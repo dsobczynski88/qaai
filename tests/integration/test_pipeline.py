@@ -11,7 +11,7 @@ from autoqa.components.test_suite_reviewer.core import (
 )
 from tests.helpers import load_jsonl, serialize_state
 
-PIPELINE_INPUTS = load_jsonl("pytest_dataset_test_suite.jsonl")
+PIPELINE_INPUTS = load_jsonl("gold_dataset.jsonl")
 
 # Cap on rows in flight at once. Tunable via AUTOQA_FANOUT_CONCURRENCY env var
 # for bisection. The RateLimitOpenAIClient already enforces RPM/TPM ceilings

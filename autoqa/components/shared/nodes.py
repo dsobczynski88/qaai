@@ -47,17 +47,64 @@ class BaseLLMNode(ABC):
     def _extract_json_from_markdown(text: str) -> str:
         """
         Extract JSON from markdown code fences if present, otherwise
-        slice from the first '{' or '[' to the end.
+        slice from the first '{' or '[' to the matching closing delimiter,
+        using bracket balancing to handle trailing garbage (e.g., extra
+        closing braces from Llama-3.3 or other models).
         """
+        # First, try to extract from markdown code fence
         fence = re.search(r"```(?:json|jsonc|javascript|js)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
         if fence:
-            return fence.group(1).strip()
+            text = fence.group(1).strip()
+        
+        # Find the start of JSON (first { or [)
         first_brace = text.find("{")
         first_bracket = text.find("[")
         starts = [i for i in (first_brace, first_bracket) if i != -1]
-        if starts:
-            return text[min(starts):].strip()
-        return text.strip()
+        
+        if not starts:
+            return text.strip()
+        
+        start_idx = min(starts)
+        start_char = text[start_idx]
+        end_char = "}" if start_char == "{" else "]"
+        
+        # Balance brackets to find the matching closing delimiter
+        balance = 0
+        in_string = False
+        escape_next = False
+        
+        for i in range(start_idx, len(text)):
+            char = text[i]
+            
+            # Handle string escaping
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            # Track string boundaries (ignore brackets inside strings)
+            if char == '"':
+                in_string = not in_string
+                continue
+            
+            if in_string:
+                continue
+            
+            # Count brackets outside of strings
+            if char == start_char:
+                balance += 1
+            elif char == end_char:
+                balance -= 1
+                
+                # When balance reaches 0, we've found the matching closing delimiter
+                if balance == 0:
+                    return text[start_idx:i+1].strip()
+        
+        # If we didn't find a balanced closing, return from start to end
+        return text[start_idx:].strip()
 
     @staticmethod
     def _parse_llm_response(result, response_model, node_name: str = "") -> Optional[Any]:
@@ -67,11 +114,23 @@ class BaseLLMNode(ABC):
                 content = choice.message.content
                 logger.debug("%s: raw LLM response — %s", node_name, content)
                 extracted_json = BaseLLMNode._extract_json_from_markdown(content)
+                logger.debug("%s: extracted JSON length=%d, first 200 chars: %s", 
+                           node_name, len(extracted_json), extracted_json[:200])
                 try:
                     return response_model.model_validate_json(extracted_json)
-                except Exception:
+                except Exception as parse_err:
+                    logger.debug("%s: Pydantic validation failed, trying json.loads: %s", 
+                               node_name, str(parse_err)[:200])
                     py_obj = json.loads(extracted_json)
                     return response_model.model_validate(py_obj)
+            except json.JSONDecodeError as e:
+                logger.warning("%s: JSON decode error at position %d: %s", node_name, e.pos, e.msg)
+                # Show context around the error position
+                context_start = max(0, e.pos - 50)
+                context_end = min(len(extracted_json), e.pos + 50)
+                logger.warning("%s: JSON context around error (pos %d): ...%s...", 
+                             node_name, e.pos, extracted_json[context_start:context_end])
+                continue
             except Exception as e:
                 logger.warning("%s: parse failed for choice — %s", node_name, e)
                 continue
