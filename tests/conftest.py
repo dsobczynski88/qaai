@@ -159,16 +159,16 @@ def jsonl_recorders_tc():
 
 @pytest.fixture
 def real_client():
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("PYTEST_API_KEY")
+    base_url = os.getenv("PYTEST_BASE_URL")
     if not api_key:
-        pytest.skip("OPENAI_API_KEY not set — skipping integration test")
-    return RateLimitOpenAIClient(api_key=api_key)
+        pytest.skip("PYTEST_API_KEY not set — skipping integration test")
+    return RateLimitOpenAIClient(api_key=api_key, base_url=base_url)
 
 
 @pytest.fixture
 def real_model():
-    return os.getenv("TEST_MODEL", "gpt-4o-mini")
-
+    return os.getenv("PYTEST_MODEL")
 
 @pytest.fixture
 def sample_hazard():
