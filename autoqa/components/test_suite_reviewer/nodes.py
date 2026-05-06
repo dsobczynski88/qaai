@@ -36,21 +36,36 @@ class SummaryNode(StandardLLMNode):
     """Summarizes raw test cases into structured format."""
 
     def _validate_state(self, state: RTMReviewState) -> bool:
-        return state.get("test_cases") is not None
+        # FIXED: Validate both requirement and test_cases exist
+        return (
+            state.get("requirement") is not None 
+            and state.get("test_cases") is not None
+        )
 
-    def _build_payload(self, state: RTMReviewState) -> list:
+    def _build_payload(self, state: RTMReviewState) -> dict:
+        # FIXED: Extract both requirement and test_cases from state
+        requirement = state.get("requirement")
         test_cases = state.get("test_cases")
+        assert requirement is not None
         assert test_cases is not None
-        return [
-            {
-                "test_id": tc.test_id,
-                "description": tc.description,
-                "setup": tc.setup,
-                "steps": tc.steps,
-                "expectedResults": tc.expectedResults
-            }
-            for tc in test_cases
-        ]
+        
+        # FIXED: Include requirement in the payload to match prompt schema
+        return {
+            "requirement": {
+                "req_id": requirement.req_id,
+                "text": requirement.text,
+            },
+            "test_cases": [
+                {
+                    "test_id": tc.test_id,
+                    "description": tc.description,
+                    "setup": tc.setup,
+                    "steps": tc.steps,
+                    "expectedResults": tc.expectedResults
+                }
+                for tc in test_cases
+            ]
+        }
 
     def _format_response(self, parsed_result: Optional[TestSuite]) -> RTMReviewState:
         return {"test_suite": parsed_result}
