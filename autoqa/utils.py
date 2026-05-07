@@ -30,7 +30,9 @@ def save_graph_png(graph, output_path: Union[str, Path]) -> None:
     Render a compiled LangGraph runnable as a Mermaid PNG and save it to disk.
 
     Uses LangGraph's built-in draw_mermaid_png() which calls the Mermaid.ink
-    public API — requires an internet connection.
+    public API — requires an internet connection. The PNG is a developer
+    convenience artefact, so a render failure (offline, mermaid.ink outage)
+    must NOT abort the overall pipeline run; we log a warning and continue.
 
     Args:
         graph: A compiled LangGraph runnable (result of StateGraph.compile()).
@@ -39,7 +41,11 @@ def save_graph_png(graph, output_path: Union[str, Path]) -> None:
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    png_bytes = graph.get_graph().draw_mermaid_png()
+    try:
+        png_bytes = graph.get_graph().draw_mermaid_png()
+    except Exception as e:
+        print(f"warning: could not render {output_path.name} (mermaid.ink unreachable?): {e}")
+        return
     output_path.write_bytes(png_bytes)
     print(f"Graph diagram saved to: {output_path}")
 

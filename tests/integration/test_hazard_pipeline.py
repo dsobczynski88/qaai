@@ -62,11 +62,11 @@ async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard
         assert isinstance(r.synthesized_assessment, SynthesizedAssessment)
         assert len(r.synthesized_assessment.mandatory_findings) == 5
 
-    # Hazard-level H1-H5 verdict.
+    # Hazard-level H1-H5 verdict (binary Yes/No; H4 may also be N-A).
     assessment = result.get("hazard_assessment")
     assert isinstance(assessment, HazardAssessment)
     assert assessment.hazard_id == sample_hazard.hazard_id
-    assert assessment.overall_verdict in ("Adequate", "Partial", "Inadequate")
+    assert assessment.overall_verdict in ("Yes", "No")
     assert len(assessment.mandatory_findings) == 5
     assert [f.code for f in assessment.mandatory_findings] == ["H1", "H2", "H3", "H4", "H5"]
     assert [f.dimension for f in assessment.mandatory_findings] == [
@@ -76,6 +76,16 @@ async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard
         "Verification Depth",
         "Residual Risk Closure",
     ]
+    for f in assessment.mandatory_findings:
+        if f.code == "H4":
+            assert f.verdict in ("Yes", "No", "N-A")
+        else:
+            assert f.verdict in ("Yes", "No")
+    # overall_verdict invariant: Yes iff every dimension is Yes or N-A.
+    expected_overall = "Yes" if all(
+        f.verdict in ("Yes", "N-A") for f in assessment.mandatory_findings
+    ) else "No"
+    assert assessment.overall_verdict == expected_overall
 
     output_path = Path(settings.log_file_path).parent / "hazard_pipeline_state.json"
     output_path.write_text(json.dumps(_serialize_hazard_state(result), indent=2))

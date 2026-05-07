@@ -15,8 +15,8 @@ from openai.types.chat import ChatCompletion
 nest_asyncio.apply()
 
 # Set event loop
-loop = asyncio.ProactorEventLoop()
-asyncio.set_event_loop(loop)
+loop =  asyncio.SelectorEventLoop() # asyncio.ProactorEventLoop()
+asyncio.set_event_loop(loop) 
 
 # Set generic data type "T"
 T = TypeVar("T")
@@ -290,11 +290,12 @@ class RateLimitOpenAIClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         max_requests_per_minute: int = 490,
         max_tokens_per_minute: Optional[int] = 200000,
         token_estimator: Optional[Callable[[List[Dict[str, Any]], str], int]] = None,
         ):
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.max_rpm = max_requests_per_minute
         self.max_tpm = max_tokens_per_minute
         self.rate_limiter = OpenAIRateLimiter(max_requests_per_minute)

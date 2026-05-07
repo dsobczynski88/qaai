@@ -47,17 +47,97 @@ class BaseLLMNode(ABC):
     def _extract_json_from_markdown(text: str) -> str:
         """
         Extract JSON from markdown code fences if present, otherwise
-        slice from the first '{' or '[' to the end.
+        slice from the first '{' or '[' to the matching closing delimiter,
+        using bracket balancing to handle trailing garbage (e.g., extra
+        closing braces from Llama-3.3) and missing closing delimiters
+        (Llama-3.3 sometimes omits the final closing brace).
         """
+        # First, try to extract from markdown code fence
         fence = re.search(r"```(?:json|jsonc|javascript|js)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
         if fence:
-            return fence.group(1).strip()
+            text = fence.group(1).strip()
+        
+        # Find the start of JSON (first { or [)
         first_brace = text.find("{")
         first_bracket = text.find("[")
         starts = [i for i in (first_brace, first_bracket) if i != -1]
-        if starts:
-            return text[min(starts):].strip()
-        return text.strip()
+        
+        if not starts:
+            return text.strip()
+        
+        start_idx = min(starts)
+        start_char = text[start_idx]
+        
+        # Balance brackets to find the matching closing delimiter
+        # Track BOTH {} and [] to handle nested structures correctly
+        brace_balance = 0
+        bracket_balance = 0
+        in_string = False
+        escape_next = False
+        
+        for i in range(start_idx, len(text)):
+            char = text[i]
+            
+            # Handle string escaping
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            # Track string boundaries (ignore brackets inside strings)
+            if char == '"':
+                in_string = not in_string
+                continue
+            
+            if in_string:
+                continue
+            
+            # Count BOTH braces and brackets outside of strings
+            if char == '{':
+                brace_balance += 1
+            elif char == '}':
+                brace_balance -= 1
+            elif char == '[':
+                bracket_balance += 1
+            elif char == ']':
+                bracket_balance -= 1
+            
+            # When the PRIMARY balance reaches 0 AND all nested structures are closed
+            if start_char == '{' and brace_balance == 0:
+                # Check if all brackets are also balanced
+                if bracket_balance == 0:
+                    return text[start_idx:i+1].strip()
+            elif start_char == '[' and bracket_balance == 0:
+                # Check if all braces are also balanced
+                if brace_balance == 0:
+                    return text[start_idx:i+1].strip()
+        
+        # If we didn't find a balanced closing, try to repair
+        extracted = text[start_idx:].strip()
+        
+        # Repair: Add missing closing braces/brackets
+        # This handles Llama-3.3's tendency to omit final closing delimiters
+        if start_char == '{':
+            missing_braces = brace_balance
+            missing_brackets = bracket_balance
+            if missing_braces > 0 or missing_brackets > 0:
+                logger.debug("JSON repair: adding %d closing braces and %d closing brackets", 
+                            missing_braces, missing_brackets)
+                # Close brackets first, then braces (inside-out)
+                extracted += ']' * missing_brackets + '}' * missing_braces
+        elif start_char == '[':
+            missing_brackets = bracket_balance
+            missing_braces = brace_balance
+            if missing_brackets > 0 or missing_braces > 0:
+                logger.debug("JSON repair: adding %d closing brackets and %d closing braces", 
+                            missing_brackets, missing_braces)
+                # Close braces first, then brackets (inside-out)
+                extracted += '}' * missing_braces + ']' * missing_brackets
+        
+        return extracted
 
     @staticmethod
     def _parse_llm_response(result, response_model, node_name: str = "") -> Optional[Any]:
@@ -67,11 +147,23 @@ class BaseLLMNode(ABC):
                 content = choice.message.content
                 logger.debug("%s: raw LLM response — %s", node_name, content)
                 extracted_json = BaseLLMNode._extract_json_from_markdown(content)
+                logger.debug("%s: extracted JSON length=%d, first 200 chars: %s", 
+                           node_name, len(extracted_json), extracted_json[:200])
                 try:
                     return response_model.model_validate_json(extracted_json)
-                except Exception:
+                except Exception as parse_err:
+                    logger.debug("%s: Pydantic validation failed, trying json.loads: %s", 
+                               node_name, str(parse_err)[:200])
                     py_obj = json.loads(extracted_json)
                     return response_model.model_validate(py_obj)
+            except json.JSONDecodeError as e:
+                logger.warning("%s: JSON decode error at position %d: %s", node_name, e.pos, e.msg)
+                # Show context around the error position
+                context_start = max(0, e.pos - 50)
+                context_end = min(len(extracted_json), e.pos + 50)
+                logger.warning("%s: JSON context around error (pos %d): ...%s...", 
+                             node_name, e.pos, extracted_json[context_start:context_end])
+                continue
             except Exception as e:
                 logger.warning("%s: parse failed for choice — %s", node_name, e)
                 continue

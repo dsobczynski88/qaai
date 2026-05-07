@@ -2,12 +2,31 @@
 output/
 CLAUDE.md
 
+
+# Config files
+config.yaml
+
+
 # Output files
 *.xlsx
+
+# docs
+docs/*
+!/docs/.gitkeep
 
 # data
 data/*
 !/data/.gitkeep
+
+# generated datasets
+tests/fixtures/generated/*
+!tests/fixtures/generated/.gitkeep
+
+# mlflow
+tests/fixtures/mlflow_eval/*
+!tests/fixtures/mlflow_eval/.gitkeep
+tests/fixtures/mlflow_eval_quick/*
+!tests/fixtures/mlflow_eval_quick/.gitkeep
 
 # logs
 logs/*

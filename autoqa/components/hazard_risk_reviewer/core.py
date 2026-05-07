@@ -7,13 +7,18 @@ evaluates whether the cited requirements + test cases provide reasonable
 assurance of safety against the hazard, applying the H1-H5 mandatory rubric
 defined by the review-hazard-mitigation-coverage skill.
 
+Verdicts are binary Yes/No (matching test_suite_reviewer's M1-M5 and
+test_case_reviewer's checklist conventions); H4 alone may be N-A when the
+hazard has no software_related_causes. overall_verdict is Yes iff every
+mandatory_findings[i].verdict is in {Yes, N-A}, else No.
+
 HazardAssessment mirrors SynthesizedAssessment from test_suite_reviewer.core:
 mandatory findings only, no advisories. The A1-A5 advisory items defined in
 the skill are reviewer-applied at review time, not pipeline-generated.
 
 HazardAssessment carries hazard_id (a back-reference) rather than the full
-HazardRecord to keep the synthesizer's JSON output reliable; the full hazard
-is preserved in HazardReviewState["hazard"] and returned alongside the
+HazardRecord to keep the final assessor's JSON output reliable; the full
+hazard is preserved in HazardReviewState["hazard"] and returned alongside the
 assessment by the API layer.
 """
 
@@ -45,6 +50,7 @@ __all__ = [
     "HazardVerdictNA",
     "HazardFinding",
     "HazardAssessment",
+    "FinalAssessorProse",
     "HazardReviewState",
 ]
 
@@ -57,8 +63,8 @@ HazardDimension = Literal[
     "Verification Depth",
     "Residual Risk Closure",
 ]
-HazardVerdict = Literal["Adequate", "Partial", "Inadequate"]
-HazardVerdictNA = Literal["Adequate", "Partial", "Inadequate", "N-A"]
+HazardVerdict = Literal["Yes", "No"]
+HazardVerdictNA = Literal["Yes", "No", "N-A"]
 
 
 class DesignDocument(BaseModel):
@@ -135,9 +141,9 @@ class HazardFinding(BaseModel):
     verdict: HazardVerdictNA = Field(
         ...,
         description=(
-            "Adequate / Partial / Inadequate / N-A. Only H4 may be N-A "
-            "(when software_related_causes indicates no software cause). "
-            "H1, H2, H3, H5 must be Adequate / Partial / Inadequate."
+            "Yes / No / N-A. Only H4 may be N-A (when "
+            "software_related_causes indicates no software cause). "
+            "H1, H2, H3, H5 must be Yes or No."
         ),
     )
     rationale: str = Field(
@@ -174,8 +180,9 @@ class HazardAssessment(BaseModel):
     overall_verdict: HazardVerdict = Field(
         ...,
         description=(
-            "Adequate iff every mandatory_findings[i].verdict ∈ {Adequate, N-A}. "
-            "Inadequate if any verdict is Inadequate. Partial otherwise."
+            "Yes iff every mandatory_findings[i].verdict ∈ {Yes, N-A}. "
+            "No otherwise. Computed deterministically by the final_assessor "
+            "node, never by the LLM."
         ),
     )
     mandatory_findings: List[HazardFinding] = Field(
@@ -193,7 +200,7 @@ class HazardAssessment(BaseModel):
         default="",
         description=(
             "Up to 2 sentences clarifying gaps. Empty string when "
-            "overall_verdict is Adequate and no ambiguity remains."
+            "overall_verdict is Yes and no ambiguity remains."
         ),
     )
     clarification_questions: List[str] = Field(
@@ -205,7 +212,24 @@ class HazardAssessment(BaseModel):
     )
 
 
+class FinalAssessorProse(BaseModel):
+    """LLM output of the final_assessor node — only the prose fields.
+
+    The deterministic verdict aggregation (mandatory_findings list and
+    overall_verdict) is computed in node code from the upstream H1-H5
+    findings, not by the LLM. The LLM is only responsible for the
+    cross-cutting comments and clarification questions.
+    """
+    comments: str = Field(default="")
+    clarification_questions: List[str] = Field(default_factory=list)
+
+
 class HazardReviewState(TypedDict, total=False):
     hazard: HazardRecord
     requirement_reviews: Annotated[List[RequirementReview], operator.add]
+    h1_finding: Optional[HazardFinding]
+    h2_finding: Optional[HazardFinding]
+    h3_finding: Optional[HazardFinding]
+    h4_finding: Optional[HazardFinding]
+    h5_finding: Optional[HazardFinding]
     hazard_assessment: Optional[HazardAssessment]

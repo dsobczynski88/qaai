@@ -2,6 +2,7 @@
 
 from .core import (
     DesignDocument,
+    FinalAssessorProse,
     HazardAssessment,
     HazardCode,
     HazardDimension,
@@ -14,16 +15,21 @@ from .core import (
     RequirementReview,
 )
 from .nodes import (
-    HazardSynthesizerNode,
     RequirementReviewerNode,
     dispatch_requirement_reviews,
-    make_hazard_synthesizer_node,
+    make_final_assessor_node,
+    make_h1_evaluator_node,
+    make_h2_evaluator_node,
+    make_h3_evaluator_node,
+    make_h4_evaluator_node,
+    make_h5_evaluator_node,
     make_requirement_reviewer_node,
 )
 from .pipeline import HazardReviewerRunnable
 
 __all__ = [
     "DesignDocument",
+    "FinalAssessorProse",
     "HazardAssessment",
     "HazardCode",
     "HazardDimension",
@@ -34,10 +40,14 @@ __all__ = [
     "HazardVerdict",
     "HazardVerdictNA",
     "RequirementReview",
-    "HazardSynthesizerNode",
     "RequirementReviewerNode",
     "dispatch_requirement_reviews",
-    "make_hazard_synthesizer_node",
+    "make_final_assessor_node",
+    "make_h1_evaluator_node",
+    "make_h2_evaluator_node",
+    "make_h3_evaluator_node",
+    "make_h4_evaluator_node",
+    "make_h5_evaluator_node",
     "make_requirement_reviewer_node",
     "HazardReviewerRunnable",
 ]

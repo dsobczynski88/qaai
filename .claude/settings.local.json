@@ -8,7 +8,11 @@
       "Bash(xargs -I {} basename {})",
       "Bash(git log *)",
       "Bash(python -m json.tool)",
-      "Bash(grep -aE \"validation error for TestCaseAssessment|^\\\\s+[a-z_]+\\\\s*$|Input should be|missing|extra\" logs/run-2026-04-27-11-13-22/autoqa.log)"
+      "Bash(grep -aE \"validation error for TestCaseAssessment|^\\\\s+[a-z_]+\\\\s*$|Input should be|missing|extra\" logs/run-2026-04-27-11-13-22/autoqa.log)",
+      "Bash(sed 's/=.*$/=***/')",
+      "Bash(python -c ' *)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code} \\(%{time_total}s\\)\\\\n\" --max-time 10 https://api.openai.com/v1/models)",
+      "Bash(tee logs/last_pipeline_run.log)"
     ]
   }
 }

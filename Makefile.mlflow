@@ -1,0 +1,95 @@
+# Makefile for MLflow Evaluation Pipeline
+
+.PHONY: help prepare-data verify-setup eval-baseline eval-quick mlflow-ui clean-mlflow clean-artifacts
+
+help:
+	@echo "MLflow Evaluation Pipeline Commands"
+	@echo "===================================="
+	@echo ""
+	@echo "Setup:"
+	@echo "  make install-deps     Install MLflow and evaluation dependencies"
+	@echo "  make prepare-data     Consolidate batch files into eval dataset"
+	@echo "  make verify-setup     Run verification checks"
+	@echo ""
+	@echo "Evaluation:"
+	@echo "  make eval-baseline    Run full evaluation (all records)"
+	@echo "  make eval-quick       Run quick evaluation (first 50 records)"
+	@echo ""
+	@echo "Viewing:"
+	@echo "  make mlflow-ui        Start MLflow UI on port 5000"
+	@echo ""
+	@echo "Cleanup:"
+	@echo "  make clean-mlflow     Remove MLflow tracking directory"
+	@echo "  make clean-artifacts  Remove evaluation artifacts"
+	@echo "  make clean-all        Remove all generated files"
+
+install-deps:
+	@echo "Installing MLflow evaluation dependencies..."
+	uv add --dev mlflow scikit-learn matplotlib
+
+prepare-data:
+	@echo "Consolidating batch files into evaluation dataset..."
+	uv run python scripts/prepare_mlflow_eval_dataset.py
+
+verify-setup:
+	@echo "Running verification checks..."
+	uv run python scripts/verify_eval_setup.py
+
+eval-baseline:
+	@echo "Running baseline evaluation (all records)..."
+	uv run python scripts/evaluate_test_suite_reviewer.py \
+		--fixture tests/fixtures/mlflow_eval/eval_inputs.jsonl \
+		--labels tests/fixtures/mlflow_eval/eval_outputs_labels.jsonl \
+		--run-name "baseline-$$(git rev-parse --short HEAD)" \
+		--max-concurrent 10
+
+eval-quick:
+	@echo "Running quick evaluation (first 50 records)..."
+	@mkdir -p tests/fixtures/mlflow_eval_quick
+	@head -n 50 tests/fixtures/mlflow_eval/eval_inputs.jsonl > tests/fixtures/mlflow_eval_quick/eval_inputs.jsonl
+	@head -n 50 tests/fixtures/mlflow_eval/eval_outputs_labels.jsonl > tests/fixtures/mlflow_eval_quick/eval_outputs_labels.jsonl
+	uv run python scripts/evaluate_test_suite_reviewer.py \
+		--fixture tests/fixtures/mlflow_eval_quick/eval_inputs.jsonl \
+		--labels tests/fixtures/mlflow_eval_quick/eval_outputs_labels.jsonl \
+		--run-name "quick-test-$$(git rev-parse --short HEAD)" \
+		--experiment-name "test_suite_reviewer-quick" \
+		--max-concurrent 5
+
+mlflow-ui:
+	@echo "Starting MLflow UI on http://localhost:5000"
+	@echo "Press Ctrl+C to stop"
+	mlflow ui --port 5000
+
+check-gates:
+	@echo "Checking evaluation metric gates..."
+	uv run python scripts/check_eval_gate.py \
+		--min-overall-accuracy 0.85 \
+		--min-rubric-macro-f1 0.80 \
+		--max-aggregator-skip-rate 0.05
+
+clean-mlflow:
+	@echo "Removing MLflow tracking directory..."
+	rm -rf mlruns/
+
+clean-artifacts:
+	@echo "Removing evaluation artifacts..."
+	rm -rf logs/mlflow_run/
+
+clean-eval-data:
+	@echo "Removing consolidated evaluation data..."
+	rm -rf tests/fixtures/mlflow_eval/
+	rm -rf tests/fixtures/mlflow_eval_quick/
+
+clean-all: clean-mlflow clean-artifacts clean-eval-data
+	@echo "All generated files removed"
+
+# Development workflow shortcuts
+dev-cycle: prepare-data verify-setup eval-quick
+	@echo ""
+	@echo "✅ Development cycle complete"
+	@echo "   View results: make mlflow-ui"
+
+full-eval: prepare-data verify-setup eval-baseline
+	@echo ""
+	@echo "✅ Full evaluation complete"
+	@echo "   View results: make mlflow-ui"

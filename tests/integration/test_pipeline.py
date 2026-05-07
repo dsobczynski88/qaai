@@ -1,7 +1,9 @@
 import asyncio
 import json
+import logging
 import os
 import pytest
+import time
 from pathlib import Path
 from autoqa.core.config import settings, PromptConfig
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
@@ -9,6 +11,7 @@ from autoqa.components.test_suite_reviewer.core import (
     RTMReviewState, Requirement, TestCase, DecomposedRequirement, TestSuite,
     EvaluatedSpec, SynthesizedAssessment,
 )
+from autoqa.prj_logger import format_elapsed_time
 from tests.helpers import load_jsonl, serialize_state
 
 PIPELINE_INPUTS = load_jsonl("gold_dataset.jsonl")
@@ -71,14 +74,26 @@ async def _fanout_pipeline(
             client=real_client, model=real_model, prompt_config=prompt_config
         )
     sem = asyncio.Semaphore(MAX_CONCURRENT)
+    logger = logging.getLogger("autoqa.test.pipeline")
+
+    # Track timing for each invocation
+    invocation_times = []
+    overall_start = time.perf_counter()
 
     async def run_one(idx: int, row: dict):
         async with sem:
             requirement = Requirement(**row["requirement"])
             test_cases = [TestCase(**tc) for tc in row["test_cases"]]
-            return idx, row, await graph.graph.ainvoke(
+            
+            # Time this specific invocation
+            start_time = time.perf_counter()
+            result = await graph.graph.ainvoke(
                 {"requirement": requirement, "test_cases": test_cases}
             )
+            end_time = time.perf_counter()
+            elapsed = end_time - start_time
+            
+            return idx, row, result, elapsed
 
     completed = await asyncio.gather(
         *(run_one(i, row) for i, row in enumerate(PIPELINE_INPUTS)),
@@ -92,22 +107,47 @@ async def _fanout_pipeline(
     )
     exception_failures = [c for c in completed if isinstance(c, Exception)]
 
-    for _idx, row, result in completed_sorted:
-        record_input(row)
-        record_output(serialize_state(result))
+    # Extract timing information and record outputs
+    for item in completed_sorted:
+        if len(item) == 4:
+            idx, row, result, elapsed = item
+            invocation_times.append((row["requirement"]["req_id"], elapsed))
+            record_input(row)
+            record_output(serialize_state(result))
+        else:
+            # Fallback for unexpected structure
+            idx, row, result = item[:3]
+            record_input(row)
+            record_output(serialize_state(result))
+
+    # Calculate total time
+    overall_end = time.perf_counter()
+    total_elapsed = overall_end - overall_start
+    
+    # Log timing summary
+    logger.info("="*70)
+    logger.info("TIMING SUMMARY")
+    logger.info("="*70)
+    for req_id, elapsed in invocation_times:
+        logger.info(f"  {req_id}: {format_elapsed_time(elapsed)}")
+    logger.info("="*70)
+    logger.info(f"Total time across all {len(invocation_times)} async invocations: {format_elapsed_time(total_elapsed)}")
+    logger.info("="*70)
 
     fail_msgs = []
-    for _idx, row, result in completed_sorted:
-        try:
-            assert isinstance(result.get("decomposed_requirement"), DecomposedRequirement)
-            assert isinstance(result.get("test_suite"), TestSuite)
-            evals = result.get("coverage_analysis", [])
-            assert len(evals) > 0
-            assert all(isinstance(e, EvaluatedSpec) for e in evals)
-            assert isinstance(result.get("synthesized_assessment"), SynthesizedAssessment)
-            _assert_partial_invariants(result["synthesized_assessment"])
-        except AssertionError as e:
-            fail_msgs.append(f"  {row['requirement']['req_id']}: {e}")
+    for item in completed_sorted:
+        if len(item) >= 3:
+            idx, row, result = item[0], item[1], item[2]
+            try:
+                assert isinstance(result.get("decomposed_requirement"), DecomposedRequirement)
+                assert isinstance(result.get("test_suite"), TestSuite)
+                evals = result.get("coverage_analysis", [])
+                assert len(evals) > 0
+                assert all(isinstance(e, EvaluatedSpec) for e in evals)
+                assert isinstance(result.get("synthesized_assessment"), SynthesizedAssessment)
+                _assert_partial_invariants(result["synthesized_assessment"])
+            except AssertionError as e:
+                fail_msgs.append(f"  {row['requirement']['req_id']}: {e}")
 
     if exception_failures or fail_msgs:
         n = len(exception_failures) + len(fail_msgs)
@@ -203,10 +243,10 @@ async def test_pipeline_parametrized_standard_coverage_fanout(
     """Fan-out variant pinning the 'standard coverage' prompt versions
     (decomposer-v4, summarizer-v2, coverage_evaluator-v6, synthesizer-v6)."""
     custom = PromptConfig(
-        decomposer="decomposer-v4.jinja2",
-        summarizer="summarizer-v2.jinja2",
-        coverage="coverage_evaluator-v6.jinja2",
-        synthesizer="synthesizer-v6.jinja2",
+        decomposer="decomposer-v5.jinja2",
+        summarizer="summarizer-v3.jinja2",
+        coverage="coverage_evaluator-v7.jinja2",
+        synthesizer="synthesizer-v7.jinja2",
     )
     await _fanout_pipeline(real_client, real_model, jsonl_recorders, prompt_config=custom)
 

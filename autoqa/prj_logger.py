@@ -1,7 +1,42 @@
 import sys
 import time
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from autoqa.prj_exception import CustomException
+
+# US Central Time zone (handles both CST and CDT automatically)
+US_CENTRAL = ZoneInfo("America/Chicago")
+
+
+def format_elapsed_time(seconds: float) -> str:
+    """Format elapsed time as 'X minutes Y seconds'.
+    
+    Args:
+        seconds: Elapsed time in seconds
+        
+    Returns:
+        Human-readable string like '5 minutes 23 seconds' or '45 seconds'
+    """
+    minutes = int(seconds // 60)
+    remaining_seconds = int(seconds % 60)
+    if minutes > 0:
+        return f"{minutes} minutes {remaining_seconds} seconds"
+    else:
+        return f"{remaining_seconds} seconds"
+
+
+class CTFormatter(logging.Formatter):
+    """Custom formatter that uses US Central Time for all log timestamps."""
+    
+    def formatTime(self, record, datefmt=None):
+        """Override formatTime to use US Central Time instead of local/UTC."""
+        dt = datetime.fromtimestamp(record.created, tz=US_CENTRAL)
+        if datefmt:
+            return dt.strftime(datefmt)
+        else:
+            # Default format: '2026-05-07 13:47:06,639' (CT)
+            return dt.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
 
 def timing(loggername):
     def decorator(func):
@@ -76,8 +111,8 @@ class ProjectLogger:
         file_handler.setLevel(logging.DEBUG)
         console_handler.setLevel(logging.DEBUG)
 
-        # create formatters and add to handlers
-        file_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        # create formatters with CT timezone for file handler
+        file_format = CTFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         console_format = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
 
         file_handler.setFormatter(file_format)
