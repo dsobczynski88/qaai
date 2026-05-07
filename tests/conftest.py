@@ -2,12 +2,14 @@ import truststore
 truststore.inject_into_ssl()
 
 import json
+import logging
 import os
 from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 load_dotenv()
 from autoqa.core.config import settings
+from autoqa.prj_logger import ProjectLogger
 
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.hazard_risk_reviewer.core import HazardRecord
@@ -20,6 +22,30 @@ from autoqa.components.test_suite_reviewer.core import (
     TestSuite,
     EvaluatedSpec,
 )
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_test_logger():
+    """Configure the logger for test runs to write to the run directory's autoqa.log.
+    This is autouse=True so it runs automatically for all test sessions."""
+    log_file = settings.log_file_path
+    
+    # Configure the test pipeline logger
+    test_logger = ProjectLogger("autoqa.test.pipeline", log_file).config()
+    
+    # Also configure other loggers that might be used
+    for logger_name in ["autoqa.hazard_pipeline", "autoqa.api.rtm", "autoqa.api.hazard"]:
+        logger = logging.getLogger(logger_name)
+        if not logger.handlers:  # Only add handlers if not already configured
+            proj_logger = ProjectLogger(logger_name, log_file).config()
+    
+    yield
+    
+    # Cleanup: flush and close handlers
+    for logger_name in ["autoqa.test.pipeline", "autoqa.hazard_pipeline", "autoqa.api.rtm", "autoqa.api.hazard"]:
+        logger = logging.getLogger(logger_name)
+        for handler in logger.handlers:
+            handler.flush()
+
 
 @pytest.fixture
 def sample_requirement():

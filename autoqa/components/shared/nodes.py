@@ -49,7 +49,8 @@ class BaseLLMNode(ABC):
         Extract JSON from markdown code fences if present, otherwise
         slice from the first '{' or '[' to the matching closing delimiter,
         using bracket balancing to handle trailing garbage (e.g., extra
-        closing braces from Llama-3.3 or other models).
+        closing braces from Llama-3.3) and missing closing delimiters
+        (Llama-3.3 sometimes omits the final closing brace).
         """
         # First, try to extract from markdown code fence
         fence = re.search(r"```(?:json|jsonc|javascript|js)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
@@ -66,10 +67,11 @@ class BaseLLMNode(ABC):
         
         start_idx = min(starts)
         start_char = text[start_idx]
-        end_char = "}" if start_char == "{" else "]"
         
         # Balance brackets to find the matching closing delimiter
-        balance = 0
+        # Track BOTH {} and [] to handle nested structures correctly
+        brace_balance = 0
+        bracket_balance = 0
         in_string = False
         escape_next = False
         
@@ -93,18 +95,49 @@ class BaseLLMNode(ABC):
             if in_string:
                 continue
             
-            # Count brackets outside of strings
-            if char == start_char:
-                balance += 1
-            elif char == end_char:
-                balance -= 1
-                
-                # When balance reaches 0, we've found the matching closing delimiter
-                if balance == 0:
+            # Count BOTH braces and brackets outside of strings
+            if char == '{':
+                brace_balance += 1
+            elif char == '}':
+                brace_balance -= 1
+            elif char == '[':
+                bracket_balance += 1
+            elif char == ']':
+                bracket_balance -= 1
+            
+            # When the PRIMARY balance reaches 0 AND all nested structures are closed
+            if start_char == '{' and brace_balance == 0:
+                # Check if all brackets are also balanced
+                if bracket_balance == 0:
+                    return text[start_idx:i+1].strip()
+            elif start_char == '[' and bracket_balance == 0:
+                # Check if all braces are also balanced
+                if brace_balance == 0:
                     return text[start_idx:i+1].strip()
         
-        # If we didn't find a balanced closing, return from start to end
-        return text[start_idx:].strip()
+        # If we didn't find a balanced closing, try to repair
+        extracted = text[start_idx:].strip()
+        
+        # Repair: Add missing closing braces/brackets
+        # This handles Llama-3.3's tendency to omit final closing delimiters
+        if start_char == '{':
+            missing_braces = brace_balance
+            missing_brackets = bracket_balance
+            if missing_braces > 0 or missing_brackets > 0:
+                logger.debug("JSON repair: adding %d closing braces and %d closing brackets", 
+                            missing_braces, missing_brackets)
+                # Close brackets first, then braces (inside-out)
+                extracted += ']' * missing_brackets + '}' * missing_braces
+        elif start_char == '[':
+            missing_brackets = bracket_balance
+            missing_braces = brace_balance
+            if missing_brackets > 0 or missing_braces > 0:
+                logger.debug("JSON repair: adding %d closing brackets and %d closing braces", 
+                            missing_brackets, missing_braces)
+                # Close braces first, then brackets (inside-out)
+                extracted += '}' * missing_braces + ']' * missing_brackets
+        
+        return extracted
 
     @staticmethod
     def _parse_llm_response(result, response_model, node_name: str = "") -> Optional[Any]:

@@ -17,8 +17,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 # Use the OS trust store for TLS verification. On Windows in particular this
@@ -38,6 +40,7 @@ from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.hazard_risk_reviewer.core import HazardRecord
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from autoqa.core.config import settings
+from autoqa.prj_logger import format_elapsed_time
 from autoqa.viewer import write_viewer_hz
 
 
@@ -86,10 +89,27 @@ async def _run(jsonl_path: Path, model: str) -> Path:
     outputs_path = run_dir / "outputs.jsonl"
     outputs_path.write_text("", encoding="utf-8")  # truncate
 
+    # Track timing for each invocation
+    invocation_times = []
+    overall_start = time.perf_counter()
+    logger = logging.getLogger("autoqa.hazard_pipeline")
+
     for i, hazard in enumerate(hazards, start=1):
         print(f"[{i}/{len(hazards)}] running {hazard.hazard_id} "
               f"({len(hazard.requirements)} req, {len(hazard.test_cases)} tc) ...")
+        
+        # Time this specific invocation
+        start_time = time.perf_counter()
         result = await graph.graph.ainvoke({"hazard": hazard})
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        invocation_times.append((hazard.hazard_id, elapsed))
+        
+        # Log the timing for this invocation
+        elapsed_str = format_elapsed_time(elapsed)
+        print(f"  completed in {elapsed_str}")
+        logger.info(f"Hazard {hazard.hazard_id} graph invocation completed in {elapsed_str}")
+        
         serialised = _serialize(result)
         with outputs_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(serialised, ensure_ascii=False) + "\n")
@@ -105,9 +125,34 @@ async def _run(jsonl_path: Path, model: str) -> Path:
         else:
             print("  hazard_assessment = None (pipeline did not produce one)")
 
+    # Calculate and log total time
+    overall_end = time.perf_counter()
+    total_elapsed = overall_end - overall_start
+    total_str = format_elapsed_time(total_elapsed)
+    
+    # Print timing summary to console
+    print(f"\n{'='*70}")
+    print(f"TIMING SUMMARY")
+    print(f"{'='*70}")
+    for hazard_id, elapsed in invocation_times:
+        print(f"  {hazard_id}: {format_elapsed_time(elapsed)}")
+    print(f"{'='*70}")
+    print(f"Total time across all {len(invocation_times)} invocations: {total_str}")
+    print(f"{'='*70}\n")
+    
+    # Log timing summary to log file
+    logger.info("="*70)
+    logger.info("TIMING SUMMARY")
+    logger.info("="*70)
+    for hazard_id, elapsed in invocation_times:
+        logger.info(f"  {hazard_id}: {format_elapsed_time(elapsed)}")
+    logger.info("="*70)
+    logger.info(f"Total time across all {len(invocation_times)} invocations: {total_str}")
+    logger.info("="*70)
+
     viewer_path = write_viewer_hz(outputs_path)
     if viewer_path is not None:
-        print(f"\nviewer rendered: {viewer_path}")
+        print(f"viewer rendered: {viewer_path}")
     print(f"outputs:        {outputs_path}")
     print(f"run directory:  {run_dir}")
     return run_dir
