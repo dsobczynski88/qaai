@@ -243,10 +243,10 @@ async def test_pipeline_parametrized_standard_coverage_fanout(
     """Fan-out variant pinning the 'standard coverage' prompt versions
     (decomposer-v4, summarizer-v2, coverage_evaluator-v6, synthesizer-v6)."""
     custom = PromptConfig(
-        decomposer="decomposer-v4.jinja2",
-        summarizer="summarizer-v2.jinja2",
-        coverage="coverage_evaluator-v6.jinja2",
-        synthesizer="synthesizer-v6.jinja2",
+        decomposer="decomposer-v5.jinja2",
+        summarizer="summarizer-v3.jinja2",
+        coverage="coverage_evaluator-v7.jinja2",
+        synthesizer="synthesizer-v7.jinja2",
     )
     await _fanout_pipeline(real_client, real_model, jsonl_recorders, prompt_config=custom)
 
