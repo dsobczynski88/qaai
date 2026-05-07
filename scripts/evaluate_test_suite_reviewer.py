@@ -341,8 +341,13 @@ async def main():
     
     with mlflow.start_run(run_name=args.run_name):
         # Pin reproducibility knobs
-        client = RateLimitOpenAIClient(api_key=os.getenv("BEDROCK_API_KEY"))
-        model = os.getenv("BEDROCK_MODEL", settings.model)
+        client = RateLimitOpenAIClient(
+            api_key=settings.openai_api_key,
+            base_url=settings.url,
+            max_requests_per_minute=settings.max_requests_per_minute,
+            max_tokens_per_minute=settings.max_tokens_per_minute
+        )
+        model = settings.model
         prompt_config = settings.prompt_config
 
         mlflow.log_params({
