@@ -8,7 +8,7 @@ from autoqa.utils import make_output_directory
 class PromptConfig(BaseModel):
     """Jinja2 template filenames used by each LLM node across reviewer graphs."""
     decomposer: str = "decomposer-v4.jinja2"
-    summarizer: str = "summarizer-v2.jinja2"
+    summarizer: str = "summarizer-v4.jinja2"  # v4 uses array-only output for better token efficiency
     coverage: str = "coverage_evaluator-v5.jinja2"
     synthesizer: str = "synthesizer-v6.jinja2"
     hazard_h1: str = "hazard_h1_evaluator-v1.jinja2"
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     model: str = Field(..., alias='BEDROCK_MODEL')
     max_requests_per_minute: int = 490
     max_tokens_per_minute: int = 200000
+    max_output_tokens: int = 16000  # Maximum output tokens for LLM (Haiku supports up to 16K)
     log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
     prompt_config: PromptConfig = Field(default_factory=PromptConfig)
     model_config = SettingsConfigDict(
