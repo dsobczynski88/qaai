@@ -6,7 +6,7 @@ live in autoqa.components.shared.core and are re-exported here for
 backward compatibility with existing call sites.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 import operator
 from typing import Optional, List, Literal, TypedDict, Annotated
 
@@ -23,6 +23,7 @@ __all__ = [
     "DecomposedRequirement",
     "TestCase",
     "SummarizedTestCase",
+    "SummarizedTestCaseList",
     "TestSuite",
     "Dimension",
     "Verdict",
@@ -47,6 +48,18 @@ class SummarizedTestCase(BaseModel):
     protocol: List[str]
     acceptance_criteria: List[str]
     is_generated: bool = False
+
+
+class SummarizedTestCaseList(RootModel[List[SummarizedTestCase]]):
+    """Wrapper for v4+ summarizer responses that return only the summary array.
+    
+    This wrapper enables Pydantic validation for List[SummarizedTestCase] responses
+    from the LLM. Uses Pydantic v2's RootModel to wrap the list while maintaining
+    full validation capabilities.
+    
+    The root field is automatically available and provides list-like behavior.
+    """
+    pass
 
 
 class TestSuite(BaseModel):

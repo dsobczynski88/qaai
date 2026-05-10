@@ -83,7 +83,9 @@ async def _run(jsonl_path: Path, model: str) -> Path:
     print(f"loaded {len(hazards)} hazard record(s) from {jsonl_path}")
 
     client = RateLimitOpenAIClient(api_key=api_key)
-    graph = HazardReviewerRunnable(client=client, model=model)
+    # Configure model_kwargs with max_tokens to handle large outputs
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    graph = HazardReviewerRunnable(client=client, model=model, model_kwargs=model_kwargs)
 
     run_dir = Path(settings.log_file_path).parent
     outputs_path = run_dir / "outputs.jsonl"

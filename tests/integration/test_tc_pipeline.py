@@ -13,7 +13,7 @@ from autoqa.components.test_case_reviewer.nodes import load_default_review_objec
 from tests.helpers import load_jsonl, serialize_state
 
 
-TC_INPUTS = load_jsonl("gold_dataset-tc.jsonl")
+TC_INPUTS = load_jsonl("converted_PRJ01624_VL_1.1.000_tc_reviewer_format.jsonl")
 
 REVIEW_OBJECTIVE_IDS = {o.id for o in load_default_review_objectives()}
 

@@ -41,7 +41,11 @@ eval-baseline:
 		--fixture tests/fixtures/mlflow_eval/eval_inputs.jsonl \
 		--labels tests/fixtures/mlflow_eval/eval_outputs_labels.jsonl \
 		--run-name "baseline-$$(git rev-parse --short HEAD)" \
-		--max-concurrent 10
+		--max-concurrent 50 \
+		--prompt_decomposer decomposer-v5.jinja2 \
+        --prompt_summarizer summarizer-v3.jinja2 \
+        --prompt_coverage coverage_evaluator-v7.jinja2 \
+    	--prompt_synthesizer synthesizer-v7.jinja2
 
 eval-quick:
 	@echo "Running quick evaluation (first 50 records)..."
@@ -53,7 +57,11 @@ eval-quick:
 		--labels tests/fixtures/mlflow_eval_quick/eval_outputs_labels.jsonl \
 		--run-name "quick-test-$$(git rev-parse --short HEAD)" \
 		--experiment-name "test_suite_reviewer-quick" \
-		--max-concurrent 5
+		--max-concurrent 5 \
+		--prompt-decomposer decomposer-v5.jinja2 \
+        --prompt-summarizer summarizer-v3.jinja2 \
+        --prompt-coverage coverage_evaluator-v7.jinja2 \
+    	--prompt-synthesizer synthesizer-v7.jinja2
 
 mlflow-ui:
 	@echo "Starting MLflow UI on http://localhost:5000"
