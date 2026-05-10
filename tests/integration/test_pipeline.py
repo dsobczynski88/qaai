@@ -14,12 +14,12 @@ from autoqa.components.test_suite_reviewer.core import (
 from autoqa.prj_logger import format_elapsed_time
 from tests.helpers import load_jsonl, serialize_state
 
-PIPELINE_INPUTS = load_jsonl("gold_dataset.jsonl")
+PIPELINE_INPUTS = load_jsonl('vl.jsonl')#load_jsonl("gold_dataset.jsonl")
 
 # Cap on rows in flight at once. Tunable via AUTOQA_FANOUT_CONCURRENCY env var
 # for bisection. The RateLimitOpenAIClient already enforces RPM/TPM ceilings
 # internally, so this semaphore is a soft cap to bound memory and tail latency.
-MAX_CONCURRENT = int(os.getenv("AUTOQA_FANOUT_CONCURRENCY", "10"))
+MAX_CONCURRENT = int(os.getenv("AUTOQA_FANOUT_CONCURRENCY", "5"))
 
 
 def _assert_partial_invariants(sa: SynthesizedAssessment) -> None:
@@ -67,11 +67,24 @@ async def _fanout_pipeline(
     runs (mirrors the prior _standard_coverage / _advanced_coverage variants).
     """
     record_input, record_output = jsonl_recorders
+    
+    # Configure model_kwargs with max_tokens to handle large outputs (100+ test cases)
+    # Haiku supports up to 16K output tokens; this ensures the summarizer can process
+    # all test cases without truncation
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    
     if prompt_config is None:
-        graph = RTMReviewerRunnable(client=real_client, model=real_model)
+        graph = RTMReviewerRunnable(
+            client=real_client, 
+            model=real_model,
+            model_kwargs=model_kwargs
+        )
     else:
         graph = RTMReviewerRunnable(
-            client=real_client, model=real_model, prompt_config=prompt_config
+            client=real_client, 
+            model=real_model, 
+            prompt_config=prompt_config,
+            model_kwargs=model_kwargs
         )
     sem = asyncio.Semaphore(MAX_CONCURRENT)
     logger = logging.getLogger("autoqa.test.pipeline")
@@ -162,7 +175,8 @@ async def _fanout_pipeline(
 @pytest.mark.integration
 async def test_pipeline_decomposer_node(real_client, real_model, sample_requirement, sample_test_cases):
     """Run the full pipeline and verify the decomposer produced structured output."""
-    graph = RTMReviewerRunnable(client=real_client, model=real_model)
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    graph = RTMReviewerRunnable(client=real_client, model=real_model, model_kwargs=model_kwargs)
     state = {"requirement": sample_requirement, "test_cases": sample_test_cases}
     result = await graph.graph.ainvoke(state)
 
@@ -178,7 +192,8 @@ async def test_pipeline_decomposer_node(real_client, real_model, sample_requirem
 @pytest.mark.integration
 async def test_pipeline_summarizer_node(real_client, real_model, sample_requirement, sample_test_cases):
     """Verify summarizer produced a structured TestSuite."""
-    graph = RTMReviewerRunnable(client=real_client, model=real_model)
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    graph = RTMReviewerRunnable(client=real_client, model=real_model, model_kwargs=model_kwargs)
     state = {"requirement": sample_requirement, "test_cases": sample_test_cases}
     result = await graph.graph.ainvoke(state)
 
@@ -191,7 +206,8 @@ async def test_pipeline_summarizer_node(real_client, real_model, sample_requirem
 @pytest.mark.integration
 async def test_pipeline_coverage_node(real_client, real_model, sample_requirement, sample_test_cases):
     """Verify coverage evaluator produced EvaluatedSpec results."""
-    graph = RTMReviewerRunnable(client=real_client, model=real_model)
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    graph = RTMReviewerRunnable(client=real_client, model=real_model, model_kwargs=model_kwargs)
     state = {"requirement": sample_requirement, "test_cases": sample_test_cases}
     result = await graph.graph.ainvoke(state)
 
@@ -209,7 +225,8 @@ async def test_pipeline_coverage_node(real_client, real_model, sample_requiremen
 @pytest.mark.integration
 async def test_pipeline_full_state(real_client, real_model, sample_requirement, sample_test_cases):
     """Run the full pipeline, validate all RTMReviewState fields, and save state as JSON."""
-    graph = RTMReviewerRunnable(client=real_client, model=real_model)
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    graph = RTMReviewerRunnable(client=real_client, model=real_model, model_kwargs=model_kwargs)
     initial_state = {"requirement": sample_requirement, "test_cases": sample_test_cases}
     result: RTMReviewState = await graph.graph.ainvoke(initial_state)
 
@@ -241,10 +258,15 @@ async def test_pipeline_parametrized_standard_coverage_fanout(
     real_client, real_model, jsonl_recorders
 ):
     """Fan-out variant pinning the 'standard coverage' prompt versions
-    (decomposer-v4, summarizer-v2, coverage_evaluator-v6, synthesizer-v6)."""
+    (decomposer-v5, summarizer-v4, coverage_evaluator-v7, synthesizer-v7).
+    
+    Uses summarizer-v4 which implements Option 1: LLM returns only the summary
+    array, not the full requirement/test_cases echo-back. This scales to 100+
+    test cases without hitting token limits.
+    """
     custom = PromptConfig(
         decomposer="decomposer-v5.jinja2",
-        summarizer="summarizer-v3.jinja2",
+        summarizer="summarizer-v4.jinja2",
         coverage="coverage_evaluator-v7.jinja2",
         synthesizer="synthesizer-v7.jinja2",
     )

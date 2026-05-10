@@ -17,11 +17,17 @@ async def lifespan(app: FastAPI):
         max_requests_per_minute=settings.max_requests_per_minute,
         max_tokens_per_minute=settings.max_tokens_per_minute,
     )
+    # Configure model_kwargs with max_tokens to handle large outputs (100+ test cases)
+    # Haiku supports up to 16K output tokens; this ensures the summarizer can process
+    # all test cases without truncation
+    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    
     # Build the RTM subgraph once and share it between both services so the
     # compiled graph + Mermaid PNG render only happen on a single import.
     rtm_runnable = RTMReviewerRunnable(
         client=client,
         model=settings.model,
+        model_kwargs=model_kwargs,
         checkpointer=MemorySaver(),
     )
     app.state.rtm_service = RTMReviewService(

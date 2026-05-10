@@ -9,6 +9,7 @@ Class hierarchy:
 - DecomposerNode(StandardLLMNode): decomposes a single requirement into atomic
   specifications; reused by every reviewer component.
 """
+import html
 import json
 import re
 from typing import Optional, Any
@@ -24,6 +25,64 @@ from .core import DecomposedRequirement
 project_logger = ProjectLogger(name="logger.shared.nodes", log_file=settings.log_file_path)
 project_logger.config()
 logger = project_logger.get_logger()
+
+
+def sanitize_requirement_text(text: str, max_length: int = 3000, req_id: Optional[str] = None) -> str:
+    """
+    Sanitize requirement text for safe JSON embedding.
+    
+    Prevents JSON parsing failures by:
+    - Decoding HTML entities (&nbsp;, &amp;, etc.)
+    - Normalizing whitespace
+    - Truncating excessive research citations while preserving core requirement
+    
+    Args:
+        text: Raw requirement text that may contain HTML entities and long citations
+        max_length: Maximum length before truncation (default 2000 chars)
+        req_id: Optional requirement ID for logging purposes
+    
+    Returns:
+        Sanitized text safe for JSON embedding
+    """
+    if not text:
+        return ""
+    
+    # Decode HTML entities (&nbsp; -> space, &amp; -> &, etc.)
+    text = html.unescape(text)
+    
+    # Normalize whitespace (collapse multiple spaces/newlines)
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Truncate research sections if too long
+    if len(text) > max_length:
+        req_label = req_id if req_id else "[unknown]"
+        logger.info("Sanitization function truncated %s (original length: %d chars)", req_label, len(text))
+        # Try to preserve SHALL statement + rationale, truncate research/references
+        # Pattern: capture everything up to and including a SHALL statement,
+        # then capture rationale/context, then truncate research sections
+        match = re.search(
+            r'(.*?\bshall\b.*?\.)'  # Capture SHALL statement
+            r'\s*(?:Rationale:|Context:)?'  # Optional section headers
+            r'\s*(.*?)'  # Capture rationale/context
+            r'(?:Sound Level Research|References:|Research Resources:|$)',  # Stop at research sections
+            text,
+            re.IGNORECASE | re.DOTALL
+        )
+        
+        if match:
+            core = match.group(1).strip()
+            rationale = match.group(2).strip()[:300] if match.group(2) else ""
+            
+            # Reconstruct with truncation notice
+            if rationale:
+                text = f"{core} Rationale: {rationale}... [research citations truncated for brevity]"
+            else:
+                text = f"{core} [additional context truncated for brevity]"
+        else:
+            # Fallback: simple truncation if pattern doesn't match
+            text = text[:max_length] + "... [truncated]"
+    
+    return text.strip()
 
 
 class BaseLLMNode(ABC):

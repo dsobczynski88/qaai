@@ -89,9 +89,9 @@ def _prompt_versions_manifest(prompt_config) -> dict:
 # Pipeline Execution
 # ============================================================================
 
-async def _run_pipeline_batch(client, model, inputs, max_concurrent):
+async def _run_pipeline_batch(client, model, inputs, prompt_config, max_concurrent):
     """Run test_suite_reviewer graph against all inputs in parallel."""
-    graph = RTMReviewerRunnable(client=client, model=model)
+    graph = RTMReviewerRunnable(client=client, model=model, prompt_config=prompt_config)
     sem = asyncio.Semaphore(max_concurrent)
 
     async def run_one(idx, row):
@@ -324,6 +324,11 @@ async def main():
     ap.add_argument("--run-name", required=False, help="MLflow run name")
     ap.add_argument("--max-concurrent", type=int, default=10)
     ap.add_argument("--experiment-name", default="test_suite_reviewer-mlflow-eval")
+    ap.add_argument("--prompt-decomposer", help="Override decomposer prompt (e.g., decomposer-v5.jinja2)")
+    ap.add_argument("--prompt-summarizer", help="Override summarizer prompt")
+    ap.add_argument("--prompt-coverage", help="Override coverage evaluator prompt")
+    ap.add_argument("--prompt-synthesizer", help="Override synthesizer prompt")
+    
     args = ap.parse_args()
 
     # Load data
@@ -340,11 +345,26 @@ async def main():
     mlflow.set_experiment(args.experiment_name)
     
     with mlflow.start_run(run_name=args.run_name):
-        # Pin reproducibility knobs
-        client = RateLimitOpenAIClient(api_key=os.getenv("BEDROCK_API_KEY"))
-        model = os.getenv("BEDROCK_MODEL", settings.model)
-        prompt_config = settings.prompt_config
+            
+        prompt_config = settings.prompt_config.model_copy()
+        if args.prompt_decomposer:
+            prompt_config.decomposer = args.prompt_decomposer
+        if args.prompt_summarizer:
+            prompt_config.summarizer = args.prompt_summarizer
+        if args.prompt_coverage:
+            prompt_config.coverage = args.prompt_coverage
+        if args.prompt_synthesizer:
+            prompt_config.synthesizer = args.prompt_synthesizer
 
+        # Pin reproducibility knobs
+        client = RateLimitOpenAIClient(
+            api_key=settings.openai_api_key,
+            base_url=settings.url,
+            max_requests_per_minute=settings.max_requests_per_minute,
+            max_tokens_per_minute=settings.max_tokens_per_minute
+        )
+        model = settings.model
+        
         mlflow.log_params({
             "component":  "test_suite_reviewer",
             "model":      model,
@@ -367,7 +387,7 @@ async def main():
         # Run pipeline
         print(f"[eval] Running pipeline on {len(inputs)} records (max_concurrent={args.max_concurrent})...")
         t0 = time.perf_counter()
-        completed = await _run_pipeline_batch(client, model, inputs, args.max_concurrent)
+        completed = await _run_pipeline_batch(client, model, inputs, prompt_config, args.max_concurrent)
         wall_clock_s = time.perf_counter() - t0
         
         predictions, skipped = _score_predictions(completed, labels)

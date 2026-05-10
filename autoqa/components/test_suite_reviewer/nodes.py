@@ -18,6 +18,7 @@ from autoqa.components.shared.nodes import (
     StandardLLMNode,
     DecomposerNode,
     make_decomposer_node,
+    sanitize_requirement_text,
 )
 
 project_logger = ProjectLogger(name="logger.nodes", log_file=settings.log_file_path)
@@ -27,33 +28,48 @@ from .core import (
     RTMReviewState,
     DecomposedRequirement,
     TestSuite,
+    SummarizedTestCase,
+    SummarizedTestCaseList,
     EvaluatedSpec,
     SynthesizedAssessment,
 )
 
 
-class SummaryNode(StandardLLMNode):
-    """Summarizes raw test cases into structured format."""
+class SummaryNode(BaseLLMNode):
+    """Summarizes raw test cases into structured format with batching support.
+    
+    For v4+ prompts: LLM returns only the summary array; this node reconstructs
+    the full TestSuite by combining the summary with the original requirement
+    and test_cases from state.
+    
+    Implements batching to handle 100+ test cases without hitting token limits.
+    Batch size is configurable via BATCH_SIZE class attribute.
+    """
+
+    BATCH_SIZE = 25  # Tune based on model output limits (25 works well for Haiku)
+
+    def __init__(self, client: RateLimitOpenAIClient, model: str, response_model, system_prompt: str, model_kwargs: dict | None = None):
+        super().__init__(client, model, system_prompt, model_kwargs)
+        self.response_model = response_model
 
     def _validate_state(self, state: RTMReviewState) -> bool:
-        # FIXED: Validate both requirement and test_cases exist
+        # Validate both requirement and test_cases exist
         return (
             state.get("requirement") is not None 
             and state.get("test_cases") is not None
         )
 
-    def _build_payload(self, state: RTMReviewState) -> dict:
-        # FIXED: Extract both requirement and test_cases from state
-        requirement = state.get("requirement")
-        test_cases = state.get("test_cases")
-        assert requirement is not None
-        assert test_cases is not None
+    def _build_payload(self, requirement, test_cases: List) -> dict:
+        """Build payload for a batch of test cases."""
+        # Sanitize requirement text to prevent JSON parsing failures
+        # from unescaped quotes, HTML entities, and excessive length
+        sanitized_text = sanitize_requirement_text(text=requirement.text, req_id=requirement.req_id)
         
-        # FIXED: Include requirement in the payload to match prompt schema
+        # Include requirement in the payload to match prompt schema
         return {
             "requirement": {
                 "req_id": requirement.req_id,
-                "text": requirement.text,
+                "text": sanitized_text,
             },
             "test_cases": [
                 {
@@ -67,11 +83,84 @@ class SummaryNode(StandardLLMNode):
             ]
         }
 
-    def _format_response(self, parsed_result: Optional[TestSuite]) -> RTMReviewState:
-        return {"test_suite": parsed_result}
-
-    def _get_skip_response(self) -> RTMReviewState:
-        return {"test_suite": None}
+    async def __call__(self, state: RTMReviewState) -> RTMReviewState:
+        """Process test cases in batches and accumulate summaries."""
+        if not self._validate_state(state):
+            logger.debug("%s: skipping — validation failed", self.__class__.__name__)
+            return {"test_suite": None}
+        
+        requirement = state.get("requirement")
+        test_cases = state.get("test_cases")
+        
+        if not test_cases:
+            logger.warning("%s: no test cases to summarize", self.__class__.__name__)
+            return {"test_suite": None}
+        
+        # Process in batches
+        all_summaries = []
+        num_batches = (len(test_cases) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+        
+        logger.info("%s: processing %d test cases in %d batches (batch_size=%d)",
+                   self.__class__.__name__, len(test_cases), num_batches, self.BATCH_SIZE)
+        
+        for i in range(0, len(test_cases), self.BATCH_SIZE):
+            batch = test_cases[i:i+self.BATCH_SIZE]
+            batch_num = i // self.BATCH_SIZE + 1
+            logger.info("%s: processing batch %d/%d (%d test cases)",
+                       self.__class__.__name__, batch_num, num_batches, len(batch))
+            
+            # Build payload for this batch
+            payload = self._build_payload(requirement, batch)
+            
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": json.dumps(payload)},
+            ]
+            
+            result = await self.client.chat_completion(
+                model=self.model,
+                messages=messages,
+                **self.model_kwargs,
+            )
+            
+            parsed = self._parse_llm_response(
+                result, self.response_model, self.__class__.__name__
+            )
+            
+            if parsed is None:
+                logger.warning(
+                    "%s: batch %d/%d failed to parse, skipping",
+                    self.__class__.__name__, batch_num, num_batches
+                )
+                continue
+            
+            # Unwrap if using SummarizedTestCaseList wrapper (v4+ prompts)
+            if isinstance(parsed, SummarizedTestCaseList):
+                all_summaries.extend(parsed.root)
+            else:
+                # For backward compatibility with v2/v3 prompts that return TestSuite
+                all_summaries.extend(parsed)
+            logger.info("%s: batch %d/%d completed, accumulated %d summaries so far",
+                       self.__class__.__name__, batch_num, num_batches, len(all_summaries))
+        
+        # Verify we got summaries for all test cases
+        if len(all_summaries) != len(test_cases):
+            logger.warning(
+                "%s: summary count mismatch: expected %d, got %d",
+                self.__class__.__name__, len(test_cases), len(all_summaries)
+            )
+        
+        # Reconstruct full TestSuite with all summaries
+        test_suite = TestSuite(
+            requirement=requirement,
+            test_cases=test_cases,
+            summary=all_summaries
+        )
+        
+        logger.info("%s: completed processing %d test cases, generated %d summaries",
+                   self.__class__.__name__, len(test_cases), len(all_summaries))
+        
+        return {"test_suite": test_suite}
 
 def dispatch_coverage(state: RTMReviewState) -> List[Send]:
     """
@@ -225,12 +314,28 @@ def make_summarizer_node(
 
     Returns:
         SummaryNode: Configured summarizer node
+        
+    Note:
+        For v4+ prompts (summarizer-v4.jinja2 and later), the response_model is
+        List[SummarizedTestCase] since the LLM returns only the summary array.
+        For v2/v3 prompts, the response_model is TestSuite (full object with
+        requirement, test_cases, and summary).
     """
     system_prompt = render_prompt(prompt_template, **template_vars)
+    
+    # Determine response model based on prompt version
+    # v4+ prompts return only the summary array, wrapped in SummarizedTestCaseList
+    # for proper Pydantic validation
+    if "v4" in prompt_template or "v5" in prompt_template or "v6" in prompt_template:
+        response_model = SummarizedTestCaseList
+    else:
+        # v2/v3 prompts return the full TestSuite object
+        response_model = TestSuite
+    
     return SummaryNode(
         client=client,
         model=model,
-        response_model=TestSuite,
+        response_model=response_model,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs
     )

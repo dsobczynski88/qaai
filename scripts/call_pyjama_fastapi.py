@@ -52,4 +52,31 @@ pyjama_api = PyJamaAPI(
 #pyjama_api._log_dir = settings.log_file_path
 
 results = asyncio.run(pyjama_api.run())
-print(f"Done — {len(results)} project/review task result(s) written to {pyjama_api.log_dir}")
+
+# Save each payload with formatted filename
+def sanitize_filename(name: str) -> str:
+    """Replace spaces and special characters with underscores for valid filenames."""
+    return name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+
+for result in results:
+    project_name = result.get("project_name", "unknown_project")
+    review_name = result.get("review_name", "unknown_review")
+    payload = result.get("payload", [])
+    
+    # Sanitize names for filename
+    safe_project = sanitize_filename(project_name)
+    safe_review = sanitize_filename(review_name)
+    
+    # Create filename
+    output_filename = f"inputs_{safe_project}_{safe_review}.jsonl"
+    output_path = Path(pyjama_api.log_dir) / output_filename
+    
+    # Write payload to JSONL file
+    with open(output_path, "w", encoding="utf-8") as f:
+        for item in payload:
+            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    
+    print(f"Saved payload for {project_name} / {review_name} to {output_path}")
+
+print(f"Done — {len(results)} project/review task result(s) processed")
+print(f"All files written to {pyjama_api.log_dir}")
