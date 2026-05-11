@@ -1,11 +1,10 @@
-"""
-Node implementations for the hazard risk reviewer.
+"""Node implementations for the hazard risk reviewer.
 
-Per-dimension graph: H1 and H2 evaluate independent hazard fields and run
+Per-dimension graph: H1, H2, H3, H7 evaluate independent hazard fields and run
 in parallel from START with `dispatch_requirement_reviews`. After every
-parallel `requirement_reviewer` Send fans in, H3 and H4 evaluate the
+parallel `requirement_reviewer` Send fans in, H4 and H5 evaluate the
 resulting list of per-requirement SynthesizedAssessment outputs at the
-requirement level (not spec-by-spec). H5 joins on H1-H4 and grades
+requirement level (not spec-by-spec). H6 joins on H3, H4, H5 and grades
 residual risk closure. The final_assessor assembles the structured
 HazardAssessment deterministically (verdicts come from upstream nodes;
 overall_verdict is computed in code) and uses the LLM only to write
@@ -34,6 +33,45 @@ from .core import (
 project_logger = ProjectLogger(name="logger.hazard.nodes", log_file=settings.log_file_path)
 project_logger.config()
 logger = project_logger.get_logger()
+
+
+# --- dispatch functions for early and late evaluators ------------------
+
+
+def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
+    """
+    Dispatch H1, H2, H3, H7 immediately (they only need hazard fields).
+    These run in parallel with requirement_reviewer fan-out.
+    """
+    hazard = state.get("hazard")
+    if not hazard:
+        logger.warning("dispatch_hazard_evaluators_early: no hazard, skipping")
+        return []
+    
+    return [
+        Send("h1_evaluator", {"hazard": hazard}),
+        Send("h2_evaluator", {"hazard": hazard}),
+        Send("h3_evaluator", {"hazard": hazard}),
+        Send("h7_evaluator", {"hazard": hazard}),
+    ]
+
+
+def dispatch_hazard_evaluators_late(state: HazardReviewState) -> List[Send]:
+    """
+    Dispatch H4, H5 after requirement_reviews complete.
+    These need the requirement_reviews list.
+    """
+    hazard = state.get("hazard")
+    requirement_reviews = state.get("requirement_reviews")
+    
+    if not hazard or not requirement_reviews:
+        logger.warning("dispatch_hazard_evaluators_late: missing hazard or requirement_reviews")
+        return []
+    
+    return [
+        Send("h4_evaluator", {"hazard": hazard, "requirement_reviews": requirement_reviews}),
+        Send("h5_evaluator", {"hazard": hazard, "requirement_reviews": requirement_reviews}),
+    ]
 
 
 # --- dispatcher + RTM fan-out (unchanged from prior architecture) ---------
@@ -105,7 +143,7 @@ def make_requirement_reviewer_node(rtm_runnable: RTMReviewerRunnable) -> Require
     return RequirementReviewerNode(rtm_runnable)
 
 
-# --- per-dimension evaluator nodes (H1-H5) -------------------------------
+# --- per-dimension evaluator nodes (H1-H7) -------------------------------
 
 
 _H1_FIELDS = (
@@ -122,6 +160,17 @@ _H1_FIELDS = (
 
 _H2_FIELDS = (
     "hazard_id",
+    "hazard",
+    "hazardous_situation",
+    "hazardous_sequence_of_events",
+    "software_related_causes",
+    "function",
+    "ots_software",
+)
+
+_H3_FIELDS = (
+    "hazard_id",
+    "software_related_causes",
     "severity",
     "exploitability_pre_mitigation",
     "probability_of_harm_pre_mitigation",
@@ -129,21 +178,21 @@ _H2_FIELDS = (
     "harm_severity_rationale",
 )
 
-_H3_HAZARD_FIELDS = (
+_H4_FIELDS = (
     "hazard_id",
     "hazardous_sequence_of_events",
     "software_related_causes",
     "risk_control_measures",
 )
 
-_H4_HAZARD_FIELDS = (
+_H5_FIELDS = (
     "hazard_id",
     "software_related_causes",
     "risk_control_measures",
     "demonstration_of_effectiveness",
 )
 
-_H5_HAZARD_FIELDS = (
+_H6_FIELDS = (
     "hazard_id",
     "severity",
     "probability_of_harm_pre_mitigation",
@@ -160,6 +209,18 @@ _H5_HAZARD_FIELDS = (
     "new_hs_reference",
 )
 
+_H7_FIELDS = (
+    "hazard_id",
+    "hazard",
+    "hazardous_situation",
+    "hazardous_sequence_of_events",
+    "software_related_causes",
+    "function",
+    "ots_software",
+    "risk_control_measures",
+    "new_hs_reference",
+)
+
 
 def _slice_hazard(hazard, fields) -> dict:
     """Return the named scalar fields from a HazardRecord as a plain dict."""
@@ -168,9 +229,9 @@ def _slice_hazard(hazard, fields) -> dict:
 
 
 def _summarise_reviews(reviews: List[RequirementReview]) -> List[dict]:
-    """Compact requirement-level summary for H3/H4 prompts.
+    """Compact requirement-level summary for H4/H5 prompts.
 
-    H3/H4 evaluate at the requirement level, not spec-by-spec. The summary
+    H4/H5 evaluate at the requirement level, not spec-by-spec. The summary
     keeps the fields they actually need: requirement, overall_verdict, and
     the M1-M5 mandatory_findings list (with code, verdict, rationale, and
     optional partial flag). Decomposed specs and coverage_analysis are
@@ -202,133 +263,128 @@ def _summarise_reviews(reviews: List[RequirementReview]) -> List[dict]:
     return out
 
 
-class _H1EvaluatorNode(StandardLLMNode):
-    """H1 — Hazard Statement Completeness."""
+class HazardEvaluatorNode(StandardLLMNode):
+    """
+    Generic evaluator for a single hazard dimension (H1-H7).
+    Invoked in parallel via LangGraph Send API.
+    
+    H1, H2, H3, H7 only need hazard fields (run early from START).
+    H4, H5 need hazard + requirement_reviews (run after requirement_reviewer completes).
+    H6 is special-cased in H6EvaluatorNode (needs H3, H4, H5 findings).
+    """
 
-    def _validate_state(self, state: HazardReviewState) -> bool:
-        return state.get("hazard") is not None
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        system_prompt: str,
+        model_kwargs: dict,
+        dimension_code: str,
+        required_fields: tuple,
+    ):
+        super().__init__(client, model, HazardFinding, system_prompt, model_kwargs)
+        self.dimension_code = dimension_code
+        self.required_fields = required_fields
 
-    def _build_payload(self, state: HazardReviewState) -> dict:
-        hazard = state.get("hazard")
-        assert hazard is not None
-        return _slice_hazard(hazard, _H1_FIELDS)
+    def _validate_state(self, state: Any) -> bool:
+        # H1, H2, H3, H7 only need hazard
+        if self.dimension_code in ["H1", "H2", "H3", "H7"]:
+            return state.get("hazard") is not None
+        # H4, H5 need hazard + requirement_reviews
+        return (
+            state.get("hazard") is not None
+            and state.get("requirement_reviews") is not None
+        )
 
-    def _format_response(self, parsed_result: Optional[HazardFinding]) -> HazardReviewState:
-        return {"h1_finding": parsed_result}
-
-    def _get_skip_response(self) -> HazardReviewState:
-        return {"h1_finding": None}
-
-
-class _H2EvaluatorNode(StandardLLMNode):
-    """H2 — Pre-Mitigation Risk."""
-
-    def _validate_state(self, state: HazardReviewState) -> bool:
-        return state.get("hazard") is not None
-
-    def _build_payload(self, state: HazardReviewState) -> dict:
-        hazard = state.get("hazard")
-        assert hazard is not None
-        return _slice_hazard(hazard, _H2_FIELDS)
-
-    def _format_response(self, parsed_result: Optional[HazardFinding]) -> HazardReviewState:
-        return {"h2_finding": parsed_result}
-
-    def _get_skip_response(self) -> HazardReviewState:
-        return {"h2_finding": None}
-
-
-class _H3EvaluatorNode(StandardLLMNode):
-    """H3 — Risk Control Adequacy. Operates over a list of SynthesizedAssessments."""
-
-    def _validate_state(self, state: HazardReviewState) -> bool:
-        return state.get("hazard") is not None and state.get("requirement_reviews") is not None
-
-    def _build_payload(self, state: HazardReviewState) -> dict:
-        hazard = state.get("hazard")
-        reviews = state.get("requirement_reviews") or []
-        assert hazard is not None
-        payload = _slice_hazard(hazard, _H3_HAZARD_FIELDS)
-        payload["requirement_reviews"] = _summarise_reviews(reviews)
+    def _build_payload(self, state: Any) -> dict:
+        hazard = state["hazard"]
+        payload = _slice_hazard(hazard, self.required_fields)
+        
+        # H4, H5 need requirement_reviews
+        if self.dimension_code in ["H4", "H5"]:
+            reviews = state.get("requirement_reviews", [])
+            payload["requirement_reviews"] = _summarise_reviews(reviews)
+            # H4, H5 also get the full requirements and test_cases lists
+            payload["requirements"] = [r.requirement.model_dump() for r in reviews]
+            payload["test_cases"] = [tc.model_dump() for tc in hazard.test_cases]
+        
         return payload
 
-    def _format_response(self, parsed_result: Optional[HazardFinding]) -> HazardReviewState:
-        return {"h3_finding": parsed_result}
+    def _format_response(self, parsed_result: Optional[HazardFinding]) -> dict:
+        return {"hazard_findings": [parsed_result]} if parsed_result else {"hazard_findings": []}
 
-    def _get_skip_response(self) -> HazardReviewState:
-        return {"h3_finding": None}
+    def _get_skip_response(self) -> dict:
+        return {"hazard_findings": []}
 
 
-class _H4EvaluatorNode(StandardLLMNode):
-    """H4 — Verification Depth. Operates over a list of SynthesizedAssessments."""
+class H6EvaluatorNode(StandardLLMNode):
+    """
+    H6 evaluates residual risk closure. Needs H3, H4, H5 findings
+    to validate that the risk downgrade is evidence-backed.
+    """
 
-    def _validate_state(self, state: HazardReviewState) -> bool:
-        return state.get("hazard") is not None and state.get("requirement_reviews") is not None
+    def _validate_state(self, state: Any) -> bool:
+        findings = state.get("hazard_findings", [])
+        return (
+            state.get("hazard") is not None
+            and all(any(f.code == code for f in findings) for code in ["H3", "H4", "H5"])
+        )
 
-    def _build_payload(self, state: HazardReviewState) -> dict:
-        hazard = state.get("hazard")
-        reviews = state.get("requirement_reviews") or []
-        assert hazard is not None
-        payload = _slice_hazard(hazard, _H4_HAZARD_FIELDS)
-        payload["requirement_reviews"] = _summarise_reviews(reviews)
+    def _build_payload(self, state: Any) -> dict:
+        hazard = state["hazard"]
+        findings = state.get("hazard_findings", [])
+        
+        # Extract H3, H4, H5 findings
+        h3 = next((f for f in findings if f.code == "H3"), None)
+        h4 = next((f for f in findings if f.code == "H4"), None)
+        h5 = next((f for f in findings if f.code == "H5"), None)
+        
+        payload = _slice_hazard(hazard, _H6_FIELDS)
+        payload["h3_finding"] = h3.model_dump() if h3 else None
+        payload["h4_finding"] = h4.model_dump() if h4 else None
+        payload["h5_finding"] = h5.model_dump() if h5 else None
+        
         return payload
 
-    def _format_response(self, parsed_result: Optional[HazardFinding]) -> HazardReviewState:
-        return {"h4_finding": parsed_result}
+    def _format_response(self, parsed_result: Optional[HazardFinding]) -> dict:
+        return {"hazard_findings": [parsed_result]} if parsed_result else {"hazard_findings": []}
 
-    def _get_skip_response(self) -> HazardReviewState:
-        return {"h4_finding": None}
-
-
-class _H5EvaluatorNode(StandardLLMNode):
-    """H5 — Residual Risk Closure. Sees H1-H4 findings plus post-mitigation fields."""
-
-    def _validate_state(self, state: HazardReviewState) -> bool:
-        return state.get("hazard") is not None
-
-    def _build_payload(self, state: HazardReviewState) -> dict:
-        hazard = state.get("hazard")
-        assert hazard is not None
-        payload = _slice_hazard(hazard, _H5_HAZARD_FIELDS)
-        for key in ("h1_finding", "h2_finding", "h3_finding", "h4_finding"):
-            f = state.get(key)
-            payload[key] = f.model_dump() if isinstance(f, HazardFinding) else None
-        return payload
-
-    def _format_response(self, parsed_result: Optional[HazardFinding]) -> HazardReviewState:
-        return {"h5_finding": parsed_result}
-
-    def _get_skip_response(self) -> HazardReviewState:
-        return {"h5_finding": None}
+    def _get_skip_response(self) -> dict:
+        return {"hazard_findings": []}
 
 
 # --- final assessor (deterministic verdict + LLM-written prose) ----------
 
 
 class _FinalAssessorNode(StandardLLMNode):
-    """Assembles HazardAssessment from the five upstream HazardFindings.
+    """Assembles HazardAssessment from the seven upstream HazardFindings.
 
     The LLM only contributes `comments` and `clarification_questions`; the
     `mandatory_findings` list and `overall_verdict` are computed in code so
     the LLM cannot accidentally re-grade or drop a dimension.
     """
 
-    _CODES = ("H1", "H2", "H3", "H4", "H5")
+    _CODES = ("H1", "H2", "H3", "H4", "H5", "H6", "H7")
 
     def _validate_state(self, state: HazardReviewState) -> bool:
-        return state.get("hazard") is not None and all(
-            isinstance(state.get(f"h{i}_finding"), HazardFinding) for i in range(1, 6)
+        findings = state.get("hazard_findings", [])
+        return (
+            state.get("hazard") is not None
+            and len(findings) == 7
+            and all(any(f.code == code for f in findings) for code in self._CODES)
         )
 
     def _build_payload(self, state: HazardReviewState) -> dict:
         hazard = state.get("hazard")
+        findings = state.get("hazard_findings", [])
         assert hazard is not None
+        
+        # Sort findings by code to ensure H1-H7 order
+        findings_dict = {f.code: f for f in findings}
+        
         return {
             "hazard_id": hazard.hazard_id,
-            **{
-                f"h{i}_finding": state[f"h{i}_finding"].model_dump()  # type: ignore[index]
-                for i in range(1, 6)
-            },
+            **{f"h{i}_finding": findings_dict[f"H{i}"].model_dump() for i in range(1, 8)},
         }
 
     def _format_response(self, parsed_result: Optional[FinalAssessorProse]) -> HazardReviewState:
@@ -338,7 +394,7 @@ class _FinalAssessorNode(StandardLLMNode):
         return {"hazard_assessment": self._latest_assessment(prose)}
 
     def _get_skip_response(self) -> HazardReviewState:
-        # Validation failed (one of H1-H5 missing). Return None so callers
+        # Validation failed (one of H1-H7 missing). Return None so callers
         # can detect that the pipeline did not produce a final assessment.
         return {"hazard_assessment": None}
 
@@ -348,12 +404,16 @@ class _FinalAssessorNode(StandardLLMNode):
         # _latest_state is set by __call__ before _format_response runs.
         state = self._latest_state
         hazard = state.get("hazard")
+        findings = state.get("hazard_findings", [])
         assert hazard is not None
-        findings = [state[f"h{i}_finding"] for i in range(1, 6)]
+        
+        # Sort findings by code
+        findings_sorted = sorted(findings, key=lambda f: f.code)
+        
         return HazardAssessment(
             hazard_id=hazard.hazard_id,
-            mandatory_findings=findings,
-            overall_verdict=self._aggregate_verdict(findings),
+            mandatory_findings=findings_sorted,
+            overall_verdict=self._aggregate_verdict(findings_sorted),
             comments=prose.comments,
             clarification_questions=prose.clarification_questions,
         )
@@ -397,20 +457,40 @@ class _FinalAssessorNode(StandardLLMNode):
 # --- factories ------------------------------------------------------------
 
 
-def _make_evaluator(
-    cls,
+def _make_hazard_evaluator(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    response_model,
+    dimension_code: str,
+    required_fields: tuple,
     **template_vars,
-):
+) -> HazardEvaluatorNode:
+    """Factory for generic HazardEvaluatorNode (H1-H5, H7)."""
     system_prompt = render_prompt(prompt_template, **template_vars)
-    return cls(
+    return HazardEvaluatorNode(
         client=client,
         model=model,
-        response_model=response_model,
+        system_prompt=system_prompt,
+        model_kwargs=model_kwargs,
+        dimension_code=dimension_code,
+        required_fields=required_fields,
+    )
+
+
+def _make_h6_evaluator(
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str,
+    **template_vars,
+) -> H6EvaluatorNode:
+    """Factory for specialized H6EvaluatorNode."""
+    system_prompt = render_prompt(prompt_template, **template_vars)
+    return H6EvaluatorNode(
+        client=client,
+        model=model,
+        response_model=HazardFinding,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
     )
@@ -420,64 +500,126 @@ def make_h1_evaluator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "hazard_h1_evaluator-v1.jinja2",
+    prompt_template: str,
     **template_vars,
-) -> _H1EvaluatorNode:
-    return _make_evaluator(_H1EvaluatorNode, client, model, model_kwargs, prompt_template, HazardFinding, **template_vars)
+) -> HazardEvaluatorNode:
+    return _make_hazard_evaluator(
+        client, model, model_kwargs, prompt_template,
+        dimension_code="H1",
+        required_fields=_H1_FIELDS,
+        **template_vars,
+    )
 
 
 def make_h2_evaluator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "hazard_h2_evaluator-v1.jinja2",
+    prompt_template: str,
     **template_vars,
-) -> _H2EvaluatorNode:
-    return _make_evaluator(_H2EvaluatorNode, client, model, model_kwargs, prompt_template, HazardFinding, **template_vars)
+) -> HazardEvaluatorNode:
+    return _make_hazard_evaluator(
+        client, model, model_kwargs, prompt_template,
+        dimension_code="H2",
+        required_fields=_H2_FIELDS,
+        **template_vars,
+    )
 
 
 def make_h3_evaluator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "hazard_h3_evaluator-v1.jinja2",
+    prompt_template: str,
     **template_vars,
-) -> _H3EvaluatorNode:
-    return _make_evaluator(_H3EvaluatorNode, client, model, model_kwargs, prompt_template, HazardFinding, **template_vars)
+) -> HazardEvaluatorNode:
+    return _make_hazard_evaluator(
+        client, model, model_kwargs, prompt_template,
+        dimension_code="H3",
+        required_fields=_H3_FIELDS,
+        **template_vars,
+    )
 
 
 def make_h4_evaluator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "hazard_h4_evaluator-v1.jinja2",
+    prompt_template: str,
     **template_vars,
-) -> _H4EvaluatorNode:
-    return _make_evaluator(_H4EvaluatorNode, client, model, model_kwargs, prompt_template, HazardFinding, **template_vars)
+) -> HazardEvaluatorNode:
+    return _make_hazard_evaluator(
+        client, model, model_kwargs, prompt_template,
+        dimension_code="H4",
+        required_fields=_H4_FIELDS,
+        **template_vars,
+    )
 
 
 def make_h5_evaluator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "hazard_h5_evaluator-v1.jinja2",
+    prompt_template: str,
     **template_vars,
-) -> _H5EvaluatorNode:
-    return _make_evaluator(_H5EvaluatorNode, client, model, model_kwargs, prompt_template, HazardFinding, **template_vars)
+) -> HazardEvaluatorNode:
+    return _make_hazard_evaluator(
+        client, model, model_kwargs, prompt_template,
+        dimension_code="H5",
+        required_fields=_H5_FIELDS,
+        **template_vars,
+    )
+
+
+def make_h6_evaluator_node(
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str,
+    **template_vars,
+) -> H6EvaluatorNode:
+    return _make_h6_evaluator(
+        client, model, model_kwargs, prompt_template,
+        **template_vars,
+    )
+
+
+def make_h7_evaluator_node(
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str,
+    **template_vars,
+) -> HazardEvaluatorNode:
+    return _make_hazard_evaluator(
+        client, model, model_kwargs, prompt_template,
+        dimension_code="H7",
+        required_fields=_H7_FIELDS,
+        **template_vars,
+    )
 
 
 def make_final_assessor_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "hazard_final_assessor-v1.jinja2",
+    prompt_template: str,
     **template_vars,
 ) -> _FinalAssessorNode:
-    return _make_evaluator(_FinalAssessorNode, client, model, model_kwargs, prompt_template, FinalAssessorProse, **template_vars)
+    system_prompt = render_prompt(prompt_template, **template_vars)
+    return _FinalAssessorNode(
+        client=client,
+        model=model,
+        response_model=FinalAssessorProse,
+        system_prompt=system_prompt,
+        model_kwargs=model_kwargs,
+    )
 
 
 __all__ = [
     "dispatch_requirement_reviews",
+    "dispatch_hazard_evaluators_early",
+    "dispatch_hazard_evaluators_late",
     "RequirementReviewerNode",
     "make_requirement_reviewer_node",
     "make_h1_evaluator_node",
@@ -485,5 +627,7 @@ __all__ = [
     "make_h3_evaluator_node",
     "make_h4_evaluator_node",
     "make_h5_evaluator_node",
+    "make_h6_evaluator_node",
+    "make_h7_evaluator_node",
     "make_final_assessor_node",
 ]

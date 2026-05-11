@@ -1,0 +1,423 @@
+"""
+SectionExpandingRetriever with hybrid search and metadata filter fallback.
+
+Generalizes multi-vec-retrieval/.../retriever.py. Key fixes over the live code:
+
+  1. Filter fallback chain is ACTIVE — retrieve_with_ids builds the filter dict
+     from doc_name / section_name and falls back from (doc+section) -> (doc) ->
+     unfiltered. The live code (retriever.py:69) always passes None; this template
+     always uses the filter.
+
+  2. _search_dense() logs exceptions instead of swallowing them silently.
+
+  3. Hybrid search (opt-in via use_hybrid=True) fuses dense Chroma results with
+     BM25 sparse results via Reciprocal Rank Fusion. The fused output is still a
+     List[Document] compatible with _format().
+
+  4. build_retriever(corpus_cfg, ...) is the factory — no copy-paste per corpus.
+
+Usage:
+    from your_pkg.corpus import CorpusConfig, load_or_build
+    from your_pkg.retriever import build_retriever
+
+    retriever = build_retriever(
+        corpus_cfg=design_cfg,
+        top_k=5,
+        embedding_model=settings.embedding_model,
+        use_hybrid=False,   # True to enable BM25 fusion
+    )
+    context, chunk_ids = retriever.retrieve_with_ids(query, doc_name="design_doc.md")
+"""
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from langchain_core.documents import Document
+from langchain_chroma import Chroma
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Embedding factory + slug
+# ---------------------------------------------------------------------------
+
+def embedding_slug(model_name: str) -> str:
+    """Filesystem-safe slug for Chroma directory namespacing per embedding model."""
+    return re.sub(r"[^a-zA-Z0-9]+", "_", model_name.strip()).strip("_")
+
+
+def build_embeddings(model_name: str):
+    """
+    Dispatch on prefix:
+      'hf:<name>' or contains '/' -> HuggingFaceEmbeddings (CPU, normalized)
+      anything else               -> OpenAIEmbeddings
+
+    TODO(rename): if your project has a central build_embeddings in config.py,
+    remove this function and import from there instead.
+    """
+    if model_name.startswith("hf:") or "/" in model_name:
+        from langchain_huggingface import HuggingFaceEmbeddings
+
+        hf_name = model_name[3:] if model_name.startswith("hf:") else model_name
+        return HuggingFaceEmbeddings(
+            model_name=hf_name,
+            model_kwargs={"device": "cpu", "trust_remote_code": True},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+    from langchain_openai import OpenAIEmbeddings
+
+    return OpenAIEmbeddings(model=model_name)
+
+
+# ---------------------------------------------------------------------------
+# Vectorstore loader
+# ---------------------------------------------------------------------------
+
+def build_or_load_vectorstore(
+    chunks: List[Document],
+    persist_dir: Path,
+    embeddings,
+    collection_name: str = "chunks",
+) -> Chroma:
+    persist_dir.mkdir(parents=True, exist_ok=True)
+    vs = Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=str(persist_dir),
+    )
+    try:
+        count = vs._collection.count()  # private API; brittle across Chroma versions
+    except Exception:
+        count = 0
+    if count == 0 and chunks:
+        vs.add_documents(chunks, ids=[c.metadata["chunk_id"] for c in chunks])
+        logger.info(
+            "Chroma collection %r: added %d documents to %s.",
+            collection_name, len(chunks), persist_dir,
+        )
+    else:
+        logger.info(
+            "Chroma collection %r: loaded %d existing documents from %s.",
+            collection_name, count, persist_dir,
+        )
+    return vs
+
+
+# ---------------------------------------------------------------------------
+# RRF fusion helper
+# ---------------------------------------------------------------------------
+
+def _rrf_score(rank: int, k: int = 60) -> float:
+    """Reciprocal Rank Fusion score for a document at position `rank` (1-indexed)."""
+    return 1.0 / (k + rank)
+
+
+def _fuse_rrf(
+    dense_hits: List[Document],
+    sparse_hits: List[Document],
+    top_k: int,
+    k: int = 60,
+) -> List[Document]:
+    """
+    Merge two ranked lists via Reciprocal Rank Fusion.
+
+    Documents are identified by chunk_id. A document appearing in both lists
+    gets score contributions from both. The fused list is sorted descending by
+    RRF score and truncated to top_k.
+
+    If a document lacks a chunk_id (shouldn't happen in a well-formed corpus),
+    it is identified by its page_content prefix to avoid silent deduplication errors.
+    """
+    scores: Dict[str, float] = {}
+    id_to_doc: Dict[str, Document] = {}
+
+    for rank, doc in enumerate(dense_hits, start=1):
+        key = doc.metadata.get("chunk_id") or doc.page_content[:80]
+        scores[key] = scores.get(key, 0.0) + _rrf_score(rank, k)
+        id_to_doc[key] = doc
+
+    for rank, doc in enumerate(sparse_hits, start=1):
+        key = doc.metadata.get("chunk_id") or doc.page_content[:80]
+        scores[key] = scores.get(key, 0.0) + _rrf_score(rank, k)
+        id_to_doc[key] = doc
+
+    ranked = sorted(scores.keys(), key=lambda key: scores[key], reverse=True)
+    return [id_to_doc[key] for key in ranked[:top_k]]
+
+
+# ---------------------------------------------------------------------------
+# Filter predicate helper (supports $eq and $and)
+# ---------------------------------------------------------------------------
+
+def _eval_filter(metadata: dict, filter_: dict) -> bool:
+    """
+    Evaluate a Chroma-style filter dict against a metadata dict.
+
+    Supports: {"key": {"$eq": value}} and {"$and": [filter1, filter2]}.
+    This covers all filters built by retrieve_with_ids. Extend for $or / $in
+    if your project requires them.
+
+    Used to post-hoc filter BM25 candidates so both search arms honour the
+    same filter without a second JSONL scan.
+    """
+    if "$and" in filter_:
+        return all(_eval_filter(metadata, sub) for sub in filter_["$and"])
+    if "$or" in filter_:
+        return any(_eval_filter(metadata, sub) for sub in filter_["$or"])
+    for key, condition in filter_.items():
+        if not isinstance(condition, dict):
+            continue
+        if "$eq" in condition:
+            if metadata.get(key) != condition["$eq"]:
+                return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# SectionExpandingRetriever
+# ---------------------------------------------------------------------------
+
+class SectionExpandingRetriever:
+    """
+    Searches at chunk level with metadata filters, then expands each hit to
+    include its full parent section text in the formatted output.
+
+    Metadata field assumptions (adjust _format if your chunker differs):
+        chunk doc:    {parent_doc_name, parent_section_name, parent_section_id, chunk_id}
+        section doc:  {doc_name, section_name, section_id}
+
+    Hybrid mode (use_hybrid=True):
+        Dense Chroma search + BM25 sparse search fused via RRF.
+        BM25 index is built lazily from chunk page_content on first hybrid call.
+        Requires the `rank_bm25` package (pip install rank-bm25).
+
+    Filter fallback chain (active — unlike the live retriever.py:69):
+        (doc_name + section_name) -> (doc_name only) -> unfiltered
+        Falls back when a tighter filter returns zero hits.
+    """
+
+    def __init__(
+        self,
+        vectorstore: Chroma,
+        sections: List[Document],
+        chunks: Optional[List[Document]] = None,
+        top_k: int = 3,
+        use_hybrid: bool = False,
+    ):
+        self.vs = vectorstore
+        self.top_k = top_k
+        self.use_hybrid = use_hybrid
+        self.section_index: Dict[str, Document] = {
+            s.metadata["section_id"]: s for s in sections
+        }
+        # BM25 state — populated lazily on first hybrid call.
+        self._chunks: List[Document] = chunks or []
+        self._bm25 = None
+
+    # --- Dense search ---
+
+    def _search_dense(self, query: str, filter_: Optional[dict]) -> List[Document]:
+        try:
+            return self.vs.similarity_search(query, k=self.top_k, filter=filter_)
+        except Exception as exc:
+            logger.warning(
+                "Dense similarity_search failed (filter=%r): %s — returning empty list.",
+                filter_, exc,
+            )
+            return []
+
+    # --- Sparse (BM25) search ---
+
+    def _build_bm25_index(self) -> None:
+        """Build the BM25 index lazily on first hybrid call. Requires rank_bm25."""
+        try:
+            from rank_bm25 import BM25Okapi
+        except ImportError as exc:
+            raise ImportError(
+                "rank_bm25 is required for hybrid search. "
+                "Add 'rank-bm25' to your project dependencies."
+            ) from exc
+        tokenized = [doc.page_content.lower().split() for doc in self._chunks]
+        self._bm25 = BM25Okapi(tokenized)
+        logger.info("BM25 index built: %d documents.", len(self._chunks))
+
+    def _search_sparse(self, query: str, filter_: Optional[dict]) -> List[Document]:
+        if self._bm25 is None:
+            self._build_bm25_index()
+
+        tokenized_query = query.lower().split()
+        scores = self._bm25.get_scores(tokenized_query)
+
+        # Rank all docs by BM25 score, take top_k * 3 candidates for post-filtering.
+        candidate_limit = self.top_k * 3
+        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        candidates = [self._chunks[i] for i in ranked_indices[:candidate_limit]]
+
+        filtered = [d for d in candidates if _eval_filter(d.metadata, filter_)] if filter_ else candidates
+        return filtered[: self.top_k]
+
+    # --- Fusion ---
+
+    def _search_hybrid(self, query: str, filter_: Optional[dict]) -> List[Document]:
+        dense = self._search_dense(query, filter_)
+        sparse = self._search_sparse(query, filter_)
+        return _fuse_rrf(dense, sparse, self.top_k)
+
+    # --- Unified search entry ---
+
+    def _search(self, query: str, filter_: Optional[dict]) -> List[Document]:
+        if self.use_hybrid:
+            return self._search_hybrid(query, filter_)
+        return self._search_dense(query, filter_)
+
+    # --- Filter fallback chain ---
+
+    def retrieve_with_ids(
+        self,
+        query: str,
+        doc_name: Optional[str] = None,
+        section_name: Optional[str] = None,
+    ) -> Tuple[str, List[str]]:
+        """
+        Return (context_string, list_of_chunk_ids_used).
+
+        Filter fallback:
+          1. (doc_name + section_name) if both provided
+          2. (doc_name only)           if step 1 returns empty
+          3. unfiltered                if step 2 returns empty
+        """
+        filter_: Optional[dict] = None
+        if doc_name and section_name:
+            filter_ = {
+                "$and": [
+                    {"parent_doc_name": {"$eq": doc_name}},
+                    {"parent_section_name": {"$eq": section_name}},
+                ]
+            }
+        elif doc_name:
+            filter_ = {"parent_doc_name": {"$eq": doc_name}}
+
+        hits = self._search(query, filter_)
+
+        if not hits and doc_name and section_name:
+            logger.debug(
+                "retrieve_with_ids: (doc+section) filter returned 0 hits — "
+                "falling back to doc-only filter (doc=%r).",
+                doc_name,
+            )
+            hits = self._search(query, {"parent_doc_name": {"$eq": doc_name}})
+
+        if not hits:
+            logger.debug(
+                "retrieve_with_ids: doc-only filter returned 0 hits — "
+                "falling back to unfiltered search."
+            )
+            hits = self._search(query, None)
+
+        chunk_ids = [
+            h.metadata.get("chunk_id", "")
+            for h in hits
+            if h.metadata.get("chunk_id")
+        ]
+        return self._format(hits), chunk_ids
+
+    def retrieve(
+        self,
+        query: str,
+        doc_name: Optional[str] = None,
+        section_name: Optional[str] = None,
+    ) -> str:
+        """Thin wrapper that discards chunk_ids. Use retrieve_with_ids for traceability."""
+        return self.retrieve_with_ids(query, doc_name, section_name)[0]
+
+    # --- Format ---
+
+    def _format(self, hits: List[Document]) -> str:
+        if not hits:
+            return "[no relevant context retrieved]"
+
+        parent_ids: List[str] = []
+        seen: set = set()
+        for h in hits:
+            pid = h.metadata.get("parent_section_id")
+            if pid and pid not in seen:
+                seen.add(pid)
+                parent_ids.append(pid)
+
+        blocks: List[str] = ["### Top-k Chunk Matches"]
+        for i, h in enumerate(hits, 1):
+            blocks.append(
+                f"[chunk {i} | doc={h.metadata.get('parent_doc_name')} | "
+                f"section={h.metadata.get('parent_section_name')} | "
+                f"id={h.metadata.get('chunk_id')}]\n{h.page_content.strip()}"
+            )
+
+        blocks.append("\n### Parent Sections (Full Text)")
+        for pid in parent_ids:
+            sec = self.section_index.get(pid)
+            if sec is None:
+                continue
+            blocks.append(
+                f"[section | doc={sec.metadata.get('doc_name')} | "
+                f"name={sec.metadata.get('section_name')} | id={pid}]\n"
+                f"{sec.page_content.strip()}"
+            )
+
+        return "\n\n".join(blocks)
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+def build_retriever(
+    corpus_cfg,            # CorpusConfig from corpus.py.template
+    top_k: Optional[int] = None,
+    embedding_model: Optional[str] = None,
+    use_hybrid: bool = False,
+) -> SectionExpandingRetriever:
+    """
+    Build (or load) a SectionExpandingRetriever for the given corpus.
+
+    Chroma is namespaced under:
+        corpus_cfg.chunked_dir / "chroma" / embedding_slug(model) / corpus_cfg.chroma_subdir
+
+    so swapping embedding models AND swapping corpora never mixes vector spaces.
+
+    Args:
+        corpus_cfg: CorpusConfig — all corpus-specific parameters.
+        top_k: retrieval depth; defaults to corpus_cfg.top_k.
+        embedding_model: overrides the model used for both chunking and embedding.
+        use_hybrid: if True, enables BM25 + dense RRF fusion.
+
+    TODO(rename): import load_or_build and build_embeddings from your project.
+    """
+    # TODO(rename): replace with your project imports.
+    # from your_pkg.corpus import load_or_build
+    # from your_pkg.config import build_embeddings, embedding_slug, settings
+    raise NotImplementedError(
+        "Wire load_or_build, build_embeddings, and embedding_slug then remove this raise. "
+        "See the reference implementation block below."
+    )
+
+    # --- Reference implementation (uncomment after wiring imports): ---
+    # model_name = embedding_model or settings.embedding_model
+    # chunks, sections = load_or_build(corpus_cfg, embedding_model=model_name)
+    #
+    # embeddings = build_embeddings(model_name)
+    # slug = embedding_slug(model_name)
+    # chroma_dir = corpus_cfg.chunked_dir / "chroma" / slug / corpus_cfg.chroma_subdir
+    #
+    # vs = build_or_load_vectorstore(
+    #     chunks, chroma_dir, embeddings,
+    #     collection_name=corpus_cfg.collection_name,
+    # )
+    # return SectionExpandingRetriever(
+    #     vs, sections, chunks=chunks,
+    #     top_k=top_k or corpus_cfg.top_k,
+    #     use_hybrid=use_hybrid,
+    # )

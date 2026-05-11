@@ -1,32 +1,33 @@
-"""
-LangGraph pipeline for the hazard risk reviewer.
+"""LangGraph pipeline for the hazard risk reviewer.
 
-Per-dimension graph with binary Yes/No verdicts:
+Per-dimension graph with binary Yes/No verdicts (H1-H7):
 
     START
-      ├──→ h1_evaluator                  (Hazard Statement Completeness)
-      ├──→ h2_evaluator                  (Pre-Mitigation Risk)
-      └──→ dispatch_requirement_reviews  (Send × N)
-              ↓
-          requirement_reviewer × N (parallel — each invokes the shared
-                                    compiled RTMReviewerRunnable.graph)
-              ↓ fan-in: operator.add on requirement_reviews
-          ┌────────────┐         ┌────────────┐
-          │ h3_evaluator│         │ h4_evaluator│
-          │  (Risk      │         │ (Verification│
-          │   Control)  │         │     Depth)  │
-          └─────┬──────┘         └─────┬──────┘
-                └────────┬───────────────┘
-                         ↓ (4-way join on H1, H2, H3, H4)
-                   h5_evaluator           (Residual Risk Closure)
-                         ↓
-                  final_assessment        (deterministic verdict +
-                                           LLM-written prose)
-                         ↓
-                        END
+      ├──→ h1_evaluator ────────────────────────┐
+      ├──→ h2_evaluator ────────────────────────┤
+      ├──→ h3_evaluator ──────────┐             │
+      ├──→ h7_evaluator ──────────┼─────────────┤
+      └──→ dispatch_requirement_reviews         │
+              ↓                   │             │
+          requirement_reviewer × N│             │
+              ↓                   │             │
+          ┌───┴────┐              │             │
+          h4       h5             │             │
+          └───┬────┘              │             │
+              └──→ h6 ────────────┘             │
+                   ↓                            │
+              final_assessment ←────────────────┘
+                   ↓
+                  END
+
+Key improvements:
+- H1, H2, H3, H7 run immediately (parallel with requirement_reviewer)
+- H4, H5 run after requirement_reviews complete
+- H6 runs after H3, H4, H5 complete (validates residual risk against upstream evidence)
+- Final assessor waits for all 7 findings
 
 overall_verdict is computed deterministically: Yes iff every
-mandatory_findings[i].verdict ∈ {Yes, N-A} (only H4 may be N-A).
+mandatory_findings[i].verdict ∈ {Yes, N-A} (only H5 may be N-A).
 """
 
 from pathlib import Path
@@ -43,6 +44,8 @@ from autoqa.utils import save_graph_png
 
 from .core import HazardReviewState
 from .nodes import (
+    dispatch_hazard_evaluators_early,
+    dispatch_hazard_evaluators_late,
     dispatch_requirement_reviews,
     make_final_assessor_node,
     make_h1_evaluator_node,
@@ -50,6 +53,8 @@ from .nodes import (
     make_h3_evaluator_node,
     make_h4_evaluator_node,
     make_h5_evaluator_node,
+    make_h6_evaluator_node,
+    make_h7_evaluator_node,
     make_requirement_reviewer_node,
 )
 
@@ -58,18 +63,18 @@ class HazardReviewerRunnable:
     """
     LangGraph-based hazard reviewer. Evaluates whether a HazardRecord's
     traced requirements + test cases provide reasonable assurance of safety
-    against the hazard, applying the H1-H5 rubric defined by the
+    against the hazard, applying the H1-H7 rubric defined by the
     review-hazard-mitigation-coverage skill.
 
-    Graph runs five per-dimension LLM evaluators (one per H1..H5) plus a
-    deterministic final_assessor. H1 and H2 evaluate hazard fields in
+    Graph runs seven per-dimension LLM evaluators (one per H1..H7) plus a
+    deterministic final_assessor. H1, H2, H3, H7 evaluate hazard fields in
     isolation and run from START in parallel with the requirement-review
-    fan-out. H3 and H4 fire after every Send-fanned requirement_reviewer
+    fan-out. H4 and H5 fire after every Send-fanned requirement_reviewer
     completes — they evaluate the *list* of per-requirement
     SynthesizedAssessment outputs at the requirement level (not spec-by-
-    spec). H5 joins on H1-H4 for residual-risk closure. Each H1..H5
-    finding is binary Yes/No (H4 may also be N-A). overall_verdict is
-    computed in code as Yes iff every dimension's verdict is in {Yes, N-A}.
+    spec). H6 joins on H3, H4, H5 for residual-risk closure validation.
+    Each H1..H7 finding is binary Yes/No (H5 may also be N-A). overall_verdict
+    is computed in code as Yes iff every dimension's verdict is in {Yes, N-A}.
     """
 
     def __init__(
@@ -100,6 +105,7 @@ class HazardReviewerRunnable:
     def build(self) -> Runnable:
         sg = StateGraph(HazardReviewState)
 
+        # Create all 7 evaluator nodes
         h1 = make_h1_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h1,
@@ -120,37 +126,59 @@ class HazardReviewerRunnable:
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h5,
         )
+        h6 = make_h6_evaluator_node(
+            self.client, self.model, self.model_kwargs,
+            prompt_template=self.prompt_config.hazard_h6,
+        )
+        h7 = make_h7_evaluator_node(
+            self.client, self.model, self.model_kwargs,
+            prompt_template=self.prompt_config.hazard_h7,
+        )
         final_assessor = make_final_assessor_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_final,
         )
         requirement_reviewer = make_requirement_reviewer_node(self.rtm)
 
+        # Add all nodes to the graph
         sg.add_node("h1_evaluator", h1)
         sg.add_node("h2_evaluator", h2)
-        sg.add_node("requirement_reviewer", requirement_reviewer)
         sg.add_node("h3_evaluator", h3)
         sg.add_node("h4_evaluator", h4)
         sg.add_node("h5_evaluator", h5)
+        sg.add_node("h6_evaluator", h6)
+        sg.add_node("h7_evaluator", h7)
+        sg.add_node("requirement_reviewer", requirement_reviewer)
         sg.add_node("final_assessment", final_assessor)
 
-        # Three parallel paths from START: H1, H2, and Send fan-out to N requirement_reviewers.
-        sg.add_edge(START, "h1_evaluator")
-        sg.add_edge(START, "h2_evaluator")
+        # Early evaluators (H1, H2, H3, H7) run immediately from START
+        sg.add_conditional_edges(
+            START,
+            dispatch_hazard_evaluators_early,
+            ["h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"],
+        )
+
+        # Requirement reviews also start from START (parallel with early evaluators)
         sg.add_conditional_edges(START, dispatch_requirement_reviews, ["requirement_reviewer"])
 
-        # After requirement_reviewer fan-in, H3 and H4 evaluate the requirement_reviews list.
-        sg.add_edge("requirement_reviewer", "h3_evaluator")
-        sg.add_edge("requirement_reviewer", "h4_evaluator")
+        # Late evaluators (H4, H5) wait for requirement_reviews
+        sg.add_conditional_edges(
+            "requirement_reviewer",
+            dispatch_hazard_evaluators_late,
+            ["h4_evaluator", "h5_evaluator"],
+        )
 
-        # H5 joins on H1, H2, H3, H4.
-        sg.add_edge("h1_evaluator", "h5_evaluator")
-        sg.add_edge("h2_evaluator", "h5_evaluator")
-        sg.add_edge("h3_evaluator", "h5_evaluator")
-        sg.add_edge("h4_evaluator", "h5_evaluator")
+        # H6 waits for H3, H4, H5 (3-way join)
+        sg.add_edge("h3_evaluator", "h6_evaluator")
+        sg.add_edge("h4_evaluator", "h6_evaluator")
+        sg.add_edge("h5_evaluator", "h6_evaluator")
 
-        # Final deterministic assembly + LLM-written prose.
-        sg.add_edge("h5_evaluator", "final_assessment")
+        # Final assessment waits for all 7 evaluators
+        sg.add_edge("h1_evaluator", "final_assessment")
+        sg.add_edge("h2_evaluator", "final_assessment")
+        sg.add_edge("h6_evaluator", "final_assessment")  # H6 already waited for H3, H4, H5
+        sg.add_edge("h7_evaluator", "final_assessment")
+
         sg.add_edge("final_assessment", END)
 
         flow = sg.compile(checkpointer=self.checkpointer)

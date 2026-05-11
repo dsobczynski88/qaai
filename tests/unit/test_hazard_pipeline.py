@@ -6,7 +6,7 @@ LLM client (per-dimension Hn evaluators + final assessor) or a mocked
 RTMReviewerRunnable (RequirementReviewerNode), mirroring the patterns in
 tests/unit/test_summary_node.py and test_decomposer_node.py.
 
-Verdict convention: each H1-H5 finding is binary Yes/No (H4 may also be
+Verdict convention: each H1-H7 finding is binary Yes/No (H5 may also be
 N-A); overall_verdict is computed deterministically by the final_assessor
 node and is Yes iff every dimension is Yes or N-A.
 """
@@ -24,12 +24,11 @@ from autoqa.components.hazard_risk_reviewer.core import (
 from autoqa.components.hazard_risk_reviewer.nodes import (
     RequirementReviewerNode,
     _FinalAssessorNode,
-    _H1EvaluatorNode,
-    _H2EvaluatorNode,
-    _H3EvaluatorNode,
-    _H4EvaluatorNode,
-    _H5EvaluatorNode,
+    HazardEvaluatorNode,
+    H6EvaluatorNode,
     dispatch_requirement_reviews,
+    dispatch_hazard_evaluators_early,
+    dispatch_hazard_evaluators_late,
 )
 from autoqa.components.hazard_risk_reviewer.core import FinalAssessorProse
 from autoqa.components.test_suite_reviewer.core import (
@@ -56,32 +55,41 @@ def _hf(code: str, dimension: str, verdict: str, **extras) -> dict:
     return out
 
 
-H1_YES = json.dumps(_hf("H1", "Hazard Statement Completeness", "Yes",
+H1_YES = json.dumps(_hf("H1", "Hazard Record Completeness and Semantic Integrity", "Yes",
                         rationale="Chain is consistent."))
-H1_NO = json.dumps(_hf("H1", "Hazard Statement Completeness", "No",
+H1_NO = json.dumps(_hf("H1", "Hazard Record Completeness and Semantic Integrity", "No",
                        rationale="Hazardous situation is empty."))
-H2_YES = json.dumps(_hf("H2", "Pre-Mitigation Risk", "Yes",
-                        rationale="Risk profile is populated and consistent."))
-H3_YES = json.dumps(_hf("H3", "Risk Control Adequacy", "Yes",
+H2_YES = json.dumps(_hf("H2", "Software Contribution and Cause Coverage", "Yes",
+                        rationale="Software causes are well-defined."))
+H3_YES = json.dumps(_hf("H3", "Pre-Mitigation Risk and Exploitability Characterization", "Yes",
+                        rationale="Pre-mitigation risk is properly characterized."))
+H3_NO = json.dumps(_hf("H3", "Pre-Mitigation Risk and Exploitability Characterization", "No",
+                       rationale="Pre-mitigation risk characterization is incomplete.",
+                       unblocked_items=["Exploitability rating missing"]))
+H4_YES = json.dumps(_hf("H4", "Risk Control Identification, Allocation, and Coverage", "Yes",
                         rationale="All software causes are controlled by REQ-PUMP-101.",
                         cited_req_ids=["REQ-PUMP-101"]))
-H3_NO = json.dumps(_hf("H3", "Risk Control Adequacy", "No",
+H4_NO = json.dumps(_hf("H4", "Risk Control Identification, Allocation, and Coverage", "No",
                        rationale="No controlling requirement for the scheduler-stall cause.",
                        unblocked_items=["Scheduler stall under heavy task load"]))
-H4_YES = json.dumps(_hf("H4", "Verification Depth", "Yes",
+H5_YES = json.dumps(_hf("H5", "Verification Depth and Hazard-Path Effectiveness", "Yes",
                         rationale="Fault injection and boundary tests verify the controls.",
                         cited_req_ids=["REQ-PUMP-101"],
                         cited_test_case_ids=["TC-PUMP-202", "TC-PUMP-203"]))
-H4_NO = json.dumps(_hf("H4", "Verification Depth", "No",
+H5_NO = json.dumps(_hf("H5", "Verification Depth and Hazard-Path Effectiveness", "No",
                        rationale="Only the functional happy path is exercised.",
                        cited_test_case_ids=["TC-PUMP-201"],
                        unblocked_items=["REQ-PUMP-101 watchdog latch behavior"]))
-H4_NA = json.dumps(_hf("H4", "Verification Depth", "N-A",
+H5_NA = json.dumps(_hf("H5", "Verification Depth and Hazard-Path Effectiveness", "N-A",
                        rationale="No software-related causes — software verification depth is not applicable."))
-H5_YES = json.dumps(_hf("H5", "Residual Risk Closure", "Yes",
+H6_YES = json.dumps(_hf("H6", "Residual Risk Closure and Acceptability Decision", "Yes",
                         rationale="Probability downgrade Probable to Remote is supported by verified controls."))
-H5_NO = json.dumps(_hf("H5", "Residual Risk Closure", "No",
+H6_NO = json.dumps(_hf("H6", "Residual Risk Closure and Acceptability Decision", "No",
                        rationale="Probability downgrade is unsupported by software verification evidence."))
+H7_YES = json.dumps(_hf("H7", "HSHA Update and Newly Identified Hazard / Hazardous Situation Capture", "Yes",
+                        rationale="HSHA is properly updated with new hazards."))
+H7_NO = json.dumps(_hf("H7", "HSHA Update and Newly Identified Hazard / Hazardous Situation Capture", "No",
+                       rationale="New hazards not captured in HSHA."))
 
 FINAL_PROSE_EMPTY = json.dumps({"comments": "", "clarification_questions": []})
 FINAL_PROSE_INADEQUATE = json.dumps({
@@ -121,27 +129,41 @@ def _good_review(req) -> RequirementReview:
 # --- per-dimension Hn evaluator nodes -----------------------------------
 
 
-def _make_node(cls, mock_response: str, response_model=HazardFinding):
-    return cls(
+def _make_h_node(dimension_code: str, required_fields: tuple, mock_response: str) -> HazardEvaluatorNode:
+    """Factory for HazardEvaluatorNode with mocked LLM."""
+    return HazardEvaluatorNode(
         client=make_mock_client(mock_response),
         model="test-model",
-        response_model=response_model,
         system_prompt="sys",
+        model_kwargs={},
+        dimension_code=dimension_code,
+        required_fields=required_fields,
+    )
+
+
+def _make_h6_node(mock_response: str) -> H6EvaluatorNode:
+    """Factory for H6EvaluatorNode with mocked LLM."""
+    return H6EvaluatorNode(
+        client=make_mock_client(mock_response),
+        model="test-model",
+        response_model=HazardFinding,
+        system_prompt="sys",
+        model_kwargs={},
     )
 
 
 def test_h1_validate_state_missing_hazard():
-    node = _make_node(_H1EvaluatorNode, H1_YES)
+    node = _make_h_node("H1", ("hazard_id", "hazard"), H1_YES)
     assert node._validate_state({}) is False
 
 
 def test_h1_validate_state_present(sample_hazard):
-    node = _make_node(_H1EvaluatorNode, H1_YES)
+    node = _make_h_node("H1", ("hazard_id", "hazard"), H1_YES)
     assert node._validate_state({"hazard": sample_hazard}) is True
 
 
 def test_h1_build_payload_only_h1_fields(sample_hazard):
-    node = _make_node(_H1EvaluatorNode, H1_YES)
+    node = _make_h_node("H1", ("hazard_id", "hazard", "harm"), H1_YES)
     payload = node._build_payload({"hazard": sample_hazard})
     assert payload["hazard_id"] == sample_hazard.hazard_id
     assert "hazard" in payload and "harm" in payload
@@ -151,32 +173,52 @@ def test_h1_build_payload_only_h1_fields(sample_hazard):
 
 
 async def test_h1_call_yes(sample_hazard):
-    node = _make_node(_H1EvaluatorNode, H1_YES)
+    node = _make_h_node("H1", ("hazard_id", "hazard"), H1_YES)
     result = await node({"hazard": sample_hazard})
-    f = result["h1_finding"]
+    findings = result["hazard_findings"]
+    assert len(findings) == 1
+    f = findings[0]
     assert isinstance(f, HazardFinding)
     assert f.code == "H1" and f.verdict == "Yes"
 
 
 async def test_h2_call_yes(sample_hazard):
-    node = _make_node(_H2EvaluatorNode, H2_YES)
+    node = _make_h_node("H2", ("hazard_id", "hazard"), H2_YES)
     result = await node({"hazard": sample_hazard})
-    f = result["h2_finding"]
+    findings = result["hazard_findings"]
+    assert len(findings) == 1
+    f = findings[0]
     assert f.code == "H2" and f.verdict == "Yes"
 
 
-def test_h3_validate_requires_reviews(sample_hazard):
-    node = _make_node(_H3EvaluatorNode, H3_YES)
+def test_h3_validate_only_needs_hazard(sample_hazard):
+    """H3 is an early evaluator — only needs hazard, not requirement_reviews."""
+    node = _make_h_node("H3", ("hazard_id",), H3_YES)
+    assert node._validate_state({"hazard": sample_hazard}) is True
+
+
+async def test_h3_call_no_with_unblocked_items(sample_hazard):
+    node = _make_h_node("H3", ("hazard_id",), H3_NO)
+    result = await node({"hazard": sample_hazard})
+    findings = result["hazard_findings"]
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.verdict == "No"
+    assert f.unblocked_items == ["Exploitability rating missing"]
+
+
+def test_h4_validate_requires_reviews(sample_hazard):
+    """H4 is a late evaluator — needs hazard + requirement_reviews."""
+    node = _make_h_node("H4", ("hazard_id",), H4_YES)
     assert node._validate_state({"hazard": sample_hazard}) is False
     assert node._validate_state({"hazard": sample_hazard, "requirement_reviews": []}) is True
 
 
-def test_h3_payload_summarises_reviews(sample_hazard):
-    node = _make_node(_H3EvaluatorNode, H3_YES)
+def test_h4_payload_summarises_reviews(sample_hazard):
+    node = _make_h_node("H4", ("hazard_id",), H4_YES)
     review = _good_review(sample_hazard.requirements[0])
     payload = node._build_payload({"hazard": sample_hazard, "requirement_reviews": [review]})
     assert payload["hazard_id"] == sample_hazard.hazard_id
-    assert "hazardous_sequence_of_events" in payload
     assert isinstance(payload["requirement_reviews"], list)
     assert len(payload["requirement_reviews"]) == 1
     summary = payload["requirement_reviews"][0]
@@ -188,37 +230,55 @@ def test_h3_payload_summarises_reviews(sample_hazard):
     ]
 
 
-async def test_h3_call_no_with_unblocked_items(sample_hazard):
-    node = _make_node(_H3EvaluatorNode, H3_NO)
+async def test_h5_call_na_when_no_software_causes(sample_hazard):
+    node = _make_h_node("H5", ("hazard_id",), H5_NA)
     review = _good_review(sample_hazard.requirements[0])
     result = await node({"hazard": sample_hazard, "requirement_reviews": [review]})
-    f = result["h3_finding"]
-    assert f.verdict == "No"
-    assert f.unblocked_items == ["Scheduler stall under heavy task load"]
+    findings = result["hazard_findings"]
+    assert len(findings) == 1
+    assert findings[0].verdict == "N-A"
 
 
-async def test_h4_call_na_when_no_software_causes(sample_hazard):
-    node = _make_node(_H4EvaluatorNode, H4_NA)
-    review = _good_review(sample_hazard.requirements[0])
-    result = await node({"hazard": sample_hazard, "requirement_reviews": [review]})
-    assert result["h4_finding"].verdict == "N-A"
-
-
-async def test_h5_payload_carries_upstream_findings(sample_hazard):
-    node = _make_node(_H5EvaluatorNode, H5_YES)
-    h1 = HazardFinding.model_validate_json(H1_YES)
-    h2 = HazardFinding.model_validate_json(H2_YES)
+def test_h6_validate_requires_h3_h4_h5_findings(sample_hazard):
+    """H6 needs H3, H4, H5 findings to validate residual risk."""
+    node = _make_h6_node(H6_YES)
     h3 = HazardFinding.model_validate_json(H3_YES)
     h4 = HazardFinding.model_validate_json(H4_YES)
+    h5 = HazardFinding.model_validate_json(H5_YES)
+    
+    # Missing findings
+    assert node._validate_state({"hazard": sample_hazard, "hazard_findings": []}) is False
+    # All three present
+    assert node._validate_state({
+        "hazard": sample_hazard,
+        "hazard_findings": [h3, h4, h5],
+    }) is True
+
+
+async def test_h6_payload_carries_upstream_findings(sample_hazard):
+    node = _make_h6_node(H6_YES)
+    h3 = HazardFinding.model_validate_json(H3_YES)
+    h4 = HazardFinding.model_validate_json(H4_YES)
+    h5 = HazardFinding.model_validate_json(H5_YES)
     payload = node._build_payload({
         "hazard": sample_hazard,
-        "h1_finding": h1, "h2_finding": h2, "h3_finding": h3, "h4_finding": h4,
+        "hazard_findings": [h3, h4, h5],
     })
-    assert payload["h1_finding"]["verdict"] == "Yes"
-    assert payload["h4_finding"]["cited_test_case_ids"] == ["TC-PUMP-202", "TC-PUMP-203"]
-    # Post-mitigation fields must be in the payload so H5 can grade closure.
+    assert payload["h3_finding"]["verdict"] == "Yes"
+    assert payload["h4_finding"]["verdict"] == "Yes"
+    assert payload["h5_finding"]["verdict"] == "Yes"
+    # Post-mitigation fields must be in the payload so H6 can grade closure.
     assert "final_risk_rating" in payload
     assert "residual_risk_acceptability" in payload
+
+
+async def test_h7_call_yes(sample_hazard):
+    node = _make_h_node("H7", ("hazard_id", "new_hs_reference"), H7_YES)
+    result = await node({"hazard": sample_hazard})
+    findings = result["hazard_findings"]
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.code == "H7" and f.verdict == "Yes"
 
 
 # --- final assessor (deterministic verdict) -----------------------------
@@ -235,42 +295,54 @@ def _final_node(prose_response: str = FINAL_PROSE_EMPTY) -> _FinalAssessorNode:
 
 def _all_yes_findings() -> dict:
     return {
-        "h1_finding": HazardFinding.model_validate_json(H1_YES),
-        "h2_finding": HazardFinding.model_validate_json(H2_YES),
-        "h3_finding": HazardFinding.model_validate_json(H3_YES),
-        "h4_finding": HazardFinding.model_validate_json(H4_YES),
-        "h5_finding": HazardFinding.model_validate_json(H5_YES),
+        "hazard_findings": [
+            HazardFinding.model_validate_json(H1_YES),
+            HazardFinding.model_validate_json(H2_YES),
+            HazardFinding.model_validate_json(H3_YES),
+            HazardFinding.model_validate_json(H4_YES),
+            HazardFinding.model_validate_json(H5_YES),
+            HazardFinding.model_validate_json(H6_YES),
+            HazardFinding.model_validate_json(H7_YES),
+        ]
     }
 
 
 def _mixed_findings_with_no() -> dict:
     return {
-        "h1_finding": HazardFinding.model_validate_json(H1_YES),
-        "h2_finding": HazardFinding.model_validate_json(H2_YES),
-        "h3_finding": HazardFinding.model_validate_json(H3_NO),
-        "h4_finding": HazardFinding.model_validate_json(H4_NO),
-        "h5_finding": HazardFinding.model_validate_json(H5_NO),
+        "hazard_findings": [
+            HazardFinding.model_validate_json(H1_YES),
+            HazardFinding.model_validate_json(H2_YES),
+            HazardFinding.model_validate_json(H3_NO),
+            HazardFinding.model_validate_json(H4_NO),
+            HazardFinding.model_validate_json(H5_NO),
+            HazardFinding.model_validate_json(H6_NO),
+            HazardFinding.model_validate_json(H7_YES),
+        ]
     }
 
 
-def test_final_validate_requires_all_five_findings(sample_hazard):
+def test_final_validate_requires_all_seven_findings(sample_hazard):
     node = _final_node()
-    bad = {"hazard": sample_hazard, **_all_yes_findings()}
-    bad.pop("h3_finding")
-    assert node._validate_state(bad) is False
+    # Missing one finding
+    incomplete = {"hazard": sample_hazard, **_all_yes_findings()}
+    incomplete["hazard_findings"] = incomplete["hazard_findings"][:6]  # Only 6 findings
+    assert node._validate_state(incomplete) is False
+    # All 7 present
     assert node._validate_state({"hazard": sample_hazard, **_all_yes_findings()}) is True
 
 
 def test_aggregate_verdict_pure_function():
-    findings_yes = list(_all_yes_findings().values())
+    findings_yes = _all_yes_findings()["hazard_findings"]
     findings_with_na = [
         HazardFinding.model_validate_json(H1_YES),
         HazardFinding.model_validate_json(H2_YES),
         HazardFinding.model_validate_json(H3_YES),
-        HazardFinding.model_validate_json(H4_NA),
-        HazardFinding.model_validate_json(H5_YES),
+        HazardFinding.model_validate_json(H4_YES),
+        HazardFinding.model_validate_json(H5_NA),
+        HazardFinding.model_validate_json(H6_YES),
+        HazardFinding.model_validate_json(H7_YES),
     ]
-    findings_with_no = list(_mixed_findings_with_no().values())
+    findings_with_no = _mixed_findings_with_no()["hazard_findings"]
     assert _FinalAssessorNode._aggregate_verdict(findings_yes) == "Yes"
     assert _FinalAssessorNode._aggregate_verdict(findings_with_na) == "Yes"
     assert _FinalAssessorNode._aggregate_verdict(findings_with_no) == "No"
@@ -284,7 +356,8 @@ async def test_final_call_all_yes_produces_yes_overall(sample_hazard):
     assert isinstance(assessment, HazardAssessment)
     assert assessment.hazard_id == sample_hazard.hazard_id
     assert assessment.overall_verdict == "Yes"
-    assert [f.code for f in assessment.mandatory_findings] == ["H1", "H2", "H3", "H4", "H5"]
+    assert len(assessment.mandatory_findings) == 7
+    assert [f.code for f in assessment.mandatory_findings] == ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
     # The LLM-written prose comes through verbatim.
     assert assessment.comments == ""
     assert assessment.clarification_questions == []
@@ -296,16 +369,16 @@ async def test_final_call_any_no_produces_no_overall(sample_hazard):
     result = await node(state)
     assessment = result["hazard_assessment"]
     assert assessment.overall_verdict == "No"
+    assert len(assessment.mandatory_findings) == 7
     h3 = next(f for f in assessment.mandatory_findings if f.code == "H3")
     assert h3.verdict == "No"
-    assert h3.unblocked_items == ["Scheduler stall under heavy task load"]
     assert "Watchdog" in assessment.comments
 
 
 async def test_final_call_skip_when_findings_missing(sample_hazard):
     node = _final_node()
     incomplete = {"hazard": sample_hazard, **_all_yes_findings()}
-    incomplete.pop("h2_finding")
+    incomplete["hazard_findings"] = incomplete["hazard_findings"][:5]  # Only 5 findings
     result = await node(incomplete)
     assert result == {"hazard_assessment": None}
 
@@ -320,6 +393,44 @@ async def test_final_call_invalid_prose_still_aggregates(sample_hazard):
     assert isinstance(assessment, HazardAssessment)
     assert assessment.overall_verdict == "Yes"
     assert assessment.comments == ""
+
+
+# --- dispatch functions -------------------------------------------------
+
+
+def test_dispatch_early_evaluators(sample_hazard):
+    """H1, H2, H3, H7 dispatch immediately from START."""
+    sends = dispatch_hazard_evaluators_early({"hazard": sample_hazard})
+    assert len(sends) == 4
+    nodes = [s.node for s in sends]
+    assert set(nodes) == {"h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"}
+    for send in sends:
+        assert send.arg["hazard"] is sample_hazard
+
+
+def test_dispatch_early_no_hazard():
+    sends = dispatch_hazard_evaluators_early({})
+    assert sends == []
+
+
+def test_dispatch_late_evaluators(sample_hazard):
+    """H4, H5 dispatch after requirement_reviews complete."""
+    review = _good_review(sample_hazard.requirements[0])
+    sends = dispatch_hazard_evaluators_late({
+        "hazard": sample_hazard,
+        "requirement_reviews": [review],
+    })
+    assert len(sends) == 2
+    nodes = [s.node for s in sends]
+    assert set(nodes) == {"h4_evaluator", "h5_evaluator"}
+    for send in sends:
+        assert send.arg["hazard"] is sample_hazard
+        assert send.arg["requirement_reviews"] == [review]
+
+
+def test_dispatch_late_missing_reviews(sample_hazard):
+    sends = dispatch_hazard_evaluators_late({"hazard": sample_hazard})
+    assert sends == []
 
 
 # --- dispatch_requirement_reviews ---------------------------------------

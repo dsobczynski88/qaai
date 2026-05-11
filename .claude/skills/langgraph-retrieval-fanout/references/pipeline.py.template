@@ -1,0 +1,93 @@
+"""
+Runnable wrapper that builds and compiles the StateGraph.
+
+The class form (as opposed to a free function) is chosen so:
+  - retriever / jinja env / model_kwargs live as attributes (cleaner for tests),
+  - the constructor is the single place that wires "embedding_model + top_k"
+    into a fully usable retriever (delegating to build_retriever).
+
+Usage:
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(...)
+    app = WorkflowRunnable(client, "gpt-4o-mini")
+    result = await app.graph.ainvoke({
+        "inputs": [item1, item2],
+        "results_1": [], "results_2": [], "results_3": [],
+    })
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from jinja2 import Environment
+from langgraph.graph import END, START, StateGraph
+from openai import AsyncOpenAI
+
+# TODO(rename): wire imports to wherever you put the templates.
+# from your_pkg.state import Result1, Result2, Result3, WorkflowState
+# from your_pkg.retriever import SectionExpandingRetriever, build_retriever
+# from your_pkg.nodes import (
+#     ExampleEvalNode,
+#     _EvalNodeBase,
+#     dispatch,
+#     jinja_env,
+# )
+
+
+class WorkflowRunnable:
+    """Generalized FeedbackReviewerRunnable. One per workflow definition."""
+
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        retriever=None,                       # SectionExpandingRetriever; built if None
+        *,
+        embedding_model: Optional[str] = None,
+        top_k: Optional[int] = None,
+        prompts_dir: Path | None = None,
+        model_kwargs: dict | None = None,
+    ):
+        # TODO(wire): fill in defaults from your settings module.
+        if retriever is None:
+            # retriever = build_retriever(
+            #     chunks=...,
+            #     sections=...,
+            #     persist_root=settings.chroma_dir,
+            #     embedding_model=embedding_model or settings.embedding_model,
+            #     top_k=top_k or settings.top_k,
+            # )
+            raise NotImplementedError("Wire build_retriever or pass `retriever=` explicitly.")
+        self.retriever = retriever
+
+        # prompts_dir = prompts_dir or settings.prompts_dir
+        env = self._build_env(prompts_dir)
+        mk = model_kwargs or {"temperature": 0}
+
+        # TODO(rename + add): one node instance per evaluator. Each node binds
+        # its concrete response_model, prompt template, and state_key.
+        # self.node_1 = ExampleEvalNode(client, model, Result1, retriever, env, mk)
+        # self.node_2 = SomeOtherNode(client, model, Result2, retriever, env, mk)
+        # self.node_3 = ThirdNode(client, model, Result3, retriever, env, mk)
+
+        builder = StateGraph(WorkflowState)  # TODO(rename)
+        # builder.add_node("node_1", self.node_1)
+        # builder.add_node("node_2", self.node_2)
+        # builder.add_node("node_3", self.node_3)
+
+        builder.add_conditional_edges(
+            START,
+            dispatch,
+            ["node_1", "node_2", "node_3"],  # TODO(rename): node names matching add_node
+        )
+        builder.add_edge("node_1", END)
+        builder.add_edge("node_2", END)
+        builder.add_edge("node_3", END)
+
+        self.graph = builder.compile()
+
+    @staticmethod
+    def _build_env(prompts_dir: Path | None) -> Environment:
+        # return jinja_env(prompts_dir or settings.prompts_dir)
+        raise NotImplementedError("Wire jinja_env(prompts_dir).")
