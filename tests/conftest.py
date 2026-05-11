@@ -185,10 +185,22 @@ def jsonl_recorders_tc():
 
 @pytest.fixture
 def real_client():
+    """Provide a real OpenAI client for integration tests.
+    
+    Security: Validates that PYTEST_BASE_URL is not a production endpoint.
+    """
     api_key = os.getenv("PYTEST_API_KEY")
     base_url = os.getenv("PYTEST_BASE_URL")
     if not api_key:
         pytest.skip("PYTEST_API_KEY not set — skipping integration test")
+    
+    # Security check: prevent accidental use of production endpoints
+    if base_url and "prod" in base_url.lower():
+        pytest.fail(
+            "PYTEST_BASE_URL appears to be a production endpoint. "
+            "Integration tests must use test/staging endpoints only."
+        )
+    
     return RateLimitOpenAIClient(api_key=api_key, base_url=base_url)
 
 
@@ -198,8 +210,8 @@ def real_model():
 
 @pytest.fixture
 def sample_hazard():
-    """Load the canonical sample HazardRecord from tests/fixtures/sample_hazard.json."""
-    fixture_path = Path(__file__).parent / "fixtures" / "sample_hazard.json"
+    """Load the canonical sample HazardRecord from tests/fixtures/external/sample_hazard.json."""
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "sample_hazard.json"
     with fixture_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     return HazardRecord.model_validate(data)
