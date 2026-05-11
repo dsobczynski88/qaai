@@ -10,10 +10,14 @@ from autoqa.api.schemas import (
     HazardReviewResponse,
     ReviewRequest,
     ReviewResponse,
+    TestCaseReviewRequest,
+    TestCaseReviewResponse,
 )
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from autoqa.components.test_case_reviewer.pipeline import TCReviewerRunnable
+from autoqa.components.test_case_reviewer.nodes import load_default_review_objectives
 from autoqa.prj_logger import format_elapsed_time
 
 
@@ -107,4 +111,60 @@ class HazardReviewService:
             hazard=request.hazard,
             hazard_assessment=final_state.get("hazard_assessment"),
             requirement_reviews=final_state.get("requirement_reviews", []),
+        )
+
+
+class TestCaseReviewService:
+    """
+    Wraps the compiled LangGraph test_case_reviewer pipeline for use by the FastAPI layer.
+    Instantiated once at application startup and stored on app.state.
+    """
+
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        model_kwargs: dict = {},
+    ):
+        self.graph = TCReviewerRunnable(
+            client, model, model_kwargs, checkpointer=MemorySaver()
+        )
+
+    async def run(self, request: TestCaseReviewRequest) -> TestCaseReviewResponse:
+        logger = logging.getLogger("autoqa.api.test_case")
+        start_time = time.perf_counter()
+        
+        config: RunnableConfig = {"configurable": {"thread_id": request.thread_id}}
+        
+        # Load default review objectives if not provided
+        review_objectives = request.review_objectives
+        if review_objectives is None:
+            review_objectives = load_default_review_objectives()
+        
+        graph_input = {
+            "test_case": request.test_case,
+            "requirements": request.requirements,
+            "review_objectives": review_objectives,
+        }
+        final_state = await self.graph.graph.ainvoke(graph_input, config)
+        
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        elapsed_str = format_elapsed_time(elapsed)
+        
+        logger.info(
+            f"Test case review graph invocation for thread {request.thread_id} "
+            f"completed in {elapsed_str}"
+        )
+        
+        return TestCaseReviewResponse(
+            status="completed",
+            thread_id=request.thread_id,
+            test_case=request.test_case,
+            requirements=request.requirements,
+            decomposed_requirements=final_state.get("decomposed_requirements"),
+            coverage_analysis=final_state.get("coverage_analysis", []),
+            logical_structure_analysis=final_state.get("logical_structure_analysis"),
+            prereqs_analysis=final_state.get("prereqs_analysis"),
+            aggregated_assessment=final_state.get("aggregated_assessment"),
         )

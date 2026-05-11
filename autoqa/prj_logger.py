@@ -54,6 +54,21 @@ def timing(loggername):
     return decorator
 
 def get_logs(loggername):        
+    """DEPRECATED: Use @timing or @exception_logger decorators instead.
+    
+    This decorator is kept for backward compatibility with external scripts
+    that may still reference it. It will be removed in v1.0.0.
+    
+    Prefer:
+        - @timing(loggername) for performance monitoring
+        - @exception_logger(loggername) for error handling
+    
+    Args:
+        loggername: Logger name for messages
+        
+    Returns:
+        Decorated function (deprecated behavior)
+    """        
     def decorator(func):
         def wrapper(*args, **kwargs):
             logger = logging.getLogger(loggername)
@@ -63,19 +78,13 @@ def get_logs(loggername):
                 output = func(*args, **kwargs)
             except Exception as e:
                 ce = CustomException(e)
-                logger = logging.getLogger(loggername)                
-                logger.debug(ce.error_message)
+                logger.error(ce.error_message, exc_info=True)
                 output = None
             finally:
-                #logger.debug(f"Exiting: {func.__name__}")
                 end_time = time.perf_counter()
                 elapsed_time = end_time - start_time
                 logger.debug(f"{func.__name__} completed in {elapsed_time:.6f} seconds")
-                try:
-                    return output
-                except Exception as e:
-                    logger.debug(f"The following error occurred: {e}")
-                    return None
+                return output
         return wrapper
     return decorator
 

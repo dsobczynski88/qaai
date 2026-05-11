@@ -8,17 +8,41 @@ import time
 import logging
 from pathlib import Path
 
-def exception_logger(loggername):       
+def exception_logger(loggername, return_on_error=None, reraise=True):
+    """Log exceptions and optionally suppress them.
+    
+    This decorator logs exceptions with full context and either re-raises them
+    or returns a default value. Use reraise=False only when silent failure is
+    acceptable and well-documented.
+    
+    Args:
+        loggername: Logger name for exception messages
+        return_on_error: Value to return on exception (only if reraise=False)
+        reraise: If True (default), re-raise the exception after logging
+        
+    Returns:
+        Decorated function that logs exceptions
+        
+    Example:
+        >>> @exception_logger("myapp.module", reraise=True)
+        >>> def risky_operation():
+        >>>     return 1 / 0  # Will log and re-raise ZeroDivisionError
+        
+        >>> @exception_logger("myapp.module", return_on_error=None, reraise=False)
+        >>> def optional_operation():
+        >>>     return 1 / 0  # Will log and return None
+    """       
     def decorator(func):
         def wrapper(*args, **kwargs):          
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                ce = CustomException(e, sys)
+                ce = CustomException(e)
                 logger = logging.getLogger(loggername)               
-                logger.debug(ce.error_message)
-                #raise ce
-                return None
+                logger.error(ce.error_message, exc_info=True)
+                if reraise:
+                    raise ce
+                return return_on_error
         return wrapper
     return decorator
 

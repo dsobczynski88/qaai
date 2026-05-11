@@ -3,6 +3,11 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from autoqa.utils import make_output_directory
+from autoqa.core.constants import (
+    DEFAULT_MAX_REQUESTS_PER_MINUTE,
+    DEFAULT_MAX_TOKENS_PER_MINUTE,
+    DEFAULT_MAX_OUTPUT_TOKENS,
+)
 
 
 class PromptConfig(BaseModel):
@@ -23,12 +28,22 @@ class PromptConfig(BaseModel):
     hazard_final: str = "hazard_final_assessor-v1.jinja2"
 
 class Settings(BaseSettings):
-    openai_api_key: str = Field(..., alias='BEDROCK_API_KEY')
-    url: str = Field(..., alias='BEDROCK_API_BASE_URL')
-    model: str = Field(..., alias='BEDROCK_MODEL')
-    max_requests_per_minute: int = 490
-    max_tokens_per_minute: int = 200000
-    max_output_tokens: int = 16000  # Maximum output tokens for LLM (Haiku supports up to 16K)
+    """Application settings loaded from environment variables.
+    
+    Environment Variables:
+        API_KEY: API key for the LLM service (required)
+        API_BASE_URL: Base URL for the API endpoint (required)
+        API_MODEL: Model identifier (required)
+        MAX_REQUESTS_PER_MINUTE: Rate limit for API requests (default: 490)
+        MAX_TOKENS_PER_MINUTE: Token rate limit (default: 200000)
+        MAX_OUTPUT_TOKENS: Maximum output tokens per request (default: 16000)
+    """
+    openai_api_key: str = Field(..., alias='API_KEY')
+    url: str = Field(..., alias='API_BASE_URL')
+    model: str = Field(..., alias='API_MODEL')
+    max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE
+    max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
     prompt_config: PromptConfig = Field(default_factory=PromptConfig)
     model_config = SettingsConfigDict(
