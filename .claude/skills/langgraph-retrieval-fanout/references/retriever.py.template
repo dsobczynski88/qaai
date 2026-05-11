@@ -1,0 +1,203 @@
+"""
+Chroma-backed retriever with metadata filtering + parent-section expansion.
+
+Generalizes multi-vec-retrieval/.../retriever.py. The two important methods:
+
+  retrieve_with_ids(query, **filters) -> (context_string, [chunk_ids])
+      The primary entry. Returns BOTH the formatted prompt context AND the
+      ordered chunk_ids that contributed, so each node can stamp the ids
+      onto its result for traceability. Don't drop the ids.
+
+  retrieve(query, **filters) -> str
+      Thin wrapper that discards chunk_ids. Use only when traceability isn't
+      needed (rare).
+
+Filter-fallback chain: tries (doc + section) first, then (doc only), then
+unfiltered. This degrades gracefully when, e.g., the section name on the
+input doesn't fuzzy-match any chunk metadata.
+
+Embeddings are namespaced by `embedding_slug(model_name)` so swapping
+embedding models never mixes vector spaces.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from langchain_core.documents import Document
+from langchain_chroma import Chroma
+
+
+# --- Embedding factory + slug ---
+
+def embedding_slug(model_name: str) -> str:
+    """Filesystem-safe slug for Chroma persistence directory namespacing."""
+    return re.sub(r"[^a-zA-Z0-9]+", "_", model_name.strip()).strip("_")
+
+
+def build_embeddings(model_name: str):
+    """
+    Dispatch on prefix:
+      'hf:<name>' or 'sentence-transformers/<name>' -> HuggingFaceEmbeddings (CPU, normalized)
+      anything else                                 -> OpenAIEmbeddings
+    """
+    if model_name.startswith("hf:") or model_name.startswith("sentence-transformers/"):
+        from langchain_huggingface import HuggingFaceEmbeddings
+
+        hf_name = model_name[3:] if model_name.startswith("hf:") else model_name
+        return HuggingFaceEmbeddings(
+            model_name=hf_name,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+
+    from langchain_openai import OpenAIEmbeddings
+
+    return OpenAIEmbeddings(model=model_name)
+
+
+# --- Vectorstore loader ---
+
+def build_or_load_vectorstore(
+    chunks: List[Document],
+    persist_dir: Path,
+    embeddings,
+    collection_name: str = "chunks",
+) -> Chroma:
+    persist_dir.mkdir(parents=True, exist_ok=True)
+    vs = Chroma(
+        collection_name=collection_name,
+        embedding_function=embeddings,
+        persist_directory=str(persist_dir),
+    )
+    try:
+        count = vs._collection.count()  # private API; brittle across Chroma versions
+    except Exception:
+        count = 0
+    if count == 0 and chunks:
+        vs.add_documents(
+            chunks,
+            ids=[c.metadata["chunk_id"] for c in chunks],  # TODO(rename): your chunk-id key
+        )
+    return vs
+
+
+# --- Retriever ---
+
+class SectionExpandingRetriever:
+    """
+    Searches at chunk-level with metadata filters, then expands each hit to
+    include its full parent section text in the formatted output.
+
+    TODO(rename): metadata field names below assume the chunker stamps:
+        chunk doc:    {parent_doc_name, parent_section_name, parent_section_id, chunk_id}
+        section doc:  {doc_name, section_name, section_id}
+    Adjust the filter dicts and `_format` if your chunker uses different keys.
+    """
+
+    def __init__(
+        self,
+        vectorstore: Chroma,
+        sections: List[Document],
+        top_k: int = 3,
+    ):
+        self.vs = vectorstore
+        self.top_k = top_k
+        self.section_index: Dict[str, Document] = {
+            s.metadata["section_id"]: s for s in sections
+        }
+
+    def _search(self, query: str, filter_: Optional[dict]) -> List[Document]:
+        try:
+            return self.vs.similarity_search(query, k=self.top_k, filter=filter_)
+        except Exception:
+            return []
+
+    def retrieve_with_ids(
+        self,
+        query: str,
+        doc_name: Optional[str] = None,
+        section_name: Optional[str] = None,
+    ) -> Tuple[str, List[str]]:
+        filter_: Optional[dict] = None
+        if doc_name and section_name:
+            filter_ = {
+                "$and": [
+                    {"parent_doc_name": {"$eq": doc_name}},
+                    {"parent_section_name": {"$eq": section_name}},
+                ]
+            }
+        elif doc_name:
+            filter_ = {"parent_doc_name": {"$eq": doc_name}}
+
+        hits = self._search(query, filter_)
+        if not hits and doc_name and section_name:
+            hits = self._search(query, {"parent_doc_name": {"$eq": doc_name}})
+        if not hits:
+            hits = self._search(query, None)
+
+        chunk_ids = [h.metadata.get("chunk_id", "") for h in hits if h.metadata.get("chunk_id")]
+        return self._format(hits), chunk_ids
+
+    def retrieve(
+        self,
+        query: str,
+        doc_name: Optional[str] = None,
+        section_name: Optional[str] = None,
+    ) -> str:
+        return self.retrieve_with_ids(query, doc_name, section_name)[0]
+
+    def _format(self, hits: List[Document]) -> str:
+        if not hits:
+            return "[no relevant context retrieved]"
+
+        parent_ids: List[str] = []
+        seen = set()
+        for h in hits:
+            pid = h.metadata.get("parent_section_id")
+            if pid and pid not in seen:
+                seen.add(pid)
+                parent_ids.append(pid)
+
+        blocks: List[str] = ["### Top-k Chunk Matches"]
+        for i, h in enumerate(hits, 1):
+            blocks.append(
+                f"[chunk {i} | doc={h.metadata.get('parent_doc_name')} | "
+                f"section={h.metadata.get('parent_section_name')} | "
+                f"id={h.metadata.get('chunk_id')}]\n{h.page_content.strip()}"
+            )
+
+        blocks.append("\n### Parent Sections (Full Text)")
+        for pid in parent_ids:
+            sec = self.section_index.get(pid)
+            if sec is None:
+                continue
+            blocks.append(
+                f"[section | doc={sec.metadata.get('doc_name')} | "
+                f"name={sec.metadata.get('section_name')} | id={pid}]\n"
+                f"{sec.page_content.strip()}"
+            )
+
+        return "\n\n".join(blocks)
+
+
+# --- Factory ---
+
+def build_retriever(
+    chunks: List[Document],
+    sections: List[Document],
+    persist_root: Path,
+    embedding_model: str,
+    top_k: int = 3,
+) -> SectionExpandingRetriever:
+    """
+    Persist directory is namespaced per embedding model:
+        <persist_root>/<embedding_slug(embedding_model)>/
+
+    so swapping embeddings never mixes incompatible vector spaces.
+    """
+    embeddings = build_embeddings(embedding_model)
+    chroma_dir = persist_root / embedding_slug(embedding_model)
+    vs = build_or_load_vectorstore(chunks, chroma_dir, embeddings)
+    return SectionExpandingRetriever(vs, sections, top_k=top_k)

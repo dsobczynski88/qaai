@@ -1,0 +1,347 @@
+"""
+Corpus builder for a two-level hierarchical RAG retrieval substrate.
+
+Generalizes multi-vec-retrieval/.../design_corpus.py so any corpus type
+(docx, md, pdf) can be built with one shared function instead of copy-pasted
+*_corpus.py files.
+
+Usage:
+    from your_pkg.corpus import CorpusConfig, load_or_build
+    from your_pkg.chunker import split_by_design_marker
+
+    design_cfg = CorpusConfig(
+        name="design",
+        collection_name="design_chunks",
+        chroma_subdir="design",
+        raw_dir=settings.design_raw_dir,
+        parsed_dir=settings.design_parsed_dir,
+        chunked_dir=settings.design_chunked_dir,
+        splitter_fn=split_by_design_marker,
+        extra_meta_keys=("global_id", "project_id"),
+        raw_extension=".docx",
+        top_k=5,
+    )
+    chunks, sections = load_or_build(design_cfg, embedding_model=settings.embedding_model)
+"""
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple
+
+from langchain_core.documents import Document
+from langchain_experimental.text_splitter import SemanticChunker
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# CorpusConfig
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CorpusConfig:
+    """
+    All corpus-specific parameters in one place.
+
+    Attributes
+    ----------
+    name : str
+        Short identifier used in log messages (e.g. "sop", "design").
+    collection_name : str
+        Chroma collection name. Must be unique per corpus to prevent cross-
+        contamination within the same Chroma persist directory.
+    chroma_subdir : str
+        Sub-path appended to the base chroma dir:
+            <chunked_dir>/chroma/<embedding_slug>/<chroma_subdir>/
+        Use a non-empty value for every non-default corpus so Chroma dirs
+        are namespaced per-corpus AND per-embedding-model.
+    raw_dir : Path
+        Directory that holds the source files (docx / pdf / md).
+    parsed_dir : Path
+        Directory where converted .md files are written. Must differ from raw_dir.
+    chunked_dir : Path
+        Directory where chunks.jsonl and sections.jsonl are persisted.
+    splitter_fn : Callable[[str, str], List[Document]]
+        Function(md_text, doc_name) -> List[section Documents].
+        Use split_by_heading for ##-delimited markdown, or split_by_design_marker
+        for GID/Project-ID marker docs. Custom corpora define their own.
+    extra_meta_keys : Tuple[str, ...]
+        Section metadata keys to propagate onto child chunks as parent_<key>.
+        Empty tuple for corpora that only use doc_name / section_name / section_id.
+        Example: ("global_id", "project_id") for design-marker corpora.
+        Replaces the module-level _PROPAGATED_SECTION_META tuple in the live chunker.py.
+    raw_extension : str
+        File extension of source files: ".docx", ".pdf", or ".md".
+        When ".md", _convert_all_raw is a no-op and files are read directly
+        from parsed_dir (or raw_dir if they're the same).
+    top_k : int
+        Default retrieval depth for this corpus.
+    """
+    name: str                                          # TODO(rename): "sop", "design", ...
+    collection_name: str                               # TODO(rename): "chunks", "design_chunks", ...
+    chroma_subdir: str                                 # TODO(rename): "", "design", "guidance", ...
+    raw_dir: Path
+    parsed_dir: Path
+    chunked_dir: Path
+    splitter_fn: Callable[[str, str], List[Document]]
+    extra_meta_keys: Tuple[str, ...] = field(default_factory=tuple)
+    raw_extension: str = ".docx"                       # TODO(rename): ".docx", ".pdf", or ".md"
+    top_k: int = 3
+
+
+# ---------------------------------------------------------------------------
+# JSONL persistence helpers
+# ---------------------------------------------------------------------------
+
+def _dump_jsonl(docs: List[Document], path: Path) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        for d in docs:
+            f.write(json.dumps({"page_content": d.page_content, "metadata": d.metadata}) + "\n")
+
+
+def _load_jsonl(path: Path) -> List[Document]:
+    out: List[Document] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            out.append(Document(page_content=obj["page_content"], metadata=obj["metadata"]))
+    return out
+
+
+def persist(chunks: List[Document], sections: List[Document], chunked_dir: Path) -> None:
+    chunked_dir.mkdir(parents=True, exist_ok=True)
+    _dump_jsonl(chunks, chunked_dir / "chunks.jsonl")
+    _dump_jsonl(sections, chunked_dir / "sections.jsonl")
+
+
+def load_persisted(chunked_dir: Path) -> Optional[Tuple[List[Document], List[Document]]]:
+    c = chunked_dir / "chunks.jsonl"
+    s = chunked_dir / "sections.jsonl"
+    if not (c.exists() and s.exists()):
+        return None
+    return _load_jsonl(c), _load_jsonl(s)
+
+
+# ---------------------------------------------------------------------------
+# Raw file conversion
+# ---------------------------------------------------------------------------
+
+def _docx_to_md(docx_path: Path, parsed_dir: Path) -> Path:
+    """Convert a single .docx to .md under parsed_dir. Idempotent: skips if .md exists."""
+    md_path = parsed_dir / f"{docx_path.stem}.md"
+    if md_path.exists():
+        return md_path
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    # TODO(rename): swap in your docx->md converter.
+    # Reference: src.utils.mword.extract_and_save_docx_text (multi-vec-retrieval).
+    # from src.utils.mword import extract_and_save_docx_text
+    # extract_and_save_docx_text(
+    #     input_path=str(docx_path),
+    #     output_folder=str(parsed_dir),
+    #     filename=docx_path.stem,
+    #     extension=".md",
+    #     include_tables=True,
+    # )
+    raise NotImplementedError(
+        f"Wire a docx->md converter for {docx_path}. "
+        "See the _docx_to_md comment for the reference implementation."
+    )
+
+
+def _pdf_to_md(pdf_path: Path, parsed_dir: Path) -> Path:
+    """Convert a single .pdf to .md under parsed_dir. Idempotent: skips if .md exists."""
+    md_path = parsed_dir / f"{pdf_path.stem}.md"
+    if md_path.exists():
+        return md_path
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+    # TODO(rename): swap in your pdf->md converter (e.g. PyMuPDF, pdfplumber).
+    raise NotImplementedError(
+        f"Wire a pdf->md converter for {pdf_path}."
+    )
+
+
+def _convert_all_raw(cfg: CorpusConfig, *, force: bool) -> List[Path]:
+    """
+    Convert every raw file to .md under parsed_dir.
+
+    When raw_extension is ".md", treats files as already-parsed and returns
+    .md paths directly from parsed_dir (no conversion needed).
+
+    Returns the list of .md Paths to process downstream.
+    """
+    md_paths: List[Path] = []
+
+    if cfg.raw_extension == ".md":
+        src_dir = cfg.parsed_dir if cfg.parsed_dir.exists() else cfg.raw_dir
+        if src_dir.exists():
+            md_paths = sorted(src_dir.glob("*.md"))
+        return md_paths
+
+    if not cfg.raw_dir.exists():
+        logger.warning(
+            "[corpus=%r] raw_dir %s does not exist — no files to convert.",
+            cfg.name, cfg.raw_dir,
+        )
+        return md_paths
+
+    for raw_file in sorted(cfg.raw_dir.glob(f"*{cfg.raw_extension}")):
+        md = cfg.parsed_dir / f"{raw_file.stem}.md"
+        if force and md.exists():
+            md.unlink()
+        if cfg.raw_extension == ".docx":
+            md_paths.append(_docx_to_md(raw_file, cfg.parsed_dir))
+        elif cfg.raw_extension == ".pdf":
+            md_paths.append(_pdf_to_md(raw_file, cfg.parsed_dir))
+        else:
+            raise ValueError(
+                f"Unsupported raw_extension {cfg.raw_extension!r} for corpus {cfg.name!r}. "
+                "Use '.docx', '.pdf', or '.md'."
+            )
+
+    # Also pick up .md files dropped directly into parsed_dir (e.g. for tests).
+    if cfg.parsed_dir.exists():
+        for md in sorted(cfg.parsed_dir.glob("*.md")):
+            if md not in md_paths:
+                md_paths.append(md)
+
+    return md_paths
+
+
+# ---------------------------------------------------------------------------
+# Semantic chunker with per-corpus extra_meta_keys
+# ---------------------------------------------------------------------------
+
+def semantic_chunk_sections(
+    section_docs: List[Document],
+    embeddings,
+    extra_meta_keys: Tuple[str, ...] = (),
+) -> List[Document]:
+    """
+    Split each section into semantic chunks using SemanticChunker.
+
+    Keys listed in extra_meta_keys are propagated from the section's metadata
+    onto each child chunk as parent_<key>. Keys absent from a section are
+    silently skipped — corpora that don't define these fields are unaffected.
+
+    This replaces the module-level _PROPAGATED_SECTION_META tuple in the live
+    chunker.py with a per-corpus, per-call parameter so different corpora can
+    propagate different metadata without a shared global.
+    """
+    chunker = SemanticChunker(embeddings, breakpoint_threshold_type="percentile")
+    chunks: List[Document] = []
+    for sec in section_docs:
+        try:
+            parts = chunker.split_text(sec.page_content)
+        except Exception as exc:
+            logger.warning(
+                "SemanticChunker failed on section %r — using section body as single chunk: %s",
+                sec.metadata.get("section_id"), exc,
+            )
+            parts = [sec.page_content]
+        if not parts:
+            parts = [sec.page_content]
+        for i, body in enumerate(parts):
+            chunk_id = f"{sec.metadata['section_id']}::chunk_{i}"
+            meta = {
+                "parent_doc_name": sec.metadata["doc_name"],
+                "parent_section_name": sec.metadata["section_name"],
+                "parent_section_id": sec.metadata["section_id"],
+                "chunk_id": chunk_id,
+            }
+            for key in extra_meta_keys:
+                if key in sec.metadata:
+                    meta[f"parent_{key}"] = sec.metadata[key]
+            chunks.append(Document(page_content=body, metadata=meta))
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def build_corpus(
+    corpus_cfg: CorpusConfig,
+    force: bool = False,
+    embedding_model: Optional[str] = None,
+) -> Tuple[List[Document], List[Document]]:
+    """
+    End-to-end: raw files -> md -> sections -> semantic chunks -> persisted JSONL.
+
+    Returns (chunks, sections). When force=False and persisted JSONL already
+    exists under corpus_cfg.chunked_dir, returns those without re-chunking.
+
+    Pass force=True whenever:
+    - The splitter function or its regex changed.
+    - extra_meta_keys changed (new fields to propagate).
+    - Source files were replaced or added.
+    """
+    if not force:
+        existing = load_persisted(corpus_cfg.chunked_dir)
+        if existing is not None:
+            logger.info(
+                "[corpus=%r] Loaded %d chunks, %d sections from cache (%s).",
+                corpus_cfg.name, len(existing[0]), len(existing[1]), corpus_cfg.chunked_dir,
+            )
+            return existing
+
+    md_paths = _convert_all_raw(corpus_cfg, force=force)
+
+    if not md_paths:
+        logger.warning(
+            "[corpus=%r] No source files found — returning empty corpus. "
+            "Drop files under %s.",
+            corpus_cfg.name, corpus_cfg.raw_dir,
+        )
+        corpus_cfg.chunked_dir.mkdir(parents=True, exist_ok=True)
+        return [], []
+
+    # TODO(rename): import build_embeddings from your project's config module.
+    # from your_pkg.config import build_embeddings
+    # embeddings = build_embeddings(embedding_model)
+    raise NotImplementedError(
+        "Wire build_embeddings(embedding_model) and remove this raise. "
+        "See the comment above for the reference import."
+    )
+
+    # --- Reference implementation (uncomment after wiring build_embeddings): ---
+    # all_sections: List[Document] = []
+    # for md_path in md_paths:
+    #     text = md_path.read_text(encoding="utf-8")
+    #     doc_name = md_path.name
+    #     all_sections.extend(corpus_cfg.splitter_fn(text, doc_name))
+    #
+    # logger.info(
+    #     "[corpus=%r] Split %d md files into %d sections.",
+    #     corpus_cfg.name, len(md_paths), len(all_sections),
+    # )
+    #
+    # all_chunks = semantic_chunk_sections(
+    #     all_sections, embeddings, extra_meta_keys=corpus_cfg.extra_meta_keys
+    # )
+    # logger.info(
+    #     "[corpus=%r] Produced %d chunks from %d sections.",
+    #     corpus_cfg.name, len(all_chunks), len(all_sections),
+    # )
+    #
+    # persist(all_chunks, all_sections, corpus_cfg.chunked_dir)
+    # return all_chunks, all_sections
+
+
+def load_or_build(
+    corpus_cfg: CorpusConfig,
+    force: bool = False,
+    embedding_model: Optional[str] = None,
+) -> Tuple[List[Document], List[Document]]:
+    """
+    Idempotent entry point: load cached JSONL if present, build otherwise.
+
+    Alias for build_corpus that reads naturally at call sites:
+        chunks, sections = load_or_build(design_cfg)
+    """
+    return build_corpus(corpus_cfg, force=force, embedding_model=embedding_model)

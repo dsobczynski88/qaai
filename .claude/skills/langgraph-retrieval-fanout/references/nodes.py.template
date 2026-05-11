@@ -1,0 +1,234 @@
+"""
+Node hierarchy for a LangGraph fan-out workflow.
+
+Three layers, each adds one responsibility:
+
+  BaseLLMNode (ABC)
+    - Holds client/model/system_prompt/model_kwargs.
+    - Static helpers: JSON-from-markdown extraction + multi-choice parse.
+
+  StandardLLMNode (BaseLLMNode, ABC)
+    - The async __call__ skeleton: validate -> build prompt -> call LLM ->
+      parse -> inject metadata -> format response.
+    - Subclasses implement:
+        _build_prompt_and_meta(task) -> (user_prompt, meta_dict)
+        _format_response(parsed)     -> {state_key: [parsed]}
+
+  _EvalNodeBase (StandardLLMNode)
+    - Holds retriever + jinja_env.
+    - Default _format_response = {self.state_key: [parsed]}.
+
+  ConcreteNode (_EvalNodeBase)
+    - Sets `prompt_template` and `state_key` class attrs.
+    - Implements `_build_prompt_and_meta` (10 lines: retrieve, render, return).
+
+Adding a new evaluator dimension = a new ~10-line ConcreteNode subclass + a Jinja file.
+"""
+from __future__ import annotations
+
+import json
+import re
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any, List, Optional
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+from langgraph.types import Send
+from openai import AsyncOpenAI
+
+# TODO(rename): import your state + result models from wherever you put state.py.template
+# from your_pkg.state import (
+#     EvalTask,
+#     Input,
+#     Result1,
+#     Result2,
+#     Result3,
+#     WorkflowState,
+# )
+# from your_pkg.retriever import SectionExpandingRetriever
+
+
+class BaseLLMNode(ABC):
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        system_prompt: str = "",
+        model_kwargs: dict | None = None,
+    ):
+        self.client = client
+        self.model = model
+        self.system_prompt = system_prompt
+        self.model_kwargs = model_kwargs or {}
+
+    @abstractmethod
+    def _validate_state(self, state: Any) -> bool:
+        ...
+
+    @staticmethod
+    def _extract_json_from_markdown(text: str) -> str:
+        fence = re.search(
+            r"```(?:json|jsonc|javascript|js)?\s*([\s\S]*?)\s*```",
+            text,
+            re.IGNORECASE,
+        )
+        if fence:
+            return fence.group(1).strip()
+        first_brace = text.find("{")
+        first_bracket = text.find("[")
+        starts = [i for i in (first_brace, first_bracket) if i != -1]
+        if starts:
+            return text[min(starts):].strip()
+        return text.strip()
+
+    @staticmethod
+    def _parse_llm_response(result, response_model, node_name: str = "") -> Optional[Any]:
+        """Try each choice in the LLM result; return the first model that validates."""
+        for choice in result.choices:
+            try:
+                content = choice.message.content
+                extracted = BaseLLMNode._extract_json_from_markdown(content)
+                try:
+                    return response_model.model_validate_json(extracted)
+                except Exception:
+                    return response_model.model_validate(json.loads(extracted))
+            except Exception:
+                continue
+        return None
+
+
+class StandardLLMNode(BaseLLMNode, ABC):
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        response_model,
+        system_prompt: str = "",
+        model_kwargs: dict | None = None,
+    ):
+        super().__init__(client, model, system_prompt, model_kwargs)
+        self.response_model = response_model
+
+    @abstractmethod
+    def _build_prompt_and_meta(self, task) -> tuple[str, dict]:
+        """Return (user_prompt_text, meta_to_inject_into_parsed_model)."""
+
+    @abstractmethod
+    def _format_response(self, parsed: Any) -> dict:
+        """Return the state-update dict, e.g. {state_key: [parsed]}."""
+
+    def _validate_state(self, state) -> bool:
+        # TODO(rename): swap `Input` for your input model + `"item"` for your EvalTask key.
+        # Default: state must be a dict with key "item" holding an Input instance.
+        return isinstance(state, dict) and state.get("item") is not None
+
+    def _skip(self, item_id: Optional[int]) -> dict:
+        return {}
+
+    async def __call__(self, state) -> dict:
+        if not self._validate_state(state):
+            return self._skip(None)
+
+        item = state["item"]
+        try:
+            user_prompt, extra_meta = self._build_prompt_and_meta(state)
+        except Exception:
+            return self._skip(getattr(item, "item_id", None))
+
+        messages = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+
+        try:
+            result = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                **self.model_kwargs,
+            )
+        except Exception:
+            return self._skip(getattr(item, "item_id", None))
+
+        inject = {"item_id": getattr(item, "item_id", None)}  # TODO(rename): id field
+        inject.update(extra_meta or {})
+        parsed = self._parse_llm_response(result, self.response_model, self.__class__.__name__)
+        if parsed is None:
+            return self._skip(getattr(item, "item_id", None))
+
+        for k, v in inject.items():
+            if hasattr(parsed, k):
+                setattr(parsed, k, v)
+
+        return self._format_response(parsed)
+
+
+def jinja_env(prompts_dir: Path) -> Environment:
+    return Environment(
+        loader=FileSystemLoader(str(prompts_dir)),
+        autoescape=select_autoescape(enabled_extensions=()),
+        keep_trailing_newline=True,
+    )
+
+
+class _EvalNodeBase(StandardLLMNode):
+    """Adds retriever + Jinja env. Subclasses set `prompt_template` and `state_key`."""
+
+    prompt_template: str = ""
+    state_key: str = ""
+
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        model: str,
+        response_model,
+        retriever,  # SectionExpandingRetriever-like
+        env: Environment,
+        model_kwargs: dict | None = None,
+    ):
+        super().__init__(client, model, response_model, system_prompt="", model_kwargs=model_kwargs)
+        self.retriever = retriever
+        self.env = env
+
+    def _format_response(self, parsed: Any) -> dict:
+        return {self.state_key: [parsed]}
+
+
+# --- Example concrete node ---
+
+class ExampleEvalNode(_EvalNodeBase):
+    """One concrete evaluator. Real workflows have N of these, one per dimension."""
+
+    prompt_template = "example.jinja2"  # TODO(rename)
+    state_key = "results_1"             # TODO(rename) — must match a WorkflowState key
+
+    def _build_prompt_and_meta(self, task) -> tuple[str, dict]:
+        item = task["item"]
+
+        # TODO(customize): build the query / filters for THIS node's retrieval surface.
+        # Different nodes filter differently — that's the whole point of the fan-out.
+        query = item.body
+        context, chunk_ids = self.retriever.retrieve_with_ids(
+            query,
+            doc_name=None,      # TODO: e.g. settings.doc_id_to_filename.get(item.doc_id)
+            section_name=None,  # TODO: e.g. resolve_section_name(item.section_label, ...)
+        )
+
+        tmpl = self.env.get_template(self.prompt_template)
+        prompt = tmpl.render(context=context, item=item.model_dump())
+        return prompt, {"retrieved_chunk_ids": chunk_ids}
+
+
+# --- Dispatch (Send fan-out from START) ---
+
+def dispatch(state) -> List[Send]:
+    """
+    Emit one Send per (input_item, node) pair. LangGraph executes them in
+    parallel; reducers merge the per-node returns into the typed lists.
+    """
+    sends: List[Send] = []
+    for item in state.get("inputs", []):  # TODO(rename): match your state key
+        payload = {"item": item}
+        sends.append(Send("node_1", payload))  # TODO(rename): one Send per concrete node
+        sends.append(Send("node_2", payload))
+        sends.append(Send("node_3", payload))
+    return sends
