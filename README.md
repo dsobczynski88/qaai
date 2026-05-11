@@ -9,7 +9,7 @@ AutoQA exposes three complementary reviewers, each implemented as an independent
 | Reviewer | What it scores | Output rubric |
 |----------|----------------|---------------|
 | **Test Suite Reviewer (RTM)** — `/api/v1/review` | One requirement against its associated test suite | M1-M5 mandatory findings (Functional / Negative / Boundary / Spec Coverage / Terminology) → binary Yes/No coverage verdict |
-| **Hazard Coverage Reviewer** — `/api/v1/hazard-review` | One hazard register entry against its traced requirements + test cases + design docs | H1-H5 mandatory findings (Hazard Statement Completeness / Pre-Mitigation Risk / Risk Control Adequacy / Verification Depth / Residual Risk Closure) → Adequate / Partial / Inadequate verdict |
+| **Hazard Coverage Reviewer** — `/api/v1/hazard-review` | One hazard register entry against its traced requirements + test cases + design docs | H1-H7 mandatory findings (Hazard Record Completeness / Software Contribution / Pre-Mitigation Risk / Risk Control Adequacy / Verification Depth / Residual Risk Closure / HSHA Update) → binary Yes/No verdict |
 | **Single Test Case Reviewer** — library only (`autoqa.components.test_case_reviewer`) | One test case against its requirements and a checklist of review objectives | Per-objective Yes/No verdicts (with a `partial` flag for material gaps) → binary Yes/No overall verdict |
 
 All three reviewers cite the artifact IDs that support each finding, return short comments clarifying any gaps, and emit closed-ended clarification questions so reviewers can quickly confirm whether flagged gaps are real or N/A in context.
@@ -47,21 +47,34 @@ END
 
 ### Hazard Coverage Reviewer
 
-The hazard pipeline reuses the test suite reviewer as an atomic subgraph: each requirement traced from a `HazardRecord` is reviewed in parallel by invoking the full RTM graph for that requirement, then a hazard-level synthesizer rolls all M1-M5 findings up into the H1-H5 rubric.
+The hazard pipeline reuses the test suite reviewer as an atomic subgraph: each requirement traced from a `HazardRecord` is reviewed in parallel by invoking the full RTM graph for that requirement. The hazard-level evaluators (H1, H2, H3, H7) run immediately in parallel with the requirement reviews, while H4 and H5 wait for requirement reviews to complete. H6 validates residual risk closure after H3, H4, and H5 complete. Finally, a deterministic aggregator assembles all seven findings into the H1-H7 rubric.
 
 ```
 START
-  ↓ dispatch_requirement_reviews → Send × N
-┌──────────────────────────────────────┐
-│ REQUIREMENT_REVIEWER × N (parallel)  │  ← each invokes the entire RTM subgraph
-└──────────────────────────────────────┘
-  ↓ (fan-in: operator.add accumulates requirement_reviews)
-┌──────────────────────────────────────┐
-│ HAZARD_SYNTHESIZER  (H1-H5 rubric)   │
-└──────────────────────────────────────┘
-  ↓
-END
+  ├──→ h1_evaluator ────────────────────────┐
+  ├──→ h2_evaluator ────────────────────────┤
+  ├──→ h3_evaluator ──────────┐             │
+  ├──→ h7_evaluator ──────────├─────────────┤
+  └──→ dispatch_requirement_reviews         │
+          ↓                   │             │
+      requirement_reviewer × N│             │
+          ↓                   │             │
+      ┌───┴────┐              │             │
+      h4       h5             │             │
+      └───┬────┘              │             │
+          └──────→ h6 ──────────┘             │
+                   ↓                          │
+              final_assessment ←──────────────┘
+                   ↓
+                  END
 ```
+
+**Key improvements:**
+- H1, H2, H3, H7 run immediately (parallel with requirement_reviewer)
+- H4, H5 run after requirement_reviews complete
+- H6 runs after H3, H4, H5 complete (validates residual risk against upstream evidence)
+- Final assessor waits for all 7 findings
+- Estimated wall-clock reduction: ~30-40% vs sequential execution
 
 ### Single Test Case Reviewer
 
@@ -106,8 +119,8 @@ The `overall_verdict` aggregates deterministically: it is `Yes` only when every 
 | Field | Description |
 |-------|-------------|
 | `requirement_reviews` | One `RequirementReview` per requirement traced from the `HazardRecord`, each carrying the M1-M5 `synthesized_assessment` plus the RTM byproducts (`decomposed_requirement`, `test_suite`, `coverage_analysis`) — the full evidence chain that drove the hazard verdict |
-| `hazard_assessment.mandatory_findings` | Exactly five items in order — H1 Hazard Statement Completeness, H2 Pre-Mitigation Risk, H3 Risk Control Adequacy, H4 Verification Depth, H5 Residual Risk Closure — each with an `Adequate` / `Partial` / `Inadequate` (or `N-A` on H4 only) verdict, cited `req_id`s and `test_id`s, and `unblocked_items` (sequence-of-events steps without controlling requirements on H3, controls without verifying tests on H4) |
-| `hazard_assessment.overall_verdict` | `Adequate` iff every finding is `Adequate` or `N-A`; `Inadequate` if any is `Inadequate`; `Partial` otherwise |
+| `hazard_assessment.mandatory_findings` | Exactly seven items in order — H1 Hazard Record Completeness and Semantic Integrity, H2 Software Contribution and Cause Coverage, H3 Pre-Mitigation Risk and Exploitability Characterization, H4 Risk Control Identification, Allocation, and Coverage, H5 Verification Depth and Hazard-Path Effectiveness, H6 Residual Risk Closure and Acceptability Decision, H7 HSHA Update and Newly Identified Hazard / Hazardous Situation Capture — each with a `Yes` / `No` (or `N-A` on H5 only) verdict, cited `req_id`s and `test_id`s, and `unblocked_items` (sequence-of-events steps without controlling requirements on H4, controls without verifying tests on H5) |
+| `hazard_assessment.overall_verdict` | `Yes` iff every finding is `Yes` or `N-A`; `No` otherwise (computed deterministically, never by the LLM) |
 | `hazard_assessment.comments` / `clarification_questions` | Same shape as the RTM reviewer — short prose plus closed-ended questions to drive reviewer follow-up |
 
 ### Single Test Case Reviewer output fields
@@ -144,13 +157,32 @@ Create a `.env` file in the repo root:
 
 ```env
 # Required
-OPENAI_API_KEY=sk-...
+API_KEY=<your api key>
+API_BASE_URL=<your api url>
+API_MODEL=<your model name>
 
 # Optional — defaults shown
-MODEL=gpt-4o
 MAX_REQUESTS_PER_MINUTE=490
 MAX_TOKENS_PER_MINUTE=200000
+MAX_OUTPUT_TOKENS=16000
+
+# Production settings (optional)
+ENVIRONMENT=development  # Set to 'production' to disable /docs and /redoc
+ALLOWED_ORIGINS=*        # Comma-separated list for CORS (e.g., https://app.example.com)
 ```
+
+**Environment Variable Reference**:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENAI_API_KEY` | Yes | — | API key for the LLM service |
+| `OPENAI_API_BASE_URL` | Yes | — | Base URL for the API endpoint |
+| `OPENAI_MODEL` | Yes | — | Model identifier (e.g., `gpt-4o`, `gpt-4o-mini`) |
+| `MAX_REQUESTS_PER_MINUTE` | No | 490 | Rate limit for API requests (buffer under 500 RPM) |
+| `MAX_TOKENS_PER_MINUTE` | No | 200000 | Token rate limit (adjust based on your account tier) |
+| `MAX_OUTPUT_TOKENS` | No | 16000 | Maximum output tokens per request (Haiku supports up to 16K) |
+| `ENVIRONMENT` | No | `development` | Set to `production` to disable interactive API docs |
+| `ALLOWED_ORIGINS` | No | `*` | CORS allowed origins (comma-separated, use `*` for development only) |
 
 ---
 
@@ -253,8 +285,31 @@ The interactive API documentation is available at `http://localhost:8000/docs` o
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/v1/health` | Health check for load balancers and monitoring |
 | `POST` | `/api/v1/review` | Submit a requirement + test suite for RTM coverage analysis (M1-M5 rubric) |
-| `POST` | `/api/v1/hazard-review` | Submit a `HazardRecord` (hazard line item + traced requirements / test cases / design docs) for hazard mitigation coverage analysis (H1-H5 rubric) |
+| `POST` | `/api/v1/hazard-review` | Submit a `HazardRecord` (hazard line item + traced requirements / test cases / design docs) for hazard mitigation coverage analysis (H1-H7 rubric) |
+
+#### Health Check Endpoint
+
+The `/api/v1/health` endpoint returns service availability status:
+
+```bash
+curl http://localhost:8000/api/v1/health
+```
+
+**Response (healthy)**:
+```json
+{
+  "status": "healthy",
+  "version": "0.2.0",
+  "services": {
+    "rtm_service": "available",
+    "hazard_service": "available"
+  }
+}
+```
+
+**Response (unhealthy)**: Returns 503 status code with error details.
 
 ---
 
@@ -487,7 +542,7 @@ async def main():
 asyncio.run(main())
 ```
 
-H4 (Verification Depth) is the only finding that may be `N-A` — it applies when `software_related_causes` indicates no software cause, in which case test-case verification is not required for that hazard. H1, H2, H3, and H5 must always resolve to `Adequate`, `Partial`, or `Inadequate`.
+H5 (Verification Depth and Hazard-Path Effectiveness) is the only finding that may be `N-A` — it applies when `software_related_causes` indicates no software cause, in which case test-case verification is not required for that hazard. H1, H2, H3, H4, H6, and H7 must always resolve to `Yes` or `No`.
 
 ---
 
@@ -543,6 +598,923 @@ asyncio.run(main())
 ```
 
 The pipeline emits three independent `SpecAnalysis` lists on the final state — `coverage_analysis`, `logical_structure_analysis`, and `prereqs_analysis` — which the aggregator collapses into the populated `evaluated_checklist`. Inspect the per-axis lists directly when you need to see why the aggregator settled on a given verdict.
+
+---
+
+## Production Deployment Guidance
+
+### Overview
+
+AutoQA is designed to run as a containerized FastAPI service behind a reverse proxy. This section covers deployment patterns, security hardening, observability, and operational considerations for production environments subject to FDA 21 CFR Part 11 / EU MDR Annex I software lifecycle controls.
+
+### Architecture Patterns
+
+#### Single-Instance Deployment (Development / Small Teams)
+
+```
+┌─────────────────────────────────────────────┐
+│  Reverse Proxy (nginx / Traefik)           │
+│  - TLS termination                          │
+│  - Rate limiting (optional)                 │
+│  - Request logging                          │
+└─────────────────┬───────────────────────────┘
+                  │
+                  ↓
+┌─────────────────────────────────────────────┐
+│  AutoQA FastAPI Service                     │
+│  - uvicorn --workers 1                      │
+│  - In-memory checkpointer                   │
+│  - Shared RTMReviewerRunnable               │
+└─────────────────┬───────────────────────────┘
+                  │
+                  ↓
+┌─────────────────────────────────────────────┐
+│  OpenAI-Compatible LLM API                  │
+│  (OpenAI / Azure OpenAI / self-hosted)      │
+└─────────────────────────────────────────────┘
+```
+
+**Characteristics:**
+- Single uvicorn worker process
+- Suitable for ≤10 concurrent review sessions
+- No shared state persistence (thread history lost on restart)
+- Simplest to deploy and debug
+
+**When to use:** Internal QA team tools, proof-of-concept deployments, environments where review sessions complete within a single request/response cycle.
+
+#### Multi-Worker Deployment (Production / High Availability)
+
+```
+┌─────────────────────────────────────────────┐
+│  Load Balancer (ALB / nginx / Traefik)     │
+│  - TLS termination                          │
+│  - Health checks (/api/v1/health)           │
+│  - Sticky sessions (optional)               │
+└─────────────────┬───────────────────────────┘
+                  │
+        ┌─────────┴─────────┬─────────────┐
+        ↓                   ↓             ↓
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│ AutoQA Pod 1  │  │ AutoQA Pod 2  │  │ AutoQA Pod N  │
+│ uvicorn       │  │ uvicorn       │  │ uvicorn       │
+│ --workers 4   │  │ --workers 4   │  │ --workers 4   │
+└───────┬───────┘  └───────┬───────┘  └───────┬───────┘
+        │                  │                  │
+        └──────────────────┴──────────────────┘
+                           │
+                           ↓
+        ┌──────────────────────────────────────┐
+        │  Shared Checkpointer (PostgreSQL)    │
+        │  - Thread state persistence          │
+        │  - Cross-pod session continuity      │
+        └──────────────────────────────────────┘
+                           │
+                           ↓
+        ┌──────────────────────────────────────┐
+        │  OpenAI-Compatible LLM API           │
+        └──────────────────────────────────────┘
+```
+
+**Characteristics:**
+- Multiple pods/containers, each running 2-4 uvicorn workers
+- Shared PostgreSQL checkpointer for thread state
+- Horizontal scaling via pod replication
+- Health-check-driven auto-recovery
+
+**When to use:** Production environments with >10 concurrent users, regulatory audit requirements for session persistence, high-availability SLAs.
+
+### Container Image
+
+#### Dockerfile
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim AS builder
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies into a virtual environment
+RUN uv sync --frozen --no-dev
+
+# Runtime stage
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy application code
+COPY autoqa/ ./autoqa/
+COPY .env.production .env
+
+# Create non-root user
+RUN useradd -m -u 1000 autoqa && \
+    chown -R autoqa:autoqa /app
+
+USER autoqa
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD python -c "import httpx; httpx.get('http://localhost:8000/api/v1/health', timeout=5.0)"
+
+# Run uvicorn
+CMD ["/app/.venv/bin/uvicorn", "autoqa.api.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "4", \
+     "--log-config", "autoqa/core/logging_config.json"]
+```
+
+#### Build and Run
+
+```bash
+# Build
+docker build -t autoqa:latest .
+
+# Run (single container)
+docker run -d \
+  --name autoqa \
+  -p 8000:8000 \
+  --env-file .env.production \
+  --restart unless-stopped \
+  autoqa:latest
+
+# View logs
+docker logs -f autoqa
+
+# Health check
+curl http://localhost:8000/api/v1/health
+```
+
+### Kubernetes Deployment
+
+#### Deployment Manifest
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoqa
+  namespace: qa-tools
+  labels:
+    app: autoqa
+    version: v0.2.0
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: autoqa
+  template:
+    metadata:
+      labels:
+        app: autoqa
+        version: v0.2.0
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: autoqa
+        image: your-registry.io/autoqa:v0.2.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: autoqa-secrets
+              key: openai-api-key
+        - name: OPENAI_API_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: autoqa-config
+              key: api-base-url
+        - name: OPENAI_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: autoqa-config
+              key: model
+        - name: MAX_REQUESTS_PER_MINUTE
+          value: "490"
+        - name: MAX_TOKENS_PER_MINUTE
+          value: "200000"
+        - name: MAX_OUTPUT_TOKENS
+          value: "16000"
+        - name: ALLOWED_ORIGINS
+          value: "https://qa.example.com,https://app.example.com"
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 2
+        volumeMounts:
+        - name: logs
+          mountPath: /app/logs
+      volumes:
+      - name: logs
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autoqa
+  namespace: qa-tools
+spec:
+  type: ClusterIP
+  selector:
+    app: autoqa
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autoqa-config
+  namespace: qa-tools
+data:
+  api-base-url: "https://api.openai.com/v1"
+  model: "gpt-4o"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: autoqa-secrets
+  namespace: qa-tools
+type: Opaque
+stringData:
+  openai-api-key: "sk-..."
+```
+
+#### Ingress (TLS Termination)
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: autoqa-ingress
+  namespace: qa-tools
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - autoqa.example.com
+    secretName: autoqa-tls
+  rules:
+  - host: autoqa.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: autoqa
+            port:
+              number: 80
+```
+
+### Security Hardening
+
+#### 1. API Key Management
+
+**DO NOT** commit API keys to version control. Use one of:
+
+- **Kubernetes Secrets** (shown above)
+- **AWS Secrets Manager** / **Azure Key Vault** / **GCP Secret Manager**
+- **HashiCorp Vault**
+
+**Example: AWS Secrets Manager integration**
+
+```python
+# autoqa/core/config.py (add to Settings class)
+import boto3
+from botocore.exceptions import ClientError
+
+def _load_secret_from_aws(secret_name: str, region: str = "us-east-1") -> str:
+    client = boto3.client("secretsmanager", region_name=region)
+    try:
+        response = client.get_secret_value(SecretId=secret_name)
+        return response["SecretString"]
+    except ClientError as e:
+        raise RuntimeError(f"Failed to retrieve secret {secret_name}: {e}")
+
+class Settings(BaseSettings):
+    openai_api_key: str = Field(
+        default_factory=lambda: (
+            os.getenv("OPENAI_API_KEY") or
+            _load_secret_from_aws("autoqa/openai-api-key")
+        )
+    )
+```
+
+#### 2. CORS Configuration
+
+**Development:**
+```env
+ALLOWED_ORIGINS=*
+```
+
+**Production:**
+```env
+ALLOWED_ORIGINS=https://qa.example.com,https://app.example.com
+```
+
+The FastAPI CORS middleware (in `autoqa/api/main.py`) parses this comma-separated list and rejects requests from unlisted origins.
+
+#### 3. Rate Limiting
+
+AutoQA includes client-side rate limiting (via `RateLimitOpenAIClient`) to stay under LLM provider quotas. Add **server-side** rate limiting at the reverse proxy layer:
+
+**nginx:**
+```nginx
+http {
+    limit_req_zone $binary_remote_addr zone=autoqa:10m rate=10r/s;
+
+    server {
+        location /api/ {
+            limit_req zone=autoqa burst=20 nodelay;
+            proxy_pass http://autoqa:8000;
+        }
+    }
+}
+```
+
+**Traefik:**
+```yaml
+http:
+  middlewares:
+    autoqa-ratelimit:
+      rateLimit:
+        average: 10
+        burst: 20
+  routers:
+    autoqa:
+      rule: "Host(`autoqa.example.com`)"
+      middlewares:
+        - autoqa-ratelimit
+      service: autoqa
+```
+
+#### 4. Input Validation
+
+All API endpoints use Pydantic models with strict validation. Additional hardening:
+
+- **Max payload size:** Configure uvicorn `--limit-max-requests` and nginx `client_max_body_size`
+- **Timeout enforcement:** Set `httpx.AsyncClient(timeout=...)` in client code (already configured)
+- **Schema validation:** Pydantic models reject malformed JSON and enforce field constraints
+
+#### 5. Audit Logging
+
+AutoQA logs all pipeline invocations to `logs/run-<timestamp>/autoqa.log`. For regulatory compliance:
+
+**Structured logging to stdout (for log aggregation):**
+
+```python
+# autoqa/core/logging_config.json
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "json": {
+      "class": "pythonjsonlogger.jsonlogger.JsonFormatter",
+      "format": "%(asctime)s %(name)s %(levelname)s %(message)s"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "formatter": "json",
+      "stream": "ext://sys.stdout"
+    }
+  },
+  "root": {
+    "level": "INFO",
+    "handlers": ["console"]
+  }
+}
+```
+
+**Ship logs to a SIEM:**
+- **ELK Stack** (Elasticsearch + Logstash + Kibana)
+- **Splunk**
+- **Datadog** / **New Relic**
+- **AWS CloudWatch Logs**
+
+**Key fields to index:**
+- `thread_id` (correlates requests within a review session)
+- `req_id` / `hazard_id` (artifact under review)
+- `overall_verdict` (Yes/No outcome)
+- `user_id` (if authentication is added)
+- `timestamp`, `duration_ms`, `model`, `token_count`
+
+### Observability
+
+#### Health Checks
+
+The `/api/v1/health` endpoint returns:
+
+```json
+{
+  "status": "healthy",
+  "version": "0.2.0",
+  "services": {
+    "rtm_service": "available",
+    "hazard_service": "available"
+  }
+}
+```
+
+**Unhealthy response (503):**
+```json
+{
+  "status": "unhealthy",
+  "version": "0.2.0",
+  "services": {
+    "rtm_service": "unavailable",
+    "hazard_service": "unavailable"
+  },
+  "error": "Failed to initialize RTM reviewer: ..."
+}
+```
+
+Configure load balancer health checks to poll this endpoint every 30s and remove unhealthy pods from rotation.
+
+#### Metrics (Prometheus)
+
+Add `prometheus-fastapi-instrumentator` for automatic metrics export:
+
+```bash
+uv add prometheus-fastapi-instrumentator
+```
+
+```python
+# autoqa/api/main.py
+from prometheus_fastapi_instrumentator import Instrumentator
+
+app = FastAPI(...)
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+```
+
+**Key metrics:**
+- `http_requests_total{method, endpoint, status}` — request count by endpoint
+- `http_request_duration_seconds{method, endpoint}` — latency histogram
+- `autoqa_pipeline_duration_seconds{pipeline}` — custom metric for RTM/hazard/TC pipeline wall-clock time
+- `autoqa_llm_tokens_total{model, operation}` — token consumption tracking
+
+**Grafana dashboard queries:**
+```promql
+# P95 latency for /api/v1/review
+histogram_quantile(0.95, 
+  rate(http_request_duration_seconds_bucket{endpoint="/api/v1/review"}[5m])
+)
+
+# Request rate by endpoint
+sum(rate(http_requests_total[5m])) by (endpoint)
+
+# Error rate (5xx responses)
+sum(rate(http_requests_total{status=~"5.."}[5m])) / 
+sum(rate(http_requests_total[5m]))
+```
+
+#### Distributed Tracing (OpenTelemetry)
+
+For multi-service environments, add OpenTelemetry instrumentation:
+
+```bash
+uv add opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi
+```
+
+```python
+# autoqa/api/main.py
+from opentelemetry import trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+trace.set_tracer_provider(TracerProvider())
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint="http://jaeger:4317"))
+)
+
+app = FastAPI(...)
+FastAPIInstrumentor.instrument_app(app)
+```
+
+Traces will include:
+- HTTP request spans (endpoint, method, status, duration)
+- LLM call spans (model, prompt tokens, completion tokens, latency)
+- Database spans (if using PostgreSQL checkpointer)
+
+### Environment-Specific Configuration
+
+#### Development
+
+```env
+ENVIRONMENT=development
+ALLOWED_ORIGINS=*
+OPENAI_MODEL=gpt-4o-mini  # Cheaper model for testing
+MAX_REQUESTS_PER_MINUTE=50
+MAX_TOKENS_PER_MINUTE=50000
+```
+
+- Interactive API docs enabled at `/docs` and `/redoc`
+- Permissive CORS
+- Lower rate limits to avoid quota exhaustion
+
+#### Staging
+
+```env
+ENVIRONMENT=production
+ALLOWED_ORIGINS=https://staging.example.com
+OPENAI_MODEL=gpt-4o
+MAX_REQUESTS_PER_MINUTE=490
+MAX_TOKENS_PER_MINUTE=200000
+```
+
+- API docs disabled
+- Restricted CORS
+- Production-equivalent rate limits
+- Separate OpenAI project/key for cost tracking
+
+#### Production
+
+```env
+ENVIRONMENT=production
+ALLOWED_ORIGINS=https://qa.example.com,https://app.example.com
+OPENAI_MODEL=gpt-4o
+MAX_REQUESTS_PER_MINUTE=490
+MAX_TOKENS_PER_MINUTE=200000
+MAX_OUTPUT_TOKENS=16000
+
+# Optional: Azure OpenAI
+OPENAI_API_BASE_URL=https://your-resource.openai.azure.com/
+OPENAI_API_VERSION=2024-02-15-preview
+```
+
+- API docs disabled
+- Strict CORS
+- Full rate limits
+- Consider Azure OpenAI for enterprise SLAs and data residency
+
+### Scaling Considerations
+
+#### Vertical Scaling (Single Pod)
+
+**Bottleneck:** LLM API latency (typically 2-10s per call)
+
+**Optimization:**
+- Increase uvicorn workers: `--workers 4` (1 per CPU core)
+- Each worker handles requests concurrently via asyncio
+- Effective concurrency = `workers × asyncio tasks per worker`
+
+**Resource sizing:**
+- **CPU:** 1-2 cores per worker (mostly I/O-bound, not CPU-intensive)
+- **Memory:** 1-2 GB per worker (LangGraph state + prompt templates)
+- **Recommended:** 4 workers × 2 GB = 8 GB pod
+
+#### Horizontal Scaling (Multiple Pods)
+
+**When to scale out:**
+- Request queue depth > 10 (check load balancer metrics)
+- P95 latency > 30s (indicates worker saturation)
+- CPU utilization > 70% sustained
+
+**Kubernetes HPA (Horizontal Pod Autoscaler):**
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: autoqa-hpa
+  namespace: qa-tools
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: autoqa
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+```
+
+#### Rate Limit Tuning
+
+**OpenAI rate limits (as of 2024):**
+
+| Tier | RPM | TPM | Max Tokens/Request |
+|------|-----|-----|--------------------|
+| Free | 3 | 40K | 4K |
+| Tier 1 | 500 | 200K | 16K |
+| Tier 2 | 5000 | 2M | 16K |
+| Tier 3 | 10000 | 10M | 16K |
+
+**AutoQA defaults (Tier 1):**
+```env
+MAX_REQUESTS_PER_MINUTE=490  # 2% buffer under 500 RPM
+MAX_TOKENS_PER_MINUTE=200000
+```
+
+**Multi-pod deployments:**
+
+If running 3 pods, each pod should configure:
+```env
+MAX_REQUESTS_PER_MINUTE=163  # 490 / 3
+MAX_TOKENS_PER_MINUTE=66666  # 200000 / 3
+```
+
+Alternatively, use a **shared rate limiter** (Redis-backed) to coordinate across pods:
+
+```python
+# autoqa/components/clients.py (future enhancement)
+import redis.asyncio as redis
+from aiolimiter import AsyncLimiter
+
+class SharedRateLimitOpenAIClient:
+    def __init__(self, redis_url: str, ...):
+        self.redis = redis.from_url(redis_url)
+        self.limiter = AsyncLimiter(
+            max_rate=490,
+            time_period=60,
+            storage=RedisStorage(self.redis)
+        )
+```
+
+### Backup and Disaster Recovery
+
+#### State Persistence
+
+**Current:** In-memory checkpointer (thread state lost on restart)
+
+**Production:** PostgreSQL checkpointer (planned)
+
+```python
+# autoqa/api/main.py (future)
+from langgraph.checkpoint.postgres import PostgresSaver
+
+checkpointer = PostgresSaver(
+    connection_string=settings.postgres_url,
+    serde=JsonPlusSerializer(),
+)
+
+runnable = RTMReviewerRunnable(
+    client=client,
+    model=settings.model,
+    checkpointer=checkpointer,
+)
+```
+
+**Backup strategy:**
+- **PostgreSQL:** Daily automated backups via `pg_dump` or managed service snapshots
+- **Retention:** 30 days for audit compliance
+- **Restore testing:** Quarterly DR drills
+
+#### Log Archival
+
+**Regulatory requirement:** Retain all review session logs for 7+ years (FDA 21 CFR Part 11)
+
+**Implementation:**
+- Ship logs to S3 / Azure Blob / GCS with lifecycle policies
+- Compress and encrypt at rest
+- Tag with `project_id`, `device_id`, `submission_id` for retrieval
+
+**Example: S3 lifecycle policy**
+```json
+{
+  "Rules": [
+    {
+      "Id": "archive-autoqa-logs",
+      "Status": "Enabled",
+      "Transitions": [
+        {"Days": 90, "StorageClass": "STANDARD_IA"},
+        {"Days": 365, "StorageClass": "GLACIER"}
+      ],
+      "Expiration": {"Days": 2555}
+    }
+  ]
+}
+```
+
+### Cost Optimization
+
+#### LLM Token Usage
+
+**Typical costs (GPT-4o as of 2024):**
+- Input: $2.50 / 1M tokens
+- Output: $10.00 / 1M tokens
+
+**Per-review estimates:**
+
+| Pipeline | Avg Input Tokens | Avg Output Tokens | Cost per Review |
+|----------|------------------|-------------------|------------------|
+| RTM (1 req, 5 TCs) | 8,000 | 3,000 | $0.05 |
+| Hazard (1 hazard, 3 reqs) | 15,000 | 5,000 | $0.09 |
+| Test Case (1 TC, 2 reqs) | 5,000 | 2,000 | $0.03 |
+
+**Monthly cost projection (1000 reviews/month):**
+- RTM: $50
+- Hazard: $90
+- Total: ~$140/month
+
+**Cost reduction strategies:**
+
+1. **Use cheaper models for decomposition/summarization:**
+   ```python
+   # Use gpt-4o-mini for non-critical nodes
+   decomposer_model = "gpt-4o-mini"  # $0.15/$0.60 per 1M tokens
+   synthesizer_model = "gpt-4o"      # Keep expensive model for final verdict
+   ```
+
+2. **Prompt compression:**
+   - Remove redundant context from prompts
+   - Use shorter system messages
+   - Compress test case descriptions (extract only setup/steps/expected)
+
+3. **Caching (future):**
+   - Cache decomposed requirements (reuse across multiple test suite updates)
+   - Cache test case summaries
+
+4. **Batch processing:**
+   - Group multiple requirements into a single LLM call (trade latency for cost)
+
+### Compliance and Validation
+
+#### FDA 21 CFR Part 11 / EU MDR Considerations
+
+AutoQA is a **software tool used in the design and development** of medical device software. It is **not** a medical device itself, but its outputs may be included in regulatory submissions (DHF, 510(k), PMA).
+
+**Key requirements:**
+
+1. **Audit Trail:**
+   - All review sessions logged with `thread_id`, `req_id`, `timestamp`, `user_id`, `verdict`
+   - Logs immutable and retained for device lifetime + 2 years (FDA) or 10 years (EU MDR)
+
+2. **Validation:**
+   - AutoQA must be validated per IEC 62304 Annex B (SOUP) or as a custom tool
+   - Validation package includes:
+     - Requirements specification (this README + API docs)
+     - Test protocol (pytest suite in `tests/`)
+     - Test results (CI/CD pipeline outputs)
+     - Traceability matrix (requirements → test cases)
+
+3. **Version Control:**
+   - Pin AutoQA version in production (`autoqa:v0.2.0`)
+   - Document version in DHF submissions
+   - Re-validate on major version upgrades
+
+4. **Access Control:**
+   - Add authentication (OAuth2 / SAML) to API endpoints
+   - Role-based access: QA Engineer (read/write), Auditor (read-only)
+
+**Example: OAuth2 integration (future)**
+
+```python
+# autoqa/api/auth.py
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    # Validate JWT token, extract user_id
+    user = await verify_token(token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    return user
+
+# Apply to endpoints
+@app.post("/api/v1/review")
+async def review_endpoint(
+    request: ReviewRequest,
+    user: User = Depends(get_current_user),
+):
+    # Log user_id with request
+    logger.info(f"Review initiated by {user.id} for {request.requirement.req_id}")
+    ...
+```
+
+### Troubleshooting
+
+#### Common Issues
+
+**1. Health check fails with "rtm_service: unavailable"**
+
+**Cause:** LangGraph compilation failed during startup
+
+**Solution:**
+- Check logs for `Failed to compile RTM graph: ...`
+- Verify `OPENAI_API_KEY` is set and valid
+- Ensure `OPENAI_MODEL` is a supported model (e.g., `gpt-4o`, not `gpt-3.5-turbo`)
+
+**2. Requests timeout after 120s**
+
+**Cause:** Hazard pipeline with many requirements exceeds default timeout
+
+**Solution:**
+- Increase client timeout: `httpx.AsyncClient(timeout=300)`
+- Increase uvicorn timeout: `--timeout-keep-alive 300`
+- Optimize: Reduce number of traced requirements per hazard
+
+**3. Rate limit errors (429 from OpenAI)**
+
+**Cause:** `MAX_REQUESTS_PER_MINUTE` / `MAX_TOKENS_PER_MINUTE` set too high
+
+**Solution:**
+- Check your OpenAI account tier at https://platform.openai.com/account/limits
+- Reduce limits in `.env` to match your tier
+- For multi-pod deployments, divide limits by pod count
+
+**4. Out-of-memory errors in Kubernetes**
+
+**Cause:** Too many uvicorn workers for allocated memory
+
+**Solution:**
+- Reduce `--workers` (e.g., from 4 to 2)
+- Increase pod memory limit: `resources.limits.memory: 4Gi`
+- Check for memory leaks: `kubectl top pod autoqa-xxx`
+
+**5. Inconsistent verdicts across runs**
+
+**Cause:** LLM non-determinism (temperature > 0)
+
+**Solution:**
+- Set `temperature=0` in LLM calls (already configured in prompts)
+- Pin model version (e.g., `gpt-4o-2024-05-13` instead of `gpt-4o`)
+- For critical reviews, run pipeline 3× and take majority vote
 
 ---
 
