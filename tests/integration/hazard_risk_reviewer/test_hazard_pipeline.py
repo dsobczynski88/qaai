@@ -48,7 +48,7 @@ def _serialize_hazard_state(state: dict) -> dict:
 
 
 @pytest.mark.integration
-async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard_full_traceability):
+async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard_full_traceability, jsonl_recorders_hz):
     """Run the full hazard pipeline end-to-end against a real LLM with full traceability.
     
     This test uses the hazard_full_traceability.json fixture which includes:
@@ -66,10 +66,21 @@ async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard
     - H5 evaluator receives summarized_user_needs in its payload
     - Each requirement review has 6 mandatory findings (M1-M5 + R6)
     - Overall hazard assessment has 7 findings (H1-H7)
+    
+    Records input/output to inputs.jsonl and outputs.jsonl for hazard viewer generation.
     """
+    record_input, record_output = jsonl_recorders_hz
+    
     graph = HazardReviewerRunnable(client=real_client, model=real_model)
     initial_state: HazardReviewState = {"hazard": sample_hazard_full_traceability}
+    
+    # Record input
+    record_input({"hazard": sample_hazard_full_traceability.model_dump()})
+    
     result: HazardReviewState = await graph.graph.ainvoke(initial_state)
+    
+    # Record output
+    record_output(_serialize_hazard_state(result))
 
     # Per-requirement RTM evidence — one review per traced requirement.
     reviews = result.get("requirement_reviews", [])
@@ -154,8 +165,11 @@ async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard
     assert assessment.overall_verdict == expected_overall, \
         f"Overall verdict mismatch. Expected {expected_overall}, got {assessment.overall_verdict}"
 
+    # Save detailed state for manual inspection
     output_path = Path(settings.log_file_path).parent / "hazard_pipeline_state.json"
     output_path.write_text(json.dumps(_serialize_hazard_state(result), indent=2))
+    
+    # Print summary
     print(f"\n[hazard_full_state] saved → {output_path}")
     print(f"[hazard_full_state] hazard_id = {assessment.hazard_id}")
     print(f"[hazard_full_state] overall_verdict = {assessment.overall_verdict}")
@@ -167,6 +181,10 @@ async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard
         print(f"  {r.requirement.req_id}: {len(r.synthesized_assessment.mandatory_findings)} findings")
         for f in r.synthesized_assessment.mandatory_findings:
             print(f"    {f.code}: {f.verdict}")
+    
+    # Note: inputs.jsonl and outputs.jsonl are recorded for hazard viewer generation
+    # The hazard viewer (viewer_hz.html) will be auto-generated at session teardown
+    # by the jsonl_recorders_hz fixture
 
 
 @pytest.mark.integration

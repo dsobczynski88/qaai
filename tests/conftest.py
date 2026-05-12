@@ -183,6 +183,41 @@ def jsonl_recorders_tc():
             print(f"\n[viewer_tc] wrote {out}")
 
 
+@pytest.fixture(scope="session")
+def jsonl_recorders_hz():
+    """Hazard-flavored counterpart to jsonl_recorders: same inputs.jsonl/outputs.jsonl
+    contract, but renders the hazard viewer (viewer_hz.html) at session teardown
+    via write_viewer_hz instead of the RTM write_viewer.
+    
+    Use this fixture for hazard_risk_reviewer integration tests to generate
+    a viewer that displays HazardReviewState records with H1-H7 findings.
+    """
+    run_dir = Path(settings.log_file_path).parent
+    inputs_path = run_dir / "inputs.jsonl"
+    outputs_path = run_dir / "outputs.jsonl"
+    inputs_path.write_text("", encoding="utf-8")
+    outputs_path.write_text("", encoding="utf-8")
+
+    def record_input(data: dict) -> None:
+        with inputs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(data) + "\n")
+
+    def record_output(data: dict) -> None:
+        with outputs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(data) + "\n")
+
+    yield record_input, record_output
+
+    try:
+        from autoqa.viewer.generator import write_viewer_hz
+        out = write_viewer_hz(outputs_path)
+    except Exception as exc:
+        print(f"\n[viewer_hz] skipped: {exc}")
+    else:
+        if out is not None:
+            print(f"\n[viewer_hz] wrote {out}")
+
+
 @pytest.fixture
 def real_client():
     """Provide a real OpenAI client for integration tests.
