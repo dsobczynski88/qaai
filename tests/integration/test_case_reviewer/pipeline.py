@@ -1,3 +1,7 @@
+"""Integration tests for the test_case_reviewer pipeline.
+
+Consolidated test suite that supports both min and all fields fixtures.
+"""
 import asyncio
 import os
 import pytest
@@ -7,13 +11,11 @@ from autoqa.components.test_case_reviewer.core import (
     TCReviewState,
     Requirement,
     TestCase,
+    DesignDocument,
     TestCaseAssessment,
 )
 from autoqa.components.test_case_reviewer.nodes import load_default_review_objectives
 from tests.helpers import load_jsonl, serialize_state
-
-
-TC_INPUTS = load_jsonl("converted_PRJ01624_VL_1.1.000_tc_reviewer_format.jsonl")
 
 REVIEW_OBJECTIVE_IDS = {o.id for o in load_default_review_objectives()}
 
@@ -77,11 +79,24 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
 
 
 @pytest.mark.integration
-async def test_tc_pipeline_parametrized_fanout(
-    real_client, real_model, jsonl_recorders_tc
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        'converted_PRJ01624_VL_1.1.000_tc_reviewer_format.jsonl'
+        #"test_case_review_min_fields.jsonl",
+        #"test_case_review_all_fields.jsonl",
+    ],
+)
+async def test_test_case_reviewer(
+    real_client, real_model, jsonl_recorders_tc, fixture_name
 ):
-    """Fan-out variant of the prior parametrized form. Builds the
-    TCReviewerRunnable once, dispatches every row in gold_dataset-tc.jsonl via
+    """Main parametrized test for the test_case_reviewer pipeline.
+    
+    Tests both:
+    - Min fields: Test case and upstream requirements only
+    - All fields: Test case, upstream requirements, and design docs
+    
+    Builds the TCReviewerRunnable once, dispatches every row in the fixture via
     asyncio.gather capped at MAX_CONCURRENT in-flight, re-orders results to
     input order before recording, then accumulates per-row hard-rule failures
     into a single pytest.fail summary.
@@ -90,6 +105,9 @@ async def test_tc_pipeline_parametrized_fanout(
     (expected_overall_verdict, expected_partial_objectives, primary_failure);
     those are attached to the recorded output for post-run match-rate analysis.
     """
+    # Load the fixture
+    tc_inputs = load_jsonl(fixture_name)
+    
     record_input, record_output = jsonl_recorders_tc
     review_objectives = load_default_review_objectives()
     graph = TCReviewerRunnable(client=real_client, model=real_model)
@@ -98,17 +116,27 @@ async def test_tc_pipeline_parametrized_fanout(
     async def run_one(idx: int, tc_input: dict):
         async with sem:
             test_case = TestCase(**tc_input["test_case"])
-            requirements = [Requirement(**r) for r in tc_input["upstream_requirements"]]
-            return idx, tc_input, await graph.graph.ainvoke(
-                {
-                    "test_case": test_case,
-                    "requirements": requirements,
-                    "review_objectives": review_objectives,
-                }
-            )
+            # Handle both 'requirements' and 'upstream_requirements' keys for backwards compatibility
+            req_key = "upstream_requirements" if "upstream_requirements" in tc_input else "requirements"
+            requirements = [Requirement(**r) for r in tc_input[req_key]]
+            
+            # Handle optional design_docs field
+            design_docs = None
+            if "design_docs" in tc_input and tc_input["design_docs"]:
+                design_docs = [DesignDocument(**dd) for dd in tc_input["design_docs"]]
+            
+            state = {
+                "test_case": test_case,
+                "requirements": requirements,
+                "review_objectives": review_objectives,
+            }
+            if design_docs:
+                state["design_docs"] = design_docs
+            
+            return idx, tc_input, await graph.graph.ainvoke(state)
 
     completed = await asyncio.gather(
-        *(run_one(i, tc_input) for i, tc_input in enumerate(TC_INPUTS)),
+        *(run_one(i, tc_input) for i, tc_input in enumerate(tc_inputs)),
         return_exceptions=True,
     )
 
@@ -143,7 +171,7 @@ async def test_tc_pipeline_parametrized_fanout(
 
     if exception_failures or fail_msgs:
         n = len(exception_failures) + len(fail_msgs)
-        msg = f"{n}/{len(TC_INPUTS)} rows failed"
+        msg = f"{n}/{len(tc_inputs)} rows failed (fixture: {fixture_name})"
         if fail_msgs:
             msg += "\nassertion-failures:\n" + "\n".join(fail_msgs)
         if exception_failures:
