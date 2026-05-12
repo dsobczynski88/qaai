@@ -1,0 +1,13 @@
+name: test_suite_reviewer_v1
+component: test_suite_reviewer
+description: |
+  Initial production stack for RTM review (test suite reviewer).
+  Uses decomposer v5, summarizer v4, coverage v7, synthesizer v7.
+prompts:
+  decomposer: v5.0.0
+  summarizer: v4.0.0
+  coverage: v7.0.0
+  synthesizer: v7.0.0
+status: production
+authored: '2025-05-05'
+parent_set: null

@@ -1,0 +1,13 @@
+name: test_case_reviewer_v1
+component: test_case_reviewer
+description: |
+  Production stack for single test case review.
+  Evaluates individual test cases against requirements using a 4-node pipeline.
+prompts:
+  single_test_aggregator: v4.0.0
+  single_test_coverage_eval: v3.0.0
+  single_test_logical_steps: v3.0.0
+  single_test_prereqs: v3.0.0
+status: production
+authored: '2025-05-05'
+parent_set: null

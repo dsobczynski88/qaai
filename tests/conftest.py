@@ -210,8 +210,32 @@ def real_model():
 
 @pytest.fixture
 def sample_hazard():
-    """Load the canonical sample HazardRecord from tests/fixtures/external/sample_hazard.json."""
+    """Load the canonical sample HazardRecord from tests/fixtures/external/sample_hazard.json.
+    
+    This fixture provides a minimal hazard record without design_docs or user_needs,
+    suitable for testing the core H1-H7 evaluation flow.
+    """
     fixture_path = Path(__file__).parent / "fixtures" / "external" / "sample_hazard.json"
+    with fixture_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    return HazardRecord.model_validate(data)
+
+
+@pytest.fixture
+def sample_hazard_full_traceability():
+    """Load the full traceability HazardRecord from tests/fixtures/external/hazard_full_traceability.json.
+    
+    This fixture provides a complete hazard record with:
+    - requirements (REQ-PUMP-101, REQ-PUMP-102)
+    - test_cases (TC-PUMP-201, TC-PUMP-202, TC-PUMP-203)
+    - design_docs (5 design documents)
+    - user_needs (UN-PUMP-003, UN-PUMP-007)
+    - system_requirements (SYS-PUMP-015, SYS-PUMP-016, SYS-PUMP-017)
+    
+    Use this fixture when testing the full pipeline with design_docs and user_needs,
+    which triggers R6 evaluation in the RTM sub-pipeline and H4/H5 summarization.
+    """
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_full_traceability.json"
     with fixture_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     return HazardRecord.model_validate(data)

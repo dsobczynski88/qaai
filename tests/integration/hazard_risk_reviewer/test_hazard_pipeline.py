@@ -48,31 +48,85 @@ def _serialize_hazard_state(state: dict) -> dict:
 
 
 @pytest.mark.integration
-async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard):
-    """Run the full hazard pipeline end-to-end against a real LLM."""
+async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard_full_traceability):
+    """Run the full hazard pipeline end-to-end against a real LLM with full traceability.
+    
+    This test uses the hazard_full_traceability.json fixture which includes:
+    - requirements (REQ-PUMP-101, REQ-PUMP-102)
+    - test_cases (TC-PUMP-201, TC-PUMP-202, TC-PUMP-203)
+    - design_docs (5 design documents)
+    - user_needs (UN-PUMP-003, UN-PUMP-007)
+    - system_requirements (SYS-PUMP-015, SYS-PUMP-016, SYS-PUMP-017)
+    
+    Expected behavior:
+    - RTM sub-pipeline receives design_docs and produces R6 verdicts
+    - User needs are summarized by HazardNeedsSummarizerNode
+    - Design docs are summarized by HazardDesignSummarizerNode
+    - H4 evaluator receives summarized_designs in its payload
+    - H5 evaluator receives summarized_user_needs in its payload
+    - Each requirement review has 6 mandatory findings (M1-M5 + R6)
+    - Overall hazard assessment has 7 findings (H1-H7)
+    """
     graph = HazardReviewerRunnable(client=real_client, model=real_model)
-    initial_state: HazardReviewState = {"hazard": sample_hazard}
+    initial_state: HazardReviewState = {"hazard": sample_hazard_full_traceability}
     result: HazardReviewState = await graph.graph.ainvoke(initial_state)
 
     # Per-requirement RTM evidence — one review per traced requirement.
     reviews = result.get("requirement_reviews", [])
-    assert len(reviews) == len(sample_hazard.requirements)
+    assert len(reviews) == len(sample_hazard_full_traceability.requirements), \
+        f"Expected {len(sample_hazard_full_traceability.requirements)} reviews, got {len(reviews)}"
+    
     for r in reviews:
-        assert isinstance(r, RequirementReview)
-        # The wrapped RTM subgraph should have produced an M1-M5 assessment
+        assert isinstance(r, RequirementReview), f"Expected RequirementReview, got {type(r)}"
+        # The wrapped RTM subgraph should have produced an M1-M5 + R6 assessment
         # for each requirement (it may be None on parser failure, but should
         # populate for a well-formed sample).
-        assert isinstance(r.synthesized_assessment, SynthesizedAssessment)
-        assert len(r.synthesized_assessment.mandatory_findings) == 5
+        assert isinstance(r.synthesized_assessment, SynthesizedAssessment), \
+            f"Expected SynthesizedAssessment for {r.requirement.req_id}, got {type(r.synthesized_assessment)}"
+        
+        # With design_docs present, expect 6 mandatory findings (M1-M5 + R6)
+        num_findings = len(r.synthesized_assessment.mandatory_findings)
+        assert num_findings == 6, \
+            f"Expected 6 mandatory findings (M1-M5 + R6) for {r.requirement.req_id}, got {num_findings}"
+        
+        # Verify R6 is present
+        r6_finding = next((f for f in r.synthesized_assessment.mandatory_findings if f.code == "R6"), None)
+        assert r6_finding is not None, \
+            f"R6 finding should be present for {r.requirement.req_id} when design_docs are provided"
+        assert r6_finding.verdict in ("Yes", "No"), \
+            f"R6 verdict should be Yes or No (not N-A) for {r.requirement.req_id}, got {r6_finding.verdict}"
+
+    # Verify summarized_designs were produced (if design_docs present)
+    summarized_designs = result.get("summarized_designs")
+    if sample_hazard_full_traceability.design_docs:
+        assert summarized_designs is not None, "Expected summarized_designs when design_docs are present"
+        assert len(summarized_designs) > 0, "Expected at least one summarized design"
+        print(f"\n[full_state] Produced {len(summarized_designs)} summarized designs from {len(sample_hazard_full_traceability.design_docs)} design docs")
+    
+    # Verify summarized_user_needs were produced (if user_needs present)
+    summarized_user_needs = result.get("summarized_user_needs")
+    if sample_hazard_full_traceability.user_needs:
+        assert summarized_user_needs is not None, "Expected summarized_user_needs when user_needs are present"
+        assert len(summarized_user_needs) > 0, "Expected at least one summarized user need"
+        print(f"[full_state] Produced {len(summarized_user_needs)} summarized user needs from {len(sample_hazard_full_traceability.user_needs)} user needs")
 
     # Hazard-level H1-H7 verdict (binary Yes/No; H5 may also be N-A).
     assessment = result.get("hazard_assessment")
-    assert isinstance(assessment, HazardAssessment)
-    assert assessment.hazard_id == sample_hazard.hazard_id
-    assert assessment.overall_verdict in ("Yes", "No")
-    assert len(assessment.mandatory_findings) == 7
-    assert [f.code for f in assessment.mandatory_findings] == ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
-    assert [f.dimension for f in assessment.mandatory_findings] == [
+    assert isinstance(assessment, HazardAssessment), f"Expected HazardAssessment, got {type(assessment)}"
+    assert assessment.hazard_id == sample_hazard_full_traceability.hazard_id
+    assert assessment.overall_verdict in ("Yes", "No"), \
+        f"Expected overall_verdict to be Yes or No, got {assessment.overall_verdict}"
+    
+    num_hazard_findings = len(assessment.mandatory_findings)
+    assert num_hazard_findings == 7, \
+        f"Expected 7 hazard-level findings (H1-H7), got {num_hazard_findings}"
+    
+    actual_codes = [f.code for f in assessment.mandatory_findings]
+    expected_codes = ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
+    assert actual_codes == expected_codes, \
+        f"Expected codes {expected_codes}, got {actual_codes}"
+    
+    expected_dimensions = [
         "Hazard Record Completeness and Semantic Integrity",
         "Software Contribution and Cause Coverage",
         "Pre-Mitigation Risk and Exploitability Characterization",
@@ -81,23 +135,38 @@ async def test_hazard_pipeline_full_state(real_client, real_model, sample_hazard
         "Residual Risk Closure and Acceptability Decision",
         "HSHA Update and Newly Identified Hazard / Hazardous Situation Capture",
     ]
+    actual_dimensions = [f.dimension for f in assessment.mandatory_findings]
+    assert actual_dimensions == expected_dimensions, \
+        f"Dimension mismatch. Expected {expected_dimensions}, got {actual_dimensions}"
+    
     for f in assessment.mandatory_findings:
         if f.code == "H5":
-            assert f.verdict in ("Yes", "No", "N-A")
+            assert f.verdict in ("Yes", "No", "N-A"), \
+                f"H5 verdict should be Yes, No, or N-A, got {f.verdict}"
         else:
-            assert f.verdict in ("Yes", "No")
+            assert f.verdict in ("Yes", "No"), \
+                f"{f.code} verdict should be Yes or No, got {f.verdict}"
+    
     # overall_verdict invariant: Yes iff every dimension is Yes or N-A.
     expected_overall = "Yes" if all(
         f.verdict in ("Yes", "N-A") for f in assessment.mandatory_findings
     ) else "No"
-    assert assessment.overall_verdict == expected_overall
+    assert assessment.overall_verdict == expected_overall, \
+        f"Overall verdict mismatch. Expected {expected_overall}, got {assessment.overall_verdict}"
 
     output_path = Path(settings.log_file_path).parent / "hazard_pipeline_state.json"
     output_path.write_text(json.dumps(_serialize_hazard_state(result), indent=2))
     print(f"\n[hazard_full_state] saved → {output_path}")
-    print(f"[hazard_full_state] verdict = {assessment.overall_verdict}")
+    print(f"[hazard_full_state] hazard_id = {assessment.hazard_id}")
+    print(f"[hazard_full_state] overall_verdict = {assessment.overall_verdict}")
+    print(f"[hazard_full_state] Hazard-level findings (H1-H7):")
     for f in assessment.mandatory_findings:
         print(f"  {f.code} {f.dimension}: {f.verdict} — {f.rationale}")
+    print(f"[hazard_full_state] Requirement-level findings (M1-M5 + R6):")
+    for r in reviews:
+        print(f"  {r.requirement.req_id}: {len(r.synthesized_assessment.mandatory_findings)} findings")
+        for f in r.synthesized_assessment.mandatory_findings:
+            print(f"    {f.code}: {f.verdict}")
 
 
 @pytest.mark.integration

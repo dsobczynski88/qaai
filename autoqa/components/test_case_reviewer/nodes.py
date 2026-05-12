@@ -108,7 +108,7 @@ def make_tc_decomposer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "decomposer-v4.jinja2",
+    prompt_template: str = "decomposer/v5.0.0/template.jinja2",
     **template_vars,
 ) -> TCDecomposerNode:
     """Build a TCDecomposerNode that wraps the shared DecomposerNode."""
@@ -247,7 +247,7 @@ def make_coverage_single_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single-test-coverage-eval-v3.jinja2",
+    prompt_template: str = "single_test_coverage_eval/v3.0.0/template.jinja2",
     **template_vars,
 ) -> SingleSpecCoverageNode:
     return _make_axis_node(
@@ -259,7 +259,7 @@ def make_logical_single_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single-test-logical-steps-v3.jinja2",
+    prompt_template: str = "single_test_logical_steps/v3.0.0/template.jinja2",
     **template_vars,
 ) -> OverallLogicalNode:
     """Build the test-case-level logical-structure node (single LLM call, no Send)."""
@@ -277,7 +277,7 @@ def make_prereqs_single_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single-test-prereqs-v3.jinja2",
+    prompt_template: str = "single_test_prereqs/v3.0.0/template.jinja2",
     **template_vars,
 ) -> OverallPrereqsNode:
     """Build the test-case-level prereqs node (single LLM call, no Send)."""
@@ -357,7 +357,7 @@ def make_aggregator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single-test-aggregator-v4.jinja2",
+    prompt_template: str = "single_test_aggregator/v4.0.0/template.jinja2",
     **template_vars,
 ) -> AggregatorNode:
     system_prompt = render_prompt(prompt_template, **template_vars)

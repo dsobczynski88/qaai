@@ -36,6 +36,7 @@ from autoqa.components.shared.core import (
     DecomposedSpec,
     DecomposedRequirement,
     TestCase,
+    DesignDocument,
 )
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "DecomposedSpec",
     "DecomposedRequirement",
     "TestCase",
+    "DesignDocument",
     "Verdict",
     "ReviewObjective",
     "EvaluatedReviewObjective",
@@ -159,6 +161,7 @@ class TestCaseAssessment(BaseModel):
 class TCReviewState(TypedDict, total=False):
     test_case: TestCase
     requirements: List[Requirement]
+    design_docs: List[DesignDocument]
     review_objectives: List[ReviewObjective]
     decomposed_requirements: Optional[List[DecomposedRequirement]]
     # Coverage stays per-spec — Send fan-out emits one SpecAnalysis per spec.

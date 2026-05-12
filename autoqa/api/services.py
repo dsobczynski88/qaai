@@ -49,6 +49,7 @@ class RTMReviewService:
         graph_input = {
             "requirement": request.requirement,
             "test_cases": request.test_cases,
+            "design_docs": request.design_docs or [],
         }
         final_state = await self.graph.graph.ainvoke(graph_input, config)
         
@@ -65,6 +66,7 @@ class RTMReviewService:
             decomposed_requirement=final_state.get("decomposed_requirement"),
             test_suite=final_state.get("test_suite"),
             synthesized_assessment=final_state.get("synthesized_assessment"),
+            design_docs=request.design_docs or [],
         )
 
 
@@ -145,6 +147,7 @@ class TestCaseReviewService:
             "test_case": request.test_case,
             "requirements": request.requirements,
             "review_objectives": review_objectives,
+            "design_docs": request.design_docs or [],
         }
         final_state = await self.graph.graph.ainvoke(graph_input, config)
         
@@ -167,4 +170,5 @@ class TestCaseReviewService:
             logical_structure_analysis=final_state.get("logical_structure_analysis"),
             prereqs_analysis=final_state.get("prereqs_analysis"),
             aggregated_assessment=final_state.get("aggregated_assessment"),
+            design_docs=request.design_docs or [],
         )

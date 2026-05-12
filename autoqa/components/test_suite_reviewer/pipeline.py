@@ -14,6 +14,7 @@ from .nodes import (
     make_coverage_evaluator,
     make_decomposer_node,
     make_summarizer_node,
+    make_design_summarizer_node,
     make_generator_node,
     make_synthesizer_node,
     dispatch_coverage,
@@ -64,21 +65,21 @@ class RTMReviewerRunnable:
         Graph structure:
             START
               ↓
-            ┌─────────────────────────────────┐
-            │DECOMPOSER, SUMMARIZER (parallel)│
-            └─────────────────────────────────┘
-              ↓ (fan-in: waits for both)
-            ┌─────────────────────────────────┐
-            │COVERAGE_ROUTER (sync point)     │
-            └─────────────────────────────────┘
+            ┌─────────────────────────────────────────────────┐
+            │DECOMPOSER, SUMMARIZER, DESIGN_SUMMARIZER (||)   │
+            └─────────────────────────────────────────────────┘
+              ↓ (fan-in: waits for all three)
+            ┌─────────────────────────────────────────────────┐
+            │COVERAGE_ROUTER (sync point)                     │
+            └─────────────────────────────────────────────────┘
               ↓ dispatch_coverage → Send × N
-            ┌─────────────────────────────────┐
-            │SPEC_EVALUATOR × N  (parallel)   │
-            └─────────────────────────────────┘
+            ┌─────────────────────────────────────────────────┐
+            │SPEC_EVALUATOR × N  (parallel)                   │
+            └─────────────────────────────────────────────────┘
               ↓ (fan-in: operator.add on coverage_analysis)
-            ┌─────────────────────────────────┐
-            │SYNTHESIZER  MoA-like aggregation│
-            └─────────────────────────────────┘
+            ┌─────────────────────────────────────────────────┐
+            │SYNTHESIZER  MoA-like aggregation                │
+            └─────────────────────────────────────────────────┘
               ↓
             END
         """
@@ -92,6 +93,10 @@ class RTMReviewerRunnable:
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.summarizer,
         )
+        design_summarizer = make_design_summarizer_node(
+            self.client, self.model, self.model_kwargs,
+            prompt_template=self.prompt_config.design_summarizer,
+        )
         spec_evaluator = make_coverage_evaluator(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.coverage,
@@ -103,19 +108,22 @@ class RTMReviewerRunnable:
 
         sg.add_node("decomposer", decomposer)
         sg.add_node("summarizer", summarizer)
+        sg.add_node("design_summarizer", design_summarizer)
         # Join barrier: LangGraph's add_conditional_edges needs a single named source,
-        # so we land decomposer + summarizer here before dispatch_coverage fans out.
+        # so we land decomposer + summarizer + design_summarizer here before dispatch_coverage fans out.
         sg.add_node("coverage_router", lambda state: {})
         sg.add_node("spec_evaluator", spec_evaluator)
         sg.add_node("synthesizer", synthesizer)
 
-        # Decomposer and summarizer run in parallel from START
+        # All three run in parallel from START
         sg.add_edge(START, "decomposer")
         sg.add_edge(START, "summarizer")
+        sg.add_edge(START, "design_summarizer")
 
         # Fan-in to coverage_router, then fan-out via Send to N parallel spec evaluators
         sg.add_edge("decomposer", "coverage_router")
         sg.add_edge("summarizer", "coverage_router")
+        sg.add_edge("design_summarizer", "coverage_router")
         sg.add_conditional_edges("coverage_router", dispatch_coverage, ["spec_evaluator"])
 
         # Synthesizer aggregates coverage evaluations (MoA-like pattern)

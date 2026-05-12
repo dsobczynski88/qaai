@@ -24,12 +24,13 @@ assessment by the API layer.
 import operator
 from typing import Annotated, List, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 
 from autoqa.components.shared.core import (
     DecomposedRequirement,
     Requirement,
     TestCase,
+    DesignDocument as SharedDesignDocument,
 )
 from autoqa.components.test_suite_reviewer.core import (
     EvaluatedSpec,
@@ -39,10 +40,13 @@ from autoqa.components.test_suite_reviewer.core import (
 
 
 __all__ = [
-    "DesignDocument",
     "HazardRecord",
     "HazardPackage",
     "RequirementReview",
+    "HazardSummarizedDesignSpec",
+    "HazardSummarizedDesignSpecList",
+    "HazardSummarizedUserNeed",
+    "HazardSummarizedUserNeedList",
     "HazardCode",
     "HazardDimension",
     "HazardVerdict",
@@ -67,12 +71,8 @@ HazardDimension = Literal[
 HazardVerdict = Literal["Yes", "No"]
 HazardVerdictNA = Literal["Yes", "No", "N-A"]
 
-
-class DesignDocument(BaseModel):
-    """Design document linked to a hazard via traceability."""
-    doc_id: str = Field(..., description="Unique design document identifier")
-    name: str = Field(..., description="Design document title")
-    description: str = Field(..., description="Design document description")
+# Backward compatibility alias
+DesignDocument = SharedDesignDocument
 
 
 class HazardRecord(BaseModel):
@@ -114,11 +114,75 @@ class HazardRecord(BaseModel):
     )
     test_cases: List[TestCase] = Field(default_factory=list)
     design_docs: List[DesignDocument] = Field(default_factory=list)
+    user_needs: List[Requirement] = Field(
+        default_factory=list,
+        description="User needs that trace to this hazard (optional).",
+    )
+    system_requirements: List[Requirement] = Field(
+        default_factory=list,
+        description="System-level requirements that trace to this hazard (optional).",
+    )
 
 
 class HazardPackage(BaseModel):
     """A list of HazardRecord items — accepted form for batch review."""
     hazards: List[HazardRecord]
+
+
+class HazardSummarizedDesignSpec(BaseModel):
+    """Summarized design document for hazard mitigation evaluation."""
+    doc_id: str = Field(..., description="Design document identifier")
+    design_intent: str = Field(
+        ..., 
+        description="Core design objective or architectural decision"
+    )
+    hazard_controls: str = Field(
+        ..., 
+        description="How this design implements risk controls or safety mechanisms"
+    )
+    key_components: List[str] = Field(
+        ..., 
+        description="Major components, modules, or interfaces involved"
+    )
+    verification_hooks: List[str] = Field(
+        ..., 
+        description="Observable behaviors that enable hazard-path testing"
+    )
+    failure_modes: List[str] = Field(
+        default_factory=list,
+        description="Documented failure modes, error conditions, or safety fallbacks"
+    )
+
+
+class HazardSummarizedDesignSpecList(RootModel[List[HazardSummarizedDesignSpec]]):
+    """Wrapper for hazard design summarizer responses."""
+    pass
+
+
+class HazardSummarizedUserNeed(BaseModel):
+    """Summarized user need for hazard objective evaluation."""
+    need_id: str = Field(..., description="User need identifier")
+    user_goal: str = Field(
+        ..., 
+        description="What the user wants to accomplish"
+    )
+    safety_context: str = Field(
+        ..., 
+        description="Safety-relevant context or constraints"
+    )
+    traced_hazards: List[str] = Field(
+        default_factory=list,
+        description="Hazard IDs this user need traces to"
+    )
+    acceptance_criteria: List[str] = Field(
+        ..., 
+        description="Observable criteria that satisfy this user need"
+    )
+
+
+class HazardSummarizedUserNeedList(RootModel[List[HazardSummarizedUserNeed]]):
+    """Wrapper for hazard user needs summarizer responses."""
+    pass
 
 
 class RequirementReview(BaseModel):
@@ -220,5 +284,7 @@ class FinalAssessorProse(BaseModel):
 class HazardReviewState(TypedDict, total=False):
     hazard: HazardRecord
     requirement_reviews: Annotated[List[RequirementReview], operator.add]
+    summarized_designs: Optional[List[HazardSummarizedDesignSpec]]
+    summarized_user_needs: Optional[List[HazardSummarizedUserNeed]]
     hazard_findings: Annotated[List[HazardFinding], operator.add]
     hazard_assessment: Optional[HazardAssessment]

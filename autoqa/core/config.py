@@ -11,21 +11,61 @@ from autoqa.core.constants import (
 
 
 class PromptConfig(BaseModel):
-    """Jinja2 template filenames used by each LLM node across reviewer graphs."""
-    decomposer: str = "decomposer-v4.jinja2"
-    summarizer: str = "summarizer-v4.jinja2"  # v4 uses array-only output for better token efficiency
-    coverage: str = "coverage_evaluator-v5.jinja2"
-    synthesizer: str = "synthesizer-v6.jinja2"
+    """Jinja2 template paths used by each LLM node across reviewer graphs.
+    
+    Paths can be either:
+    - Legacy flat filenames (for backward compatibility): "decomposer-v4.jinja2"
+    - New versioned paths: "decomposer/v5.0.0/template.jinja2"
+    
+    Use PromptConfig.from_set("set_name") to load from a named prompt set manifest.
+    """
+    decomposer: str = "decomposer/v5.0.0/template.jinja2"
+    summarizer: str = "summarizer/v4.0.0/template.jinja2"
+    design_summarizer: str = "design_summarizer/v1.0.0/template.jinja2"
+    coverage: str = "coverage_evaluator/v7.0.0/template.jinja2"
+    synthesizer: str = "synthesizer/v8.0.0/template.jinja2"
     
     # Hazard reviewer prompts (H1-H7 + final assessor)
-    hazard_h1: str = "H1_hazard_record_completeness_and_semantic_integrity.jinja2"
-    hazard_h2: str = "H2_software_contribution_and_cause_coverage.jinja2"
-    hazard_h3: str = "H3_pre_mitigation_risk_and_exploitability_characterization.jinja2"
-    hazard_h4: str = "H4_risk_control_identification_allocation_and_coverage.jinja2"
-    hazard_h5: str = "H5_verification_depth_and_hazard_path_effectiveness.jinja2"
-    hazard_h6: str = "H6_residual_risk_closure_and_acceptability_decision.jinja2"
-    hazard_h7: str = "H7_hsha_update_and_newly_identified_hazard_capture.jinja2"
-    hazard_final: str = "hazard_final_assessor-v1.jinja2"
+    hazard_h1: str = "hazard_h1/v1.0.0/template.jinja2"
+    hazard_h2: str = "hazard_h2/v1.0.0/template.jinja2"
+    hazard_h3: str = "hazard_h3/v1.0.0/template.jinja2"
+    hazard_h4: str = "hazard_h4/v1.0.0/template.jinja2"
+    hazard_h5: str = "hazard_h5/v1.0.0/template.jinja2"
+    hazard_h6: str = "hazard_h6/v1.0.0/template.jinja2"
+    hazard_h7: str = "hazard_h7/v1.0.0/template.jinja2"
+    hazard_final: str = "hazard_final_assessor/v1.0.0/template.jinja2"
+    hazard_design_summarizer: str = "hazard_design_summarizer/v1.0.0/template.jinja2"
+    hazard_needs_summarizer: str = "hazard_needs_summarizer/v1.0.0/template.jinja2"
+    
+    @classmethod
+    def from_set(cls, set_name: str) -> "PromptConfig":
+        """Load prompt config from a named set manifest.
+        
+        Args:
+            set_name: Name of the prompt set (e.g., "test_suite_reviewer_v1")
+            
+        Returns:
+            PromptConfig with paths resolved from the set manifest
+            
+        Example:
+            >>> config = PromptConfig.from_set("test_suite_reviewer_v1")
+            >>> config.decomposer
+            'decomposer/v5.0.0/template.jinja2'
+        """
+        from autoqa.prompts._registry import load_set
+        resolved = load_set(set_name)
+        
+        # Map resolved prompts to PromptConfig fields
+        # Use relative paths from prompts directory
+        kwargs = {}
+        for role, prompt in resolved.prompts.items():
+            # Convert role names to field names
+            field_name = role
+            # Build relative path: role/version/template.jinja2
+            relative_path = f"{role}/{prompt.version}/template.jinja2"
+            kwargs[field_name] = relative_path
+        
+        return cls(**kwargs)
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
