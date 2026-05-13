@@ -378,3 +378,16 @@ def test_load_default_review_objectives():
     for o in objectives:
         assert isinstance(o, ReviewObjective)
         assert o.description  # non-empty
+        assert hasattr(o, "mandatory"), f"objective {o.id} missing mandatory field"
+    
+    # Verify that test_case_setup_clarity is the only recommended (non-mandatory) objective
+    setup_clarity = next((o for o in objectives if o.id == "test_case_setup_clarity"), None)
+    assert setup_clarity is not None, "test_case_setup_clarity not found"
+    assert setup_clarity.mandatory is False, "test_case_setup_clarity should be mandatory=False"
+    
+    # Verify all other objectives are mandatory
+    mandatory_ids = ["expected_result_support", "expected_result_spec_align", "test_case_achieves", "test_case_logical_sequence"]
+    for obj_id in mandatory_ids:
+        obj = next((o for o in objectives if o.id == obj_id), None)
+        assert obj is not None, f"{obj_id} not found"
+        assert obj.mandatory is True, f"{obj_id} should be mandatory=True"

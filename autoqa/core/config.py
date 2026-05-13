@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from autoqa.utils import make_output_directory
@@ -19,11 +20,18 @@ class PromptConfig(BaseModel):
     
     Use PromptConfig.from_set("set_name") to load from a named prompt set manifest.
     """
+    # Test Suite Reviewer prompts
     decomposer: str = "decomposer/v5.0.0/template.jinja2"
     summarizer: str = "summarizer/v4.0.0/template.jinja2"
     design_summarizer: str = "design_summarizer/v1.0.0/template.jinja2"
     coverage: str = "coverage_evaluator/v7.0.0/template.jinja2"
     synthesizer: str = "synthesizer/v8.0.0/template.jinja2"
+    
+    # Test Case Reviewer prompts
+    single_test_aggregator: str = "single_test_aggregator/v6.0.0/template.jinja2"
+    single_test_coverage_eval: str = "single_test_coverage_eval/v3.0.0/template.jinja2"
+    single_test_logical_steps: str = "single_test_logical_steps/v3.0.0/template.jinja2"
+    single_test_prereqs: str = "single_test_prereqs/v3.0.0/template.jinja2"
     
     # Hazard reviewer prompts (H1-H7 + final assessor)
     hazard_h1: str = "hazard_h1/v1.0.0/template.jinja2"
@@ -42,28 +50,28 @@ class PromptConfig(BaseModel):
         """Load prompt config from a named set manifest.
         
         Args:
-            set_name: Name of the prompt set (e.g., "test_suite_reviewer_v1")
+            set_name: Name of the prompt set (e.g., "test_case_reviewer_v2")
             
         Returns:
             PromptConfig with paths resolved from the set manifest
             
         Example:
-            >>> config = PromptConfig.from_set("test_suite_reviewer_v1")
-            >>> config.decomposer
-            'decomposer/v5.0.0/template.jinja2'
+            >>> config = PromptConfig.from_set("test_case_reviewer_v2")
+            >>> config.single_test_aggregator
+            'single_test_aggregator/v6.0.0/template.jinja2'
         """
         from autoqa.prompts._registry import load_set
         resolved = load_set(set_name)
         
-        # Map resolved prompts to PromptConfig fields
-        # Use relative paths from prompts directory
-        kwargs = {}
+        # Start with current defaults
+        current = cls()
+        kwargs = current.model_dump()
+        
+        # Override with resolved prompts from the set
         for role, prompt in resolved.prompts.items():
-            # Convert role names to field names
-            field_name = role
             # Build relative path: role/version/template.jinja2
-            relative_path = f"{role}/{prompt.version}/template.jinja2"
-            kwargs[field_name] = relative_path
+            relative_path = f"{prompt.role}/{prompt.version}/template.jinja2"
+            kwargs[role] = relative_path
         
         return cls(**kwargs)
 
@@ -77,6 +85,7 @@ class Settings(BaseSettings):
         MAX_REQUESTS_PER_MINUTE: Rate limit for API requests (default: 490)
         MAX_TOKENS_PER_MINUTE: Token rate limit (default: 200000)
         MAX_OUTPUT_TOKENS: Maximum output tokens per request (default: 16000)
+        PROMPT_SET: Named prompt set to load (optional, e.g., "test_case_reviewer_v2")
     """
     openai_api_key: str = Field(..., alias='API_KEY')
     url: str = Field(..., alias='API_BASE_URL')
@@ -85,7 +94,22 @@ class Settings(BaseSettings):
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
-    prompt_config: PromptConfig = Field(default_factory=PromptConfig)
+    
+    # Optional prompt set name - if specified, overrides default prompt_config
+    prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
+    
+    _prompt_config_cache: Optional[PromptConfig] = None
+    
+    @property
+    def prompt_config(self) -> PromptConfig:
+        """Get prompt configuration, loading from prompt_set if specified."""
+        if self._prompt_config_cache is None:
+            if self.prompt_set:
+                self._prompt_config_cache = PromptConfig.from_set(self.prompt_set)
+            else:
+                self._prompt_config_cache = PromptConfig()
+        return self._prompt_config_cache
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",

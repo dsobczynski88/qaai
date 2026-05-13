@@ -199,6 +199,39 @@ class BaseLLMNode(ABC):
         return extracted
 
     @staticmethod
+    def _repair_checklist_structure(data: dict, node_name: str = "") -> dict:
+        """
+        ✅ Solution 4: Pre-validate and repair checklist structure before Pydantic validation.
+        Adds missing 'description' fields to evaluated_checklist items to prevent validation errors.
+        """
+        checklist = data.get("evaluated_checklist", [])
+        if not checklist:
+            return data
+        
+        for i, item in enumerate(checklist):
+            if not isinstance(item, dict):
+                continue
+                
+            # Add missing description field
+            if "description" not in item:
+                item_id = item.get("id", "unknown")
+                item["description"] = f"Evaluation criterion: {item_id}"
+                logger.warning(
+                    "%s: Added missing 'description' field to checklist item %d (id=%s)",
+                    node_name, i, item_id
+                )
+            
+            # Ensure partial field exists (optional but good practice)
+            if "partial" not in item:
+                item["partial"] = False
+                logger.debug(
+                    "%s: Added missing 'partial' field to checklist item %d (id=%s)",
+                    node_name, i, item.get("id", "unknown")
+                )
+        
+        return data
+
+    @staticmethod
     def _parse_llm_response(result, response_model, node_name: str = "") -> Optional[Any]:
         """Try each choice in the LLM result; return the first successfully parsed model."""
         for choice in result.choices:
@@ -209,12 +242,17 @@ class BaseLLMNode(ABC):
                 logger.debug("%s: extracted JSON length=%d, first 200 chars: %s", 
                            node_name, len(extracted_json), extracted_json[:200])
                 try:
-                    return response_model.model_validate_json(extracted_json)
-                except Exception as parse_err:
-                    logger.debug("%s: Pydantic validation failed, trying json.loads: %s", 
-                               node_name, str(parse_err)[:200])
+                    # Parse to dict first for potential repair
                     py_obj = json.loads(extracted_json)
+                    
+                    # ✅ Solution 4: Repair checklist structure if present
+                    if "evaluated_checklist" in py_obj:
+                        py_obj = BaseLLMNode._repair_checklist_structure(py_obj, node_name)
+                    
                     return response_model.model_validate(py_obj)
+                except json.JSONDecodeError:
+                    # If json.loads failed, try direct Pydantic validation as fallback
+                    return response_model.model_validate_json(extracted_json)
             except json.JSONDecodeError as e:
                 logger.warning("%s: JSON decode error at position %d: %s", node_name, e.pos, e.msg)
                 # Show context around the error position

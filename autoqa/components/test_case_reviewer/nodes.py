@@ -60,7 +60,11 @@ def load_default_review_objectives(path: Optional[Path] = None) -> List[ReviewOb
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return [
-        ReviewObjective(id=item["id"], description=" ".join(item["description"].split()))
+        ReviewObjective(
+            id=item["id"],
+            description=" ".join(item["description"].split()),
+            mandatory=item.get("mandatory", True),  # Default to True for backward compatibility
+        )
         for item in data
     ]
 
@@ -108,10 +112,17 @@ def make_tc_decomposer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "decomposer/v5.0.0/template.jinja2",
+    prompt_template: Optional[str] = None,
     **template_vars,
 ) -> TCDecomposerNode:
-    """Build a TCDecomposerNode that wraps the shared DecomposerNode."""
+    """Build a TCDecomposerNode that wraps the shared DecomposerNode.
+    
+    Args:
+        prompt_template: Optional override. If None, uses settings.prompt_config.decomposer
+    """
+    if prompt_template is None:
+        prompt_template = settings.prompt_config.decomposer
+    
     inner = make_decomposer_node(
         client=client,
         model=model,
@@ -247,9 +258,17 @@ def make_coverage_single_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single_test_coverage_eval/v3.0.0/template.jinja2",
+    prompt_template: Optional[str] = None,
     **template_vars,
 ) -> SingleSpecCoverageNode:
+    """Build the coverage evaluator node.
+    
+    Args:
+        prompt_template: Optional override. If None, uses settings.prompt_config.single_test_coverage_eval
+    """
+    if prompt_template is None:
+        prompt_template = settings.prompt_config.single_test_coverage_eval
+    
     return _make_axis_node(
         SingleSpecCoverageNode, client, model, model_kwargs, prompt_template, **template_vars
     )
@@ -259,10 +278,17 @@ def make_logical_single_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single_test_logical_steps/v3.0.0/template.jinja2",
+    prompt_template: Optional[str] = None,
     **template_vars,
 ) -> OverallLogicalNode:
-    """Build the test-case-level logical-structure node (single LLM call, no Send)."""
+    """Build the test-case-level logical-structure node (single LLM call, no Send).
+    
+    Args:
+        prompt_template: Optional override. If None, uses settings.prompt_config.single_test_logical_steps
+    """
+    if prompt_template is None:
+        prompt_template = settings.prompt_config.single_test_logical_steps
+    
     system_prompt = render_prompt(prompt_template, **template_vars)
     return OverallLogicalNode(
         client=client,
@@ -277,10 +303,17 @@ def make_prereqs_single_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single_test_prereqs/v3.0.0/template.jinja2",
+    prompt_template: Optional[str] = None,
     **template_vars,
 ) -> OverallPrereqsNode:
-    """Build the test-case-level prereqs node (single LLM call, no Send)."""
+    """Build the test-case-level prereqs node (single LLM call, no Send).
+    
+    Args:
+        prompt_template: Optional override. If None, uses settings.prompt_config.single_test_prereqs
+    """
+    if prompt_template is None:
+        prompt_template = settings.prompt_config.single_test_prereqs
+    
     system_prompt = render_prompt(prompt_template, **template_vars)
     return OverallPrereqsNode(
         client=client,
@@ -357,9 +390,17 @@ def make_aggregator_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "single_test_aggregator/v4.0.0/template.jinja2",
+    prompt_template: Optional[str] = None,
     **template_vars,
 ) -> AggregatorNode:
+    """Build the aggregator node.
+    
+    Args:
+        prompt_template: Optional override. If None, uses settings.prompt_config.single_test_aggregator
+    """
+    if prompt_template is None:
+        prompt_template = settings.prompt_config.single_test_aggregator
+    
     system_prompt = render_prompt(prompt_template, **template_vars)
     return AggregatorNode(
         client=client,

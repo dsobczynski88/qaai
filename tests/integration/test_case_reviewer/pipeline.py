@@ -42,12 +42,17 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
             assert o.verdict == "Yes", (
                 f"{o.id}: partial=True requires verdict='Yes', got {o.verdict!r}"
             )
+        # Verify mandatory field is present
+        assert hasattr(o, "mandatory"), f"{o.id}: missing mandatory field"
 
-    expected_overall = "Yes" if all(o.verdict == "Yes" for o in checklist) else "No"
+    # overall_verdict should be computed from MANDATORY criteria only
+    mandatory_checklist = [o for o in checklist if o.mandatory is not False]
+    expected_overall = "Yes" if all(o.verdict == "Yes" for o in mandatory_checklist) else "No"
     assert asmt.overall_verdict == expected_overall, (
-        f"overall_verdict={asmt.overall_verdict!r} disagrees with AND-across-checklist "
+        f"overall_verdict={asmt.overall_verdict!r} disagrees with AND-across-MANDATORY-checklist "
         f"(expected {expected_overall!r}); "
-        f"per-objective verdicts={[(o.id, o.verdict) for o in checklist]}"
+        f"mandatory verdicts={[(o.id, o.verdict, o.mandatory) for o in mandatory_checklist]}; "
+        f"all verdicts={[(o.id, o.verdict, o.mandatory) for o in checklist]}"
     )
 
     cov = {a.spec_id: a.exists for a in state.get("coverage_analysis", [])}

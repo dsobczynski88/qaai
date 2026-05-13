@@ -44,6 +44,8 @@ TC_HTML_TEMPLATE = r"""<!doctype html>
   table.findings { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.findings th, table.findings td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
   table.findings th { background: #f2f4f7; font-weight: 600; font-size: 12px; color: var(--mute); }
+  table.findings tr.recommended { background: #f8f9fc; }
+  table.findings tr.recommended td:first-child::before { content: "ℹ️ "; margin-right: 4px; }
   .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #fff; }
   .chip-Yes { background: var(--chip-yes); }
   .chip-No  { background: var(--chip-no); }
@@ -178,7 +180,9 @@ function renderLeft() {
 
   const findings = checklist.map(o => {
     const chipClass = (o.verdict === "Yes" && o.partial) ? "Yellow" : o.verdict;
-    return `<tr>
+    const isRecommended = o.mandatory === false;
+    const rowClass = isRecommended ? ' class="recommended"' : '';
+    return `<tr${rowClass}>
       <td><strong>${escapeHTML(o.id)}</strong><div class="obj-desc">${escapeHTML(o.description)}</div></td>
       <td><span class="chip chip-${chipClass}">${escapeHTML(o.verdict ?? "?")}</span></td>
       <td>${escapeHTML(o.assessment ?? "")}</td>
@@ -290,18 +294,18 @@ function openCriteriaHelp() {
   openModal(`
     <h3>Review objectives</h3>
     <dl class="criteria-help">
-      <dt>expected_result_support</dt>
+      <dt>expected_result_support (Mandatory)</dt>
       <dd>Expected results include sufficient evidence to prove outcomes; gaps in evidence are flagged.</dd>
-      <dt>expected_result_spec_align</dt>
+      <dt>expected_result_spec_align (Mandatory)</dt>
       <dd>Expected results reflect all conditions in the requirement; vague or incomplete outcomes are flagged.</dd>
-      <dt>test_case_achieves</dt>
+      <dt>test_case_achieves (Mandatory)</dt>
       <dd>Final steps verify the intended outcome of the spec; missing validation is flagged.</dd>
-      <dt>test_case_logical_sequence</dt>
+      <dt>test_case_logical_sequence (Mandatory)</dt>
       <dd>Steps follow a logical flow from setup to verification; out-of-order or inconsistent flow is flagged.</dd>
-      <dt>test_case_setup_clarity</dt>
-      <dd>Environment and prerequisites are clearly documented; ambiguity that may prevent repeatable execution is flagged.</dd>
+      <dt>ℹ️ test_case_setup_clarity (Recommended)</dt>
+      <dd>Environment and prerequisites are clearly documented; ambiguity that may prevent repeatable execution is flagged. <strong>Does NOT affect overall_verdict</strong> — advisory only.</dd>
     </dl>
-    <div class="legend">Yellow = "Yes, but partial" — the objective is met but coverage is materially incomplete; reviewer should re-check. A partial Yes still passes overall_verdict.</div>
+    <div class="legend">Yellow = "Yes, but partial" — the objective is met but coverage is materially incomplete; reviewer should re-check. A partial Yes still passes overall_verdict. <strong>ℹ️ = Recommended criterion — advisory only, does NOT affect overall_verdict.</strong></div>
   `);
 }
 

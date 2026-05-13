@@ -1,0 +1,15 @@
+name: test_case_reviewer_v2
+component: test_case_reviewer
+description: |
+  Production stack for single test case review with mandatory vs. recommended objectives.
+  Evaluates individual test cases against requirements using a 4-node pipeline.
+  Version 2 introduces the mandatory/recommended distinction: test_case_setup_clarity
+  is now recommended-only and does NOT affect overall_verdict.
+prompts:
+  single_test_aggregator: v6.0.0
+  single_test_coverage_eval: v3.0.0
+  single_test_logical_steps: v3.0.0
+  single_test_prereqs: v3.0.0
+status: production
+authored: '2025-05-14'
+parent_set: test_case_reviewer_v1
