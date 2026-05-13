@@ -39,6 +39,8 @@ HTML_TEMPLATE = r"""<!doctype html>
   table.findings { width: 100%; border-collapse: collapse; font-size: 13px; }
   table.findings th, table.findings td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
   table.findings th { background: #f2f4f7; font-weight: 600; font-size: 12px; color: var(--mute); }
+  table.findings tr.recommended { background: #f8f9fc; }
+  table.findings tr.recommended td:first-child::before { content: "ℹ️ "; margin-right: 4px; }
   .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #fff; }
   .chip-Yes { background: var(--chip-yes); }
   .chip-No  { background: var(--chip-no); }
@@ -158,7 +160,9 @@ function renderLeft() {
     if (f.cited_test_case_ids?.length) extras.push(`TCs: ${f.cited_test_case_ids.map(escapeHTML).join(", ")}`);
     if (f.uncovered_spec_ids?.length) extras.push(`uncovered: ${f.uncovered_spec_ids.map(escapeHTML).join(", ")}`);
     const chipClass = (f.verdict === "Yes" && f.partial) ? "Yellow" : f.verdict;
-    return `<tr>
+    const isRecommended = f.code === "R6";
+    const rowClass = isRecommended ? ' class="recommended"' : '';
+    return `<tr${rowClass}>
       <td><strong>${escapeHTML(f.code)}</strong> ${escapeHTML(f.dimension)}</td>
       <td><span class="chip chip-${chipClass}">${escapeHTML(f.verdict)}</span></td>
       <td>${escapeHTML(f.rationale)}${extras.length ? `<div class="cited">${extras.join(" · ")}</div>` : ""}</td>
@@ -166,16 +170,22 @@ function renderLeft() {
   }).join("");
   const overallPartial = (sa?.overall_verdict === "Yes") && (sa?.mandatory_findings ?? []).some(f => f.partial);
   const overallClass = overallPartial ? "Yellow" : sa?.overall_verdict;
-  const tcList = (rec.test_cases ?? []).map((_, i) =>
-    `<li><a onclick="openTC(${i})">${escapeHTML(rec.test_cases[i].test_id)}</a> — ${escapeHTML(rec.test_cases[i].description)}</li>`
-  ).join("");
+  const tcList = (rec.test_cases ?? []).map((_, i) => {
+    const tc = rec.test_cases[i];
+    const inBaseline = tc.in_baseline ?? false;
+    const checkmark = inBaseline ? '✓' : '○';
+    return `<li>
+      <span style="margin-right:6px;font-family:ui-monospace,Menlo,monospace;color:var(--mute)" title="${inBaseline ? 'In baseline' : 'Not in baseline'}">${checkmark}</span>
+      <a onclick="openTC(${i})">${escapeHTML(tc.test_id)}</a> — ${escapeHTML(tc.description)}
+    </li>`;
+  }).join("");
   const clarq = (sa?.clarification_questions ?? []);
   document.getElementById("left").innerHTML = `
     <h2>Requirement</h2>
     <h1><span class="req-id">${reqId}</span></h1>
     <div class="req-text">${reqText}</div>
 
-    <h2>Test Cases</h2>
+    <h2>Test Cases <span style="font-size:11px;color:var(--mute);font-weight:normal">(✓ = in baseline, ○ = not in baseline)</span></h2>
     <ul class="tc-list">${tcList || "<li><em>(none)</em></li>"}</ul>
 
     <h2>Coverage Assessment</h2>
@@ -185,7 +195,7 @@ function renderLeft() {
       <span class="link-like" onclick="openSpecs()">Decomposed specs &amp; coverage analysis →</span>
     </div>
     <table class="findings">
-      <thead><tr><th>Dimension <span class="help-icon" onclick="openCriteriaHelp()" title="What do M1-M5 mean?">?</span></th><th>Verdict</th><th>Rationale</th></tr></thead>
+      <thead><tr><th>Dimension <span class="help-icon" onclick="openCriteriaHelp()" title="What do M1-M5 and R6 mean?">?</span></th><th>Verdict</th><th>Rationale</th></tr></thead>
       <tbody>${findings}</tbody>
     </table>
     ${sa?.comments ? `<div class="comments"><h2>Comments</h2><div>${escapeHTML(sa.comments)}</div></div>` : ""}
@@ -235,7 +245,6 @@ function openTC(i) {
       <tr><th>Verifies</th><td>${escapeHTML(sum.verifies)}</td></tr>
       <tr><th>Protocol</th><td><ol>${sum.protocol.map(p => `<li>${escapeHTML(p)}</li>`).join("")}</ol></td></tr>
       <tr><th>Acceptance criteria</th><td><ul>${sum.acceptance_criteria.map(a => `<li>${escapeHTML(a)}</li>`).join("")}</ul></td></tr>
-      <tr><th>AI-generated?</th><td>${sum.is_generated ? "yes" : "no"}</td></tr>
     </table>` : "";
   openModal(`<h3>Test case ${escapeHTML(tc.test_id)}</h3><table class="detail">${rows}</table>${sumRows}`);
 }
@@ -271,7 +280,7 @@ function openSpecs() {
 
 function openCriteriaHelp() {
   openModal(`
-    <h3>Mandatory rubric — M1 to M5</h3>
+    <h3>Mandatory rubric — M1 to M5 + Recommended R6</h3>
     <dl class="criteria-help">
       <dt>M1 Functional</dt>
       <dd>At least one test case verifies the core positive behavior of the requirement (happy path). Never N-A.</dd>
@@ -283,8 +292,10 @@ function openCriteriaHelp() {
       <dd>Every decomposed spec has at least one covering test case. Never N-A.</dd>
       <dt>M5 Terminology</dt>
       <dd>Test-case vocabulary aligns with the requirement (no semantic drift, no renamed roles or tags). Never N-A.</dd>
+      <dt>ℹ️ R6 Design Alignment (Recommended)</dt>
+      <dd>Requirement intent is reflected in design summaries. N-A when no design documents exist. <strong>Does NOT affect overall_verdict</strong> — advisory only.</dd>
     </dl>
-    <div class="legend">Yellow = "Yes, but partial" — coverage exists for this dimension but is incomplete; reviewer should re-check. A partial Yes still passes SoP gating.</div>
+    <div class="legend">Yellow = "Yes, but partial" — coverage exists for this dimension but is incomplete; reviewer should re-check. A partial Yes still passes SoP gating. <strong>R6 is recommended only and never affects overall verdict.</strong></div>
   `);
 }
 

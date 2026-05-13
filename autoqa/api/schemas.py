@@ -4,6 +4,7 @@ from autoqa.core.constants import MAX_THREAD_ID_LENGTH, MAX_TEST_CASES_PER_REQUI
 from autoqa.components.test_suite_reviewer.core import (
     Requirement,
     TestCase,
+    DesignDocument,
     EvaluatedSpec,
     DecomposedRequirement,
     TestSuite,
@@ -29,6 +30,7 @@ class ReviewRequest(BaseModel):
         thread_id: Unique identifier for the review session (max 100 chars).
         requirement: Software requirement to review.
         test_cases: Associated test cases (max 1000 per request).
+        design_docs: Optional design documents for additional context.
     """
     thread_id: str = Field(
         ...,
@@ -41,6 +43,10 @@ class ReviewRequest(BaseModel):
         ...,
         max_length=MAX_TEST_CASES_PER_REQUIREMENT,
         description="Test cases to evaluate against the requirement"
+    )
+    design_docs: Optional[List[DesignDocument]] = Field(
+        default=None,
+        description="Optional design documents for additional context"
     )
     
     @field_validator('thread_id')
@@ -71,6 +77,7 @@ class ReviewResponse(BaseModel):
     decomposed_requirement: Optional[DecomposedRequirement] = None
     test_suite: Optional[TestSuite] = None
     synthesized_assessment: Optional[SynthesizedAssessment] = None
+    design_docs: List[DesignDocument] = []
 
 
 class HazardReviewRequest(BaseModel):
@@ -125,6 +132,7 @@ class TestCaseReviewRequest(BaseModel):
         test_case: Test case to review.
         requirements: Traced requirements (1 or more).
         review_objectives: Optional custom checklist (defaults to standard 5).
+        design_docs: Optional design documents for additional context.
     """
     thread_id: str = Field(
         ...,
@@ -141,6 +149,10 @@ class TestCaseReviewRequest(BaseModel):
     review_objectives: Optional[List[ReviewObjective]] = Field(
         default=None,
         description="Custom review checklist (defaults to standard 5 objectives if omitted)"
+    )
+    design_docs: Optional[List[DesignDocument]] = Field(
+        default=None,
+        description="Optional design documents for additional context"
     )
     
     @field_validator('thread_id')
@@ -177,6 +189,7 @@ class TestCaseReviewResponse(BaseModel):
         logical_structure_analysis: Test-case-level logical flow verdict.
         prereqs_analysis: Test-case-level prerequisites verdict.
         aggregated_assessment: Final assessment with 5-objective checklist.
+        design_docs: Design documents provided in the request.
     """
     status: str
     thread_id: str
@@ -187,3 +200,4 @@ class TestCaseReviewResponse(BaseModel):
     logical_structure_analysis: Optional[OverallAnalysis] = None
     prereqs_analysis: Optional[OverallAnalysis] = None
     aggregated_assessment: Optional[TestCaseAssessment] = None
+    design_docs: List[DesignDocument] = []

@@ -183,12 +183,59 @@ def jsonl_recorders_tc():
             print(f"\n[viewer_tc] wrote {out}")
 
 
+@pytest.fixture(scope="session")
+def jsonl_recorders_hz():
+    """Hazard-flavored counterpart to jsonl_recorders: same inputs.jsonl/outputs.jsonl
+    contract, but renders the hazard viewer (viewer_hz.html) at session teardown
+    via write_viewer_hz instead of the RTM write_viewer.
+    
+    Use this fixture for hazard_risk_reviewer integration tests to generate
+    a viewer that displays HazardReviewState records with H1-H7 findings.
+    """
+    run_dir = Path(settings.log_file_path).parent
+    inputs_path = run_dir / "inputs.jsonl"
+    outputs_path = run_dir / "outputs.jsonl"
+    inputs_path.write_text("", encoding="utf-8")
+    outputs_path.write_text("", encoding="utf-8")
+
+    def record_input(data: dict) -> None:
+        with inputs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(data) + "\n")
+
+    def record_output(data: dict) -> None:
+        with outputs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(data) + "\n")
+
+    yield record_input, record_output
+
+    try:
+        from autoqa.viewer.generator import write_viewer_hz
+        out = write_viewer_hz(outputs_path)
+    except Exception as exc:
+        print(f"\n[viewer_hz] skipped: {exc}")
+    else:
+        if out is not None:
+            print(f"\n[viewer_hz] wrote {out}")
+
+
 @pytest.fixture
 def real_client():
+    """Provide a real OpenAI client for integration tests.
+    
+    Security: Validates that PYTEST_BASE_URL is not a production endpoint.
+    """
     api_key = os.getenv("PYTEST_API_KEY")
     base_url = os.getenv("PYTEST_BASE_URL")
     if not api_key:
         pytest.skip("PYTEST_API_KEY not set — skipping integration test")
+    
+    # Security check: prevent accidental use of production endpoints
+    if base_url and "prod" in base_url.lower():
+        pytest.fail(
+            "PYTEST_BASE_URL appears to be a production endpoint. "
+            "Integration tests must use test/staging endpoints only."
+        )
+    
     return RateLimitOpenAIClient(api_key=api_key, base_url=base_url)
 
 
@@ -198,8 +245,32 @@ def real_model():
 
 @pytest.fixture
 def sample_hazard():
-    """Load the canonical sample HazardRecord from tests/fixtures/sample_hazard.json."""
-    fixture_path = Path(__file__).parent / "fixtures" / "sample_hazard.json"
+    """Load the canonical sample HazardRecord from tests/fixtures/external/hazard_risk_review_min_fields.jsonl.
+    
+    This fixture provides a minimal hazard record without design_docs or user_needs,
+    suitable for testing the core H1-H7 evaluation flow.
+    """
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_risk_review_min_fields.jsonl"
     with fixture_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+        data = json.loads(f.readline())
+    return HazardRecord.model_validate(data)
+
+
+@pytest.fixture
+def sample_hazard_full_traceability():
+    """Load the full traceability HazardRecord from tests/fixtures/external/hazard_risk_review_all_fields.jsonl.
+    
+    This fixture provides a complete hazard record with:
+    - requirements (REQ-PUMP-101, REQ-PUMP-102)
+    - test_cases (TC-PUMP-201, TC-PUMP-202, TC-PUMP-203)
+    - design_docs (5 design documents)
+    - user_needs (UN-PUMP-003, UN-PUMP-007)
+    - system_requirements (SYS-PUMP-015, SYS-PUMP-016, SYS-PUMP-017)
+    
+    Use this fixture when testing the full pipeline with design_docs and user_needs,
+    which triggers R6 evaluation in the RTM sub-pipeline and H4/H5 summarization.
+    """
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_risk_review_all_fields.jsonl"
+    with fixture_path.open("r", encoding="utf-8") as f:
+        data = json.loads(f.readline())
     return HazardRecord.model_validate(data)

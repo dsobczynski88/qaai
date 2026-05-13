@@ -9,8 +9,13 @@ residual risk closure. The final_assessor assembles the structured
 HazardAssessment deterministically (verdicts come from upstream nodes;
 overall_verdict is computed in code) and uses the LLM only to write
 `comments` and `clarification_questions`.
+
+Additionally, design_summarizer and needs_summarizer nodes run in parallel
+from START to summarize design documents and user needs for optional
+consumption by H4/H5 evaluators.
 """
 
+import json
 from typing import Any, List, Optional
 
 from langgraph.types import Send
@@ -27,12 +32,184 @@ from .core import (
     HazardAssessment,
     HazardFinding,
     HazardReviewState,
+    HazardSummarizedDesignSpec,
+    HazardSummarizedDesignSpecList,
+    HazardSummarizedUserNeed,
+    HazardSummarizedUserNeedList,
     RequirementReview,
 )
 
 project_logger = ProjectLogger(name="logger.hazard.nodes", log_file=settings.log_file_path)
 project_logger.config()
 logger = project_logger.get_logger()
+
+
+# --- design and user needs summarizer nodes -------------------------------
+
+
+class HazardDesignSummarizerNode(BaseLLMNode):
+    """Summarizes design documents for hazard mitigation evaluation."""
+    
+    BATCH_SIZE = 5
+
+    def __init__(self, client: RateLimitOpenAIClient, model: str, response_model, 
+                 system_prompt: str, model_kwargs: dict | None = None):
+        super().__init__(client, model, system_prompt, model_kwargs)
+        self.response_model = response_model
+
+    def _validate_state(self, state: HazardReviewState) -> bool:
+        hazard = state.get("hazard")
+        return (
+            hazard is not None 
+            and hasattr(hazard, 'design_docs')
+            and len(hazard.design_docs) > 0
+        )
+
+    def _build_payload(self, hazard, design_docs: List) -> dict:
+        return {
+            "hazard": {
+                "hazard_id": hazard.hazard_id,
+                "hazardous_situation": hazard.hazardous_situation,
+                "software_related_causes": hazard.software_related_causes,
+                "risk_control_measures": hazard.risk_control_measures,
+            },
+            "design_docs": [
+                {
+                    "doc_id": dd.doc_id,
+                    "name": dd.name,
+                    "description": dd.description,
+                }
+                for dd in design_docs
+            ]
+        }
+
+    async def __call__(self, state: HazardReviewState) -> HazardReviewState:
+        if not self._validate_state(state):
+            logger.debug("%s: skipping — no design docs", self.__class__.__name__)
+            return {"summarized_designs": None}
+        
+        hazard = state.get("hazard")
+        design_docs = hazard.design_docs
+        
+        all_summaries = []
+        num_batches = (len(design_docs) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+        
+        logger.info("%s: processing %d design docs in %d batches",
+                   self.__class__.__name__, len(design_docs), num_batches)
+        
+        for i in range(0, len(design_docs), self.BATCH_SIZE):
+            batch = design_docs[i:i+self.BATCH_SIZE]
+            batch_num = i // self.BATCH_SIZE + 1
+            
+            payload = self._build_payload(hazard, batch)
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": json.dumps(payload)},
+            ]
+            
+            result = await self.client.chat_completion(
+                model=self.model, messages=messages, **self.model_kwargs,
+            )
+            
+            parsed = self._parse_llm_response(
+                result, self.response_model, self.__class__.__name__
+            )
+            
+            if parsed is None:
+                logger.warning("%s: batch %d/%d failed", self.__class__.__name__, 
+                             batch_num, num_batches)
+                continue
+            
+            if isinstance(parsed, HazardSummarizedDesignSpecList):
+                all_summaries.extend(parsed.root)
+            else:
+                all_summaries.extend(parsed)
+        
+        logger.info("%s: completed %d design docs → %d summaries",
+                   self.__class__.__name__, len(design_docs), len(all_summaries))
+        
+        return {"summarized_designs": all_summaries}
+
+
+class HazardNeedsSummarizerNode(BaseLLMNode):
+    """Summarizes user needs for hazard objective evaluation."""
+    
+    BATCH_SIZE = 5
+
+    def __init__(self, client: RateLimitOpenAIClient, model: str, response_model, 
+                 system_prompt: str, model_kwargs: dict | None = None):
+        super().__init__(client, model, system_prompt, model_kwargs)
+        self.response_model = response_model
+
+    def _validate_state(self, state: HazardReviewState) -> bool:
+        hazard = state.get("hazard")
+        return (
+            hazard is not None 
+            and hasattr(hazard, 'user_needs')
+            and len(hazard.user_needs) > 0
+        )
+
+    def _build_payload(self, hazard, user_needs: List) -> dict:
+        return {
+            "hazard": {
+                "hazard_id": hazard.hazard_id,
+                "hazardous_situation": hazard.hazardous_situation,
+            },
+            "user_needs": [
+                {
+                    "req_id": un.req_id,
+                    "text": un.text,
+                }
+                for un in user_needs
+            ]
+        }
+
+    async def __call__(self, state: HazardReviewState) -> HazardReviewState:
+        if not self._validate_state(state):
+            logger.debug("%s: skipping — no user needs", self.__class__.__name__)
+            return {"summarized_user_needs": None}
+        
+        hazard = state.get("hazard")
+        user_needs = hazard.user_needs
+        
+        all_summaries = []
+        num_batches = (len(user_needs) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+        
+        logger.info("%s: processing %d user needs in %d batches",
+                   self.__class__.__name__, len(user_needs), num_batches)
+        
+        for i in range(0, len(user_needs), self.BATCH_SIZE):
+            batch = user_needs[i:i+self.BATCH_SIZE]
+            batch_num = i // self.BATCH_SIZE + 1
+            
+            payload = self._build_payload(hazard, batch)
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": json.dumps(payload)},
+            ]
+            
+            result = await self.client.chat_completion(
+                model=self.model, messages=messages, **self.model_kwargs,
+            )
+            
+            parsed = self._parse_llm_response(
+                result, self.response_model, self.__class__.__name__
+            )
+            
+            if parsed is None:
+                logger.warning("%s: batch %d/%d failed", self.__class__.__name__, 
+                             batch_num, num_batches)
+                continue
+            
+            if isinstance(parsed, HazardSummarizedUserNeedList):
+                all_summaries.extend(parsed.root)
+            else:
+                all_summaries.extend(parsed)
+        
+        logger.info("%s: completed %d user needs → %d summaries",
+                   self.__class__.__name__, len(user_needs), len(all_summaries))
+        
+        return {"summarized_user_needs": all_summaries}
 
 
 # --- dispatch functions for early and late evaluators ------------------
@@ -59,18 +236,33 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
 def dispatch_hazard_evaluators_late(state: HazardReviewState) -> List[Send]:
     """
     Dispatch H4, H5 after requirement_reviews complete.
-    These need the requirement_reviews list.
+    These need the requirement_reviews list plus optional summarized data.
     """
     hazard = state.get("hazard")
     requirement_reviews = state.get("requirement_reviews")
+    summarized_designs = state.get("summarized_designs")
+    summarized_user_needs = state.get("summarized_user_needs")
     
     if not hazard or not requirement_reviews:
         logger.warning("dispatch_hazard_evaluators_late: missing hazard or requirement_reviews")
         return []
     
+    # Build state dict with optional summarized data
+    h4_state = {
+        "hazard": hazard,
+        "requirement_reviews": requirement_reviews,
+        "summarized_designs": summarized_designs,
+    }
+    
+    h5_state = {
+        "hazard": hazard,
+        "requirement_reviews": requirement_reviews,
+        "summarized_user_needs": summarized_user_needs,
+    }
+    
     return [
-        Send("h4_evaluator", {"hazard": hazard, "requirement_reviews": requirement_reviews}),
-        Send("h5_evaluator", {"hazard": hazard, "requirement_reviews": requirement_reviews}),
+        Send("h4_evaluator", h4_state),
+        Send("h5_evaluator", h5_state),
     ]
 
 
@@ -115,6 +307,9 @@ class RequirementReviewerNode:
             "requirement": requirement,
             "test_cases": hazard.test_cases,
         }
+        # Pass design_docs to RTM sub-pipeline if available
+        if hasattr(hazard, 'design_docs') and hazard.design_docs:
+            rtm_input["design_docs"] = hazard.design_docs
         try:
             rtm_result = await self.rtm.graph.ainvoke(rtm_input)
         except Exception as e:
@@ -307,6 +502,26 @@ class HazardEvaluatorNode(StandardLLMNode):
             # H4, H5 also get the full requirements and test_cases lists
             payload["requirements"] = [r.requirement.model_dump() for r in reviews]
             payload["test_cases"] = [tc.model_dump() for tc in hazard.test_cases]
+            
+            # H4 gets summarized_designs if available
+            if self.dimension_code == "H4":
+                summarized_designs = state.get("summarized_designs")
+                if summarized_designs is not None and len(summarized_designs) > 0:
+                    payload["summarized_designs"] = [
+                        sd.model_dump() for sd in summarized_designs
+                    ]
+                else:
+                    payload["summarized_designs"] = None
+            
+            # H5 gets summarized_user_needs if available
+            if self.dimension_code == "H5":
+                summarized_user_needs = state.get("summarized_user_needs")
+                if summarized_user_needs is not None and len(summarized_user_needs) > 0:
+                    payload["summarized_user_needs"] = [
+                        sun.model_dump() for sun in summarized_user_needs
+                    ]
+                else:
+                    payload["summarized_user_needs"] = None
         
         return payload
 
@@ -616,6 +831,42 @@ def make_final_assessor_node(
     )
 
 
+def make_hazard_design_summarizer_node(
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str = "hazard_design_summarizer/v1.0.0/template.jinja2",
+    **template_vars,
+) -> HazardDesignSummarizerNode:
+    """Create a HazardDesignSummarizerNode with prompt loaded from Jinja2 template."""
+    system_prompt = render_prompt(prompt_template, **template_vars)
+    return HazardDesignSummarizerNode(
+        client=client,
+        model=model,
+        response_model=HazardSummarizedDesignSpecList,
+        system_prompt=system_prompt,
+        model_kwargs=model_kwargs
+    )
+
+
+def make_hazard_needs_summarizer_node(
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str = "hazard_needs_summarizer/v1.0.0/template.jinja2",
+    **template_vars,
+) -> HazardNeedsSummarizerNode:
+    """Create a HazardNeedsSummarizerNode with prompt loaded from Jinja2 template."""
+    system_prompt = render_prompt(prompt_template, **template_vars)
+    return HazardNeedsSummarizerNode(
+        client=client,
+        model=model,
+        response_model=HazardSummarizedUserNeedList,
+        system_prompt=system_prompt,
+        model_kwargs=model_kwargs
+    )
+
+
 __all__ = [
     "dispatch_requirement_reviews",
     "dispatch_hazard_evaluators_early",
@@ -630,4 +881,6 @@ __all__ = [
     "make_h6_evaluator_node",
     "make_h7_evaluator_node",
     "make_final_assessor_node",
+    "make_hazard_design_summarizer_node",
+    "make_hazard_needs_summarizer_node",
 ]

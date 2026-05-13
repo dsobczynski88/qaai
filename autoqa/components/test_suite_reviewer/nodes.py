@@ -30,6 +30,8 @@ from .core import (
     TestSuite,
     SummarizedTestCase,
     SummarizedTestCaseList,
+    SummarizedDesignSpec,
+    SummarizedDesignSpecList,
     EvaluatedSpec,
     SynthesizedAssessment,
 )
@@ -162,6 +164,123 @@ class SummaryNode(BaseLLMNode):
         
         return {"test_suite": test_suite}
 
+
+class DesignSummarizerNode(BaseLLMNode):
+    """Summarizes design documents into structured format with batching support.
+    
+    For v1+ prompts: LLM returns only the summary array; this node reconstructs
+    the full list by combining the summary with the original requirement and
+    design_docs from state.
+    
+    Implements batching to handle many design documents without hitting token limits.
+    Batch size is configurable via BATCH_SIZE class attribute.
+    """
+
+    BATCH_SIZE = 5  # Default to 5 per call as specified
+
+    def __init__(self, client: RateLimitOpenAIClient, model: str, response_model, 
+                 system_prompt: str, model_kwargs: dict | None = None):
+        super().__init__(client, model, system_prompt, model_kwargs)
+        self.response_model = response_model
+
+    def _validate_state(self, state: RTMReviewState) -> bool:
+        # Only validate if design_docs exist; if not, skip gracefully
+        return (
+            state.get("requirement") is not None 
+            and state.get("design_docs") is not None
+            and len(state.get("design_docs", [])) > 0
+        )
+
+    def _build_payload(self, requirement, design_docs: List) -> dict:
+        """Build payload for a batch of design documents."""
+        sanitized_text = sanitize_requirement_text(
+            text=requirement.text, req_id=requirement.req_id
+        )
+        
+        return {
+            "requirement": {
+                "req_id": requirement.req_id,
+                "text": sanitized_text,
+            },
+            "design_docs": [
+                {
+                    "doc_id": dd.doc_id,
+                    "name": dd.name,
+                    "description": dd.description,
+                }
+                for dd in design_docs
+            ]
+        }
+
+    async def __call__(self, state: RTMReviewState) -> RTMReviewState:
+        """Process design documents in batches and accumulate summaries."""
+        if not self._validate_state(state):
+            logger.debug("%s: skipping — no design docs or validation failed", 
+                        self.__class__.__name__)
+            return {"summarized_designs": None}
+        
+        requirement = state.get("requirement")
+        design_docs = state.get("design_docs")
+        
+        # Process in batches
+        all_summaries = []
+        num_batches = (len(design_docs) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+        
+        logger.info("%s: processing %d design docs in %d batches (batch_size=%d)",
+                   self.__class__.__name__, len(design_docs), num_batches, self.BATCH_SIZE)
+        
+        for i in range(0, len(design_docs), self.BATCH_SIZE):
+            batch = design_docs[i:i+self.BATCH_SIZE]
+            batch_num = i // self.BATCH_SIZE + 1
+            logger.info("%s: processing batch %d/%d (%d design docs)",
+                       self.__class__.__name__, batch_num, num_batches, len(batch))
+            
+            payload = self._build_payload(requirement, batch)
+            
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": json.dumps(payload)},
+            ]
+            
+            result = await self.client.chat_completion(
+                model=self.model,
+                messages=messages,
+                **self.model_kwargs,
+            )
+            
+            parsed = self._parse_llm_response(
+                result, self.response_model, self.__class__.__name__
+            )
+            
+            if parsed is None:
+                logger.warning(
+                    "%s: batch %d/%d failed to parse, skipping",
+                    self.__class__.__name__, batch_num, num_batches
+                )
+                continue
+            
+            # Unwrap if using SummarizedDesignSpecList wrapper
+            if isinstance(parsed, SummarizedDesignSpecList):
+                all_summaries.extend(parsed.root)
+            else:
+                all_summaries.extend(parsed)
+            
+            logger.info("%s: batch %d/%d completed, accumulated %d summaries so far",
+                       self.__class__.__name__, batch_num, num_batches, len(all_summaries))
+        
+        # Verify we got summaries for all design docs
+        if len(all_summaries) != len(design_docs):
+            logger.warning(
+                "%s: summary count mismatch: expected %d, got %d",
+                self.__class__.__name__, len(design_docs), len(all_summaries)
+            )
+        
+        logger.info("%s: completed processing %d design docs, generated %d summaries",
+                   self.__class__.__name__, len(design_docs), len(all_summaries))
+        
+        return {"summarized_designs": all_summaries}
+
+
 def dispatch_coverage(state: RTMReviewState) -> List[Send]:
     """
     LangGraph Send dispatcher: fans out one Send per decomposed spec so that
@@ -270,11 +389,13 @@ class SynthesizerNode(StandardLLMNode):
         decomposed_requirement = state.get("decomposed_requirement")
         test_suite = state.get("test_suite")
         coverage_analysis = state.get("coverage_analysis")
+        summarized_designs = state.get("summarized_designs")
         assert requirement is not None
         assert decomposed_requirement is not None
         assert test_suite is not None
         assert coverage_analysis is not None
-        return {
+        
+        payload = {
             "requirement": requirement.model_dump(),
             "decomposed_specifications": [
                 s.model_dump() for s in decomposed_requirement.decomposed_specifications
@@ -286,6 +407,16 @@ class SynthesizerNode(StandardLLMNode):
                 e.model_dump() for e in coverage_analysis
             ],
         }
+        
+        # Include summarized_designs if present (for R6 Design Alignment criterion)
+        if summarized_designs is not None and len(summarized_designs) > 0:
+            payload["summarized_designs"] = [
+                s.model_dump() for s in summarized_designs
+            ]
+        else:
+            payload["summarized_designs"] = None
+        
+        return payload
 
     def _format_response(self, parsed_result: Optional[SynthesizedAssessment]) -> RTMReviewState:
         return {"synthesized_assessment": parsed_result}
@@ -300,7 +431,7 @@ def make_summarizer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "summarizer-v2.jinja2",
+    prompt_template: str = "summarizer/v4.0.0/template.jinja2",
     **template_vars,
 ) -> SummaryNode:
     """
@@ -367,7 +498,7 @@ def make_coverage_evaluator(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "coverage_evaluator-v6.jinja2",
+    prompt_template: str = "coverage_evaluator/v7.0.0/template.jinja2",
     **template_vars,
 ) -> SingleSpecEvaluatorNode:
     """
@@ -398,7 +529,7 @@ def make_synthesizer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "synthesizer-v6.jinja2",
+    prompt_template: str = "synthesizer/v8.0.0/template.jinja2",
     **template_vars,
 ) -> SynthesizerNode:
     """
@@ -419,6 +550,37 @@ def make_synthesizer_node(
         client=client,
         model=model,
         response_model=SynthesizedAssessment,
+        system_prompt=system_prompt,
+        model_kwargs=model_kwargs
+    )
+
+
+def make_design_summarizer_node(
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str = "design_summarizer/v1.0.0/template.jinja2",
+    **template_vars,
+) -> DesignSummarizerNode:
+    """Create a DesignSummarizerNode with prompt loaded from Jinja2 template.
+    
+    Args:
+        client: RateLimitOpenAIClient instance
+        model: Model identifier string
+        model_kwargs: Model-specific keyword arguments
+        prompt_template: Filename of the Jinja2 template to render as the system prompt
+        **template_vars: Optional variables to pass to the Jinja2 template
+
+    Returns:
+        DesignSummarizerNode: Configured design summarizer node
+    """
+    system_prompt = render_prompt(prompt_template, **template_vars)
+    response_model = SummarizedDesignSpecList
+    
+    return DesignSummarizerNode(
+        client=client,
+        model=model,
+        response_model=response_model,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs
     )

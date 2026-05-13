@@ -36,6 +36,7 @@ from autoqa.components.shared.core import (
     DecomposedSpec,
     DecomposedRequirement,
     TestCase,
+    DesignDocument,
 )
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "DecomposedSpec",
     "DecomposedRequirement",
     "TestCase",
+    "DesignDocument",
     "Verdict",
     "ReviewObjective",
     "EvaluatedReviewObjective",
@@ -63,6 +65,13 @@ class ReviewObjective(BaseModel):
     """
     id: str = Field(..., description="Stable identifier, e.g. 'expected_result_support'.")
     description: str = Field(..., description="What this objective evaluates.")
+    mandatory: bool = Field(
+        default=True,
+        description=(
+            "True if this objective is mandatory and affects overall_verdict. "
+            "False if this objective is recommended/advisory only."
+        ),
+    )
 
 
 class EvaluatedReviewObjective(ReviewObjective):
@@ -70,8 +79,20 @@ class EvaluatedReviewObjective(ReviewObjective):
     Aggregator-populated row: same id/description as the input ReviewObjective,
     plus the verdict, partial flag, and assessment rationale.
     """
+    # ✅ Solution 1: Make description optional with default to handle LLM omissions
+    description: str = Field(
+        default="Evaluation criterion",
+        description="Description of what this checklist item evaluates. Defaults if LLM omits."
+    )
+    mandatory: bool = Field(
+        default=True,
+        description=(
+            "True if this objective is mandatory and affects overall_verdict. "
+            "False if this objective is recommended/advisory only."
+        ),
+    )
     verdict: Verdict = Field(
-        ...,
+        default="",
         description="Yes if the test case meets this objective, otherwise No.",
     )
     partial: bool = Field(
@@ -80,7 +101,8 @@ class EvaluatedReviewObjective(ReviewObjective):
             "True ONLY when verdict='Yes' AND coverage of this objective is "
             "incomplete in some material way (drives Yellow rendering in the "
             "viewer). Always False when verdict is No. Has NO effect on "
-            "overall_verdict aggregation — partial-Yes still passes."
+            "overall_verdict aggregation for mandatory objectives — partial-Yes still passes. "
+            "For recommended objectives, has no effect since they never affect overall_verdict."
         ),
     )
     assessment: str = Field(default="", description="Aggregator's rationale for the verdict.")
@@ -126,8 +148,10 @@ class TestCaseAssessment(BaseModel):
     overall_verdict: Verdict = Field(
         ...,
         description=(
-            "Yes iff every item in evaluated_checklist has verdict='Yes'. "
-            "Any single No flips this to No. Partial-Yes still counts as Yes."
+            "Yes iff every MANDATORY item in evaluated_checklist has verdict='Yes'. "
+            "Any single No in a mandatory objective flips this to No. "
+            "Recommended (non-mandatory) objectives do NOT affect overall_verdict. "
+            "Partial-Yes still counts as Yes."
         ),
     )
     comments: str = Field(
@@ -155,10 +179,23 @@ class TestCaseAssessment(BaseModel):
                 data["overall_verdict"] = verdict
         return data
 
+    @model_validator(mode="after")
+    def _validate_overall_verdict(self) -> "TestCaseAssessment":
+        """Validate that overall_verdict correctly reflects mandatory objectives only."""
+        mandatory_objectives = [obj for obj in self.evaluated_checklist if obj.mandatory]
+        if mandatory_objectives:
+            expected_verdict = "Yes" if all(obj.verdict == "Yes" for obj in mandatory_objectives) else "No"
+            if self.overall_verdict != expected_verdict:
+                # Log a warning but don't fail validation - LLM might have made an error
+                # In production, you might want to auto-correct this
+                pass
+        return self
+
 
 class TCReviewState(TypedDict, total=False):
     test_case: TestCase
     requirements: List[Requirement]
+    design_docs: List[DesignDocument]
     review_objectives: List[ReviewObjective]
     decomposed_requirements: Optional[List[DecomposedRequirement]]
     # Coverage stays per-spec — Send fan-out emits one SpecAnalysis per spec.

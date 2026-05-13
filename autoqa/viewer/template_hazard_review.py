@@ -241,9 +241,14 @@ function renderLeft() {
   }).join("");
 
   // Test cases bundled with the hazard.
-  const tcList = (haz.test_cases ?? []).map((tc, i) =>
-    `<li><a class="link-like" onclick="openTC(${i})">${escapeHTML(tc.test_id)}</a> — ${escapeHTML(tc.description)}</li>`
-  ).join("");
+  const tcList = (haz.test_cases ?? []).map((tc, i) => {
+    const inBaseline = tc.in_baseline ?? false;
+    const checkmark = inBaseline ? '✓' : '○';
+    return `<li>
+      <span style="margin-right:6px;font-family:ui-monospace,Menlo,monospace;color:var(--mute)" title="${inBaseline ? 'In baseline' : 'Not in baseline'}">${checkmark}</span>
+      <a class="link-like" onclick="openTC(${i})">${escapeHTML(tc.test_id)}</a> — ${escapeHTML(tc.description)}
+    </li>`;
+  }).join("");
 
   // H1-H5 mandatory findings table.
   const findingsRows = findings.map(f => {
@@ -268,7 +273,7 @@ function renderLeft() {
     <h2>Traced Requirements (RTM evidence)</h2>
     ${reqList || "<em>(no requirements traced)</em>"}
 
-    <h2>Test Cases</h2>
+    <h2>Test Cases <span style="font-size:11px;color:var(--mute);font-weight:normal">(✓ = in baseline, ○ = not in baseline)</span></h2>
     <ul class="tc-list">${tcList || "<li><em>(none)</em></li>"}</ul>
 
     <h2>Hazard Assessment</h2>

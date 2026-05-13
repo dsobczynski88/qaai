@@ -55,6 +55,8 @@ from .nodes import (
     make_h5_evaluator_node,
     make_h6_evaluator_node,
     make_h7_evaluator_node,
+    make_hazard_design_summarizer_node,
+    make_hazard_needs_summarizer_node,
     make_requirement_reviewer_node,
 )
 
@@ -139,6 +141,16 @@ class HazardReviewerRunnable:
             prompt_template=self.prompt_config.hazard_final,
         )
         requirement_reviewer = make_requirement_reviewer_node(self.rtm)
+        
+        # Create summarizer nodes
+        design_summarizer = make_hazard_design_summarizer_node(
+            self.client, self.model, self.model_kwargs,
+            prompt_template=self.prompt_config.hazard_design_summarizer,
+        )
+        needs_summarizer = make_hazard_needs_summarizer_node(
+            self.client, self.model, self.model_kwargs,
+            prompt_template=self.prompt_config.hazard_needs_summarizer,
+        )
 
         # Add all nodes to the graph
         sg.add_node("h1_evaluator", h1)
@@ -149,6 +161,8 @@ class HazardReviewerRunnable:
         sg.add_node("h6_evaluator", h6)
         sg.add_node("h7_evaluator", h7)
         sg.add_node("requirement_reviewer", requirement_reviewer)
+        sg.add_node("design_summarizer", design_summarizer)
+        sg.add_node("needs_summarizer", needs_summarizer)
         sg.add_node("final_assessment", final_assessor)
 
         # Early evaluators (H1, H2, H3, H7) run immediately from START
@@ -160,10 +174,23 @@ class HazardReviewerRunnable:
 
         # Requirement reviews also start from START (parallel with early evaluators)
         sg.add_conditional_edges(START, dispatch_requirement_reviews, ["requirement_reviewer"])
+        
+        # Summarizers run from START in parallel
+        sg.add_edge(START, "design_summarizer")
+        sg.add_edge(START, "needs_summarizer")
 
-        # Late evaluators (H4, H5) wait for requirement_reviews
+        # Late evaluators (H4, H5) wait for requirement_reviews AND summarizers
+        # We need a join node to synchronize requirement_reviewer + design_summarizer + needs_summarizer
+        sg.add_node("late_evaluator_router", lambda state: {})
+        
+        # All three must complete before late_evaluator_router
+        sg.add_edge("requirement_reviewer", "late_evaluator_router")
+        sg.add_edge("design_summarizer", "late_evaluator_router")
+        sg.add_edge("needs_summarizer", "late_evaluator_router")
+        
+        # Then dispatch H4, H5 from the router
         sg.add_conditional_edges(
-            "requirement_reviewer",
+            "late_evaluator_router",
             dispatch_hazard_evaluators_late,
             ["h4_evaluator", "h5_evaluator"],
         )

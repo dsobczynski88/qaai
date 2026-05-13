@@ -15,6 +15,7 @@ from autoqa.components.shared.core import (
     DecomposedSpec,
     DecomposedRequirement,
     TestCase,
+    DesignDocument,
 )
 
 __all__ = [
@@ -22,8 +23,11 @@ __all__ = [
     "DecomposedSpec",
     "DecomposedRequirement",
     "TestCase",
+    "DesignDocument",
     "SummarizedTestCase",
     "SummarizedTestCaseList",
+    "SummarizedDesignSpec",
+    "SummarizedDesignSpecList",
     "TestSuite",
     "Dimension",
     "Verdict",
@@ -47,7 +51,10 @@ class SummarizedTestCase(BaseModel):
     verifies: str
     protocol: List[str]
     acceptance_criteria: List[str]
-    is_generated: bool = False
+    in_baseline: bool = Field(
+        default=False,
+        description="True if this test case is in the current baseline under review"
+    )
 
 
 class SummarizedTestCaseList(RootModel[List[SummarizedTestCase]]):
@@ -59,6 +66,32 @@ class SummarizedTestCaseList(RootModel[List[SummarizedTestCase]]):
     
     The root field is automatically available and provides list-like behavior.
     """
+    pass
+
+
+class SummarizedDesignSpec(BaseModel):
+    """Summarized design document for coverage evaluation."""
+    doc_id: str = Field(..., description="Design document identifier")
+    design_intent: str = Field(
+        ..., 
+        description="Core design objective or architectural decision"
+    )
+    implements: str = Field(
+        ..., 
+        description="What requirement aspects this design addresses"
+    )
+    key_components: List[str] = Field(
+        ..., 
+        description="Major components, modules, or interfaces involved"
+    )
+    verification_hooks: List[str] = Field(
+        ..., 
+        description="Observable behaviors or interfaces that enable testing"
+    )
+
+
+class SummarizedDesignSpecList(RootModel[List[SummarizedDesignSpec]]):
+    """Wrapper for design summarizer responses (Pydantic v2 RootModel)."""
     pass
 
 
@@ -93,7 +126,7 @@ class EvaluatedSpec(BaseModel):
     covered_exists: bool = Field(
         ...,
         description=(
-            "True if at least one non-AI-generated test case in TestSuite covers "
+            "True if at least one test case in TestSuite covers "
             "any dimension of this spec, otherwise False."
         ),
     )
@@ -108,16 +141,23 @@ class EvaluatedSpec(BaseModel):
 
 
 class MandatoryFinding(BaseModel):
-    """Single item in the M1-M5 SoP-gating rubric."""
-    code: Literal["M1", "M2", "M3", "M4", "M5"]
+    """Single item in the M1-M5 SoP-gating rubric plus R6 recommended criterion.
+    
+    Note: Despite the name 'MandatoryFinding', this model now includes both
+    mandatory (M1-M5) and recommended (R6) findings for backward compatibility.
+    Only M1-M5 affect overall_verdict; R6 is advisory only.
+    """
+    code: Literal["M1", "M2", "M3", "M4", "M5", "R6"]
     dimension: Literal[
-        "Functional", "Negative", "Boundary", "Spec Coverage", "Terminology"
+        "Functional", "Negative", "Boundary", "Spec Coverage", "Terminology", "Design Alignment"
     ]
     verdict: VerdictNA = Field(
         ...,
         description=(
-            "Yes / No / N-A. Only M2 and M3 may be N-A (when the requirement has "
-            "no validation surface or no threshold/limit surface respectively). "
+            "Yes / No / N-A. Only M2, M3, and R6 may be N-A. "
+            "M2 N-A: requirement has no validation surface. "
+            "M3 N-A: requirement has no threshold/limit surface. "
+            "R6 N-A: no design documents exist. "
             "M1, M4, M5 must be Yes or No."
         ),
     )
@@ -135,7 +175,8 @@ class MandatoryFinding(BaseModel):
         description=(
             "One sentence. For M1-M3 cite TC IDs. For M4 list the uncovered "
             "spec_ids (or say 'all covered'). For M5 list specific vocabulary "
-            "mismatches (or say 'aligned')."
+            "mismatches (or say 'aligned'). For R6 describe design alignment or "
+            "state 'no design docs' when N-A."
         ),
     )
     cited_test_case_ids: List[str] = Field(
@@ -154,13 +195,17 @@ class SynthesizedAssessment(BaseModel):
     overall_verdict: Verdict = Field(
         ...,
         description=(
-            "Yes iff every item in mandatory_findings has verdict in {Yes, N-A}. "
-            "Any single No flips this to No."
+            "Yes iff every MANDATORY item (M1-M5) in mandatory_findings has verdict in {Yes, N-A}. "
+            "Any single No in M1-M5 flips this to No. R6 (recommended) does NOT affect overall_verdict."
         ),
     )
     mandatory_findings: List[MandatoryFinding] = Field(
         ...,
-        description="Exactly 5 items, in order: M1 Functional, M2 Negative, M3 Boundary, M4 Spec Coverage, M5 Terminology.",
+        description=(
+            "Exactly 6 items, in order: M1 Functional, M2 Negative, M3 Boundary, "
+            "M4 Spec Coverage, M5 Terminology, R6 Design Alignment. "
+            "Note: R6 is recommended only and does NOT affect overall_verdict."
+        ),
     )
     comments: str = Field(
         default="",
@@ -182,7 +227,9 @@ class SynthesizedAssessment(BaseModel):
 class RTMReviewState(TypedDict, total=False):
     requirement: Requirement
     test_cases: List[TestCase]
+    design_docs: List[DesignDocument]
     decomposed_requirement: Optional[DecomposedRequirement]
     test_suite: Optional[TestSuite]
+    summarized_designs: Optional[List[SummarizedDesignSpec]]
     coverage_analysis: Annotated[List[EvaluatedSpec], operator.add]
     synthesized_assessment: Optional[SynthesizedAssessment]

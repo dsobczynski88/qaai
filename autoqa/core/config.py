@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from autoqa.utils import make_output_directory
@@ -11,21 +12,68 @@ from autoqa.core.constants import (
 
 
 class PromptConfig(BaseModel):
-    """Jinja2 template filenames used by each LLM node across reviewer graphs."""
-    decomposer: str = "decomposer-v4.jinja2"
-    summarizer: str = "summarizer-v4.jinja2"  # v4 uses array-only output for better token efficiency
-    coverage: str = "coverage_evaluator-v5.jinja2"
-    synthesizer: str = "synthesizer-v6.jinja2"
+    """Jinja2 template paths used by each LLM node across reviewer graphs.
+    
+    Paths can be either:
+    - Legacy flat filenames (for backward compatibility): "decomposer-v4.jinja2"
+    - New versioned paths: "decomposer/v5.0.0/template.jinja2"
+    
+    Use PromptConfig.from_set("set_name") to load from a named prompt set manifest.
+    """
+    # Test Suite Reviewer prompts
+    decomposer: str = "decomposer/v5.0.0/template.jinja2"
+    summarizer: str = "summarizer/v4.0.0/template.jinja2"
+    design_summarizer: str = "design_summarizer/v1.0.0/template.jinja2"
+    coverage: str = "coverage_evaluator/v7.0.0/template.jinja2"
+    synthesizer: str = "synthesizer/v8.0.0/template.jinja2"
+    
+    # Test Case Reviewer prompts
+    single_test_aggregator: str = "single_test_aggregator/v6.0.0/template.jinja2"
+    single_test_coverage_eval: str = "single_test_coverage_eval/v3.0.0/template.jinja2"
+    single_test_logical_steps: str = "single_test_logical_steps/v3.0.0/template.jinja2"
+    single_test_prereqs: str = "single_test_prereqs/v3.0.0/template.jinja2"
     
     # Hazard reviewer prompts (H1-H7 + final assessor)
-    hazard_h1: str = "H1_hazard_record_completeness_and_semantic_integrity.jinja2"
-    hazard_h2: str = "H2_software_contribution_and_cause_coverage.jinja2"
-    hazard_h3: str = "H3_pre_mitigation_risk_and_exploitability_characterization.jinja2"
-    hazard_h4: str = "H4_risk_control_identification_allocation_and_coverage.jinja2"
-    hazard_h5: str = "H5_verification_depth_and_hazard_path_effectiveness.jinja2"
-    hazard_h6: str = "H6_residual_risk_closure_and_acceptability_decision.jinja2"
-    hazard_h7: str = "H7_hsha_update_and_newly_identified_hazard_capture.jinja2"
-    hazard_final: str = "hazard_final_assessor-v1.jinja2"
+    hazard_h1: str = "hazard_h1/v1.0.0/template.jinja2"
+    hazard_h2: str = "hazard_h2/v1.0.0/template.jinja2"
+    hazard_h3: str = "hazard_h3/v1.0.0/template.jinja2"
+    hazard_h4: str = "hazard_h4/v1.0.0/template.jinja2"
+    hazard_h5: str = "hazard_h5/v1.0.0/template.jinja2"
+    hazard_h6: str = "hazard_h6/v1.0.0/template.jinja2"
+    hazard_h7: str = "hazard_h7/v1.0.0/template.jinja2"
+    hazard_final: str = "hazard_final_assessor/v1.0.0/template.jinja2"
+    hazard_design_summarizer: str = "hazard_design_summarizer/v1.0.0/template.jinja2"
+    hazard_needs_summarizer: str = "hazard_needs_summarizer/v1.0.0/template.jinja2"
+    
+    @classmethod
+    def from_set(cls, set_name: str) -> "PromptConfig":
+        """Load prompt config from a named set manifest.
+        
+        Args:
+            set_name: Name of the prompt set (e.g., "test_case_reviewer_v2")
+            
+        Returns:
+            PromptConfig with paths resolved from the set manifest
+            
+        Example:
+            >>> config = PromptConfig.from_set("test_case_reviewer_v2")
+            >>> config.single_test_aggregator
+            'single_test_aggregator/v6.0.0/template.jinja2'
+        """
+        from autoqa.prompts._registry import load_set
+        resolved = load_set(set_name)
+        
+        # Start with current defaults
+        current = cls()
+        kwargs = current.model_dump()
+        
+        # Override with resolved prompts from the set
+        for role, prompt in resolved.prompts.items():
+            # Build relative path: role/version/template.jinja2
+            relative_path = f"{prompt.role}/{prompt.version}/template.jinja2"
+            kwargs[role] = relative_path
+        
+        return cls(**kwargs)
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
@@ -37,6 +85,7 @@ class Settings(BaseSettings):
         MAX_REQUESTS_PER_MINUTE: Rate limit for API requests (default: 490)
         MAX_TOKENS_PER_MINUTE: Token rate limit (default: 200000)
         MAX_OUTPUT_TOKENS: Maximum output tokens per request (default: 16000)
+        PROMPT_SET: Named prompt set to load (optional, e.g., "test_case_reviewer_v2")
     """
     openai_api_key: str = Field(..., alias='API_KEY')
     url: str = Field(..., alias='API_BASE_URL')
@@ -45,7 +94,22 @@ class Settings(BaseSettings):
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
-    prompt_config: PromptConfig = Field(default_factory=PromptConfig)
+    
+    # Optional prompt set name - if specified, overrides default prompt_config
+    prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
+    
+    _prompt_config_cache: Optional[PromptConfig] = None
+    
+    @property
+    def prompt_config(self) -> PromptConfig:
+        """Get prompt configuration, loading from prompt_set if specified."""
+        if self._prompt_config_cache is None:
+            if self.prompt_set:
+                self._prompt_config_cache = PromptConfig.from_set(self.prompt_set)
+            else:
+                self._prompt_config_cache = PromptConfig()
+        return self._prompt_config_cache
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
