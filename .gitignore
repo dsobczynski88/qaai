@@ -19,7 +19,7 @@ data/*
 !/data/.gitkeep
 
 # local datasets
-tests/fixtures/local*
+tests/fixtures/local/*
 !/tests/fixtures/local/.gitkeep
 
 # generated datasets
