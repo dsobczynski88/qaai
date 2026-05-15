@@ -1,7 +1,7 @@
 .vscode/
 output/
 CLAUDE.md
-
+.claude/
 
 # Config files
 config.yaml
@@ -18,6 +18,10 @@ docs/*
 data/*
 !/data/.gitkeep
 
+# local datasets
+tests/fixtures/local*
+!/tests/fixtures/local/.gitkeep
+
 # generated datasets
 tests/fixtures/generated/*
 !tests/fixtures/generated/.gitkeep
@@ -27,6 +31,8 @@ tests/fixtures/mlflow_eval/*
 !tests/fixtures/mlflow_eval/.gitkeep
 tests/fixtures/mlflow_eval_quick/*
 !tests/fixtures/mlflow_eval_quick/.gitkeep
+mlflow.db
+mlruns/
 
 # logs
 logs/*
