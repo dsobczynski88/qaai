@@ -8,7 +8,7 @@ backward compatibility with existing call sites.
 
 from pydantic import BaseModel, Field, RootModel
 import operator
-from typing import Optional, List, Literal, TypedDict, Annotated
+from typing import Optional, List, Literal, TypedDict, Annotated, Any, Dict
 
 from autoqa.components.shared.core import (
     Requirement,
@@ -225,9 +225,15 @@ class SynthesizedAssessment(BaseModel):
 
 
 class RTMReviewState(TypedDict, total=False):
+    # Data source fields (Option 1: local OR Option 2: JAMA)
     requirement: Requirement
     test_cases: List[TestCase]
-    design_docs: List[DesignDocument]
+    # JAMA integration fields (Option 2 only)
+    pyjama_request: Optional[Any]  # PyJamaRequest, but avoid import cycle
+    jama_data: Optional[List[Dict[str, Any]]]
+    jama_metadata: Optional[Dict[str, Any]]
+    # Pipeline state fields
+    design_docs: Optional[List[DesignDocument]]
     decomposed_requirement: Optional[DecomposedRequirement]
     test_suite: Optional[TestSuite]
     summarized_designs: Optional[List[SummarizedDesignSpec]]

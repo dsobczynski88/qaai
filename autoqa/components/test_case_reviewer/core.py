@@ -16,7 +16,7 @@ shapes:
 - TCReviewState — the LangGraph TypedDict that threads everything.
 """
 from pydantic import BaseModel, Field, model_validator
-from typing import Any, Optional, List, Literal, TypedDict, Annotated
+from typing import Any, Optional, List, Literal, TypedDict, Annotated, Dict
 import operator
 
 
@@ -193,10 +193,16 @@ class TestCaseAssessment(BaseModel):
 
 
 class TCReviewState(TypedDict, total=False):
+    # Data source fields (Option 1: local OR Option 2: JAMA)
     test_case: TestCase
     requirements: List[Requirement]
     design_docs: List[DesignDocument]
     review_objectives: List[ReviewObjective]
+    # JAMA integration fields (Option 2 only)
+    pyjama_request: Optional[Any]  # PyJamaRequest, but avoid import cycle
+    jama_data: Optional[List[Dict[str, Any]]]
+    jama_metadata: Optional[Dict[str, Any]]
+    # Pipeline state fields
     decomposed_requirements: Optional[List[DecomposedRequirement]]
     # Coverage stays per-spec — Send fan-out emits one SpecAnalysis per spec.
     coverage_analysis: Annotated[List[SpecAnalysis], operator.add]

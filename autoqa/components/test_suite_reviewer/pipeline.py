@@ -9,6 +9,11 @@ from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
 from autoqa.components.processors import df_to_prompt_items
 from autoqa.components.clients import RateLimitOpenAIClient
+from autoqa.components.shared.nodes import (
+    make_data_integration_node,
+    make_transform_node_test_suite_review,
+)
+from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from .core import RTMReviewState
 from .nodes import (
     make_coverage_evaluator,
@@ -48,6 +53,7 @@ class RTMReviewerRunnable:
         model_kwargs: dict = {},
         checkpointer: Union[MemorySaver, None] = None,
         prompt_config: Optional[PromptConfig] = None,
+        pyjama_config: Optional[PyJamaNodeConfig] = None,
     ):
 
         self.client = client
@@ -55,6 +61,7 @@ class RTMReviewerRunnable:
         self.model_kwargs = model_kwargs
         self.checkpointer = checkpointer # currently the graph collects intermediate responses via operator.add (no specific checkpointer implemented)
         self.prompt_config = prompt_config if prompt_config is not None else settings.prompt_config
+        self.pyjama_config = pyjama_config
         self.graph = self.build()
 
 
@@ -65,13 +72,21 @@ class RTMReviewerRunnable:
         Graph structure:
             START
               ↓
-            ┌─────────────────────────────────────────────────┐
-            │DECOMPOSER, SUMMARIZER, DESIGN_SUMMARIZER (||)   │
-            └─────────────────────────────────────────────────┘
-              ↓ (fan-in: waits for all three)
-            ┌─────────────────────────────────────────────────┐
-            │COVERAGE_ROUTER (sync point)                     │
-            └─────────────────────────────────────────────────┘
+            ┌─────────────────────────────────┐
+            │DATA_INTEGRATION (fetch/passthru)│
+            └─────────────────────────────────┘
+              ↓
+            ┌─────────────────────────────────┐
+            │TRANSFORM (JAMA→state or no-op)  │
+            └─────────────────────────────────┘
+              ↓
+            ┌─────────────────────────────────┐
+            │DECOMPOSER, SUMMARIZER (parallel)│
+            └─────────────────────────────────┘
+              ↓ (fan-in: waits for both)
+            ┌─────────────────────────────────┐
+            │COVERAGE_ROUTER (sync point)     │
+            └─────────────────────────────────┘
               ↓ dispatch_coverage → Send × N
             ┌─────────────────────────────────────────────────┐
             │SPEC_EVALUATOR × N  (parallel)                   │
@@ -84,6 +99,10 @@ class RTMReviewerRunnable:
             END
         """
         sg = StateGraph(RTMReviewState)
+
+        # Data integration layer
+        data_integration = make_data_integration_node(self.pyjama_config)
+        transform = make_transform_node_test_suite_review()
 
         decomposer = make_decomposer_node(
             self.client, self.model, self.model_kwargs,
@@ -106,6 +125,9 @@ class RTMReviewerRunnable:
             prompt_template=self.prompt_config.synthesizer,
         )
 
+        # Add all nodes
+        sg.add_node("data_integration", data_integration)
+        sg.add_node("transform", transform)
         sg.add_node("decomposer", decomposer)
         sg.add_node("summarizer", summarizer)
         sg.add_node("design_summarizer", design_summarizer)
@@ -115,10 +137,13 @@ class RTMReviewerRunnable:
         sg.add_node("spec_evaluator", spec_evaluator)
         sg.add_node("synthesizer", synthesizer)
 
-        # All three run in parallel from START
-        sg.add_edge(START, "decomposer")
-        sg.add_edge(START, "summarizer")
-        sg.add_edge(START, "design_summarizer")
+        # Wire data integration layer
+        sg.add_edge(START, "data_integration")
+        sg.add_edge("data_integration", "transform")
+
+        # Decomposer and summarizer run in parallel from transform
+        sg.add_edge("transform", "decomposer")
+        sg.add_edge("transform", "summarizer")
 
         # Fan-in to coverage_router, then fan-out via Send to N parallel spec evaluators
         sg.add_edge("decomposer", "coverage_router")

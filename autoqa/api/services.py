@@ -14,6 +14,7 @@ from autoqa.api.schemas import (
     TestCaseReviewResponse,
 )
 from autoqa.components.clients import RateLimitOpenAIClient
+from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.components.test_case_reviewer.pipeline import TCReviewerRunnable
@@ -28,6 +29,8 @@ class RTMReviewService:
 
     Accepts an optional pre-built RTMReviewerRunnable so a single compiled
     graph can be shared with HazardReviewService at lifespan time.
+    
+    Supports both local data input and JAMA baseline fetching via pyjama_config.
     """
 
     def __init__(
@@ -36,9 +39,10 @@ class RTMReviewService:
         model: str,
         model_kwargs: dict = {},
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
+        pyjama_config: Optional[PyJamaNodeConfig] = None,
     ):
         self.graph = rtm_runnable or RTMReviewerRunnable(
-            client, model, model_kwargs, checkpointer=MemorySaver()
+            client, model, model_kwargs, checkpointer=MemorySaver(), pyjama_config=pyjama_config
         )
 
     async def run(self, request: ReviewRequest) -> ReviewResponse:
@@ -120,6 +124,8 @@ class TestCaseReviewService:
     """
     Wraps the compiled LangGraph test_case_reviewer pipeline for use by the FastAPI layer.
     Instantiated once at application startup and stored on app.state.
+    
+    Supports both local data input and JAMA baseline fetching via pyjama_config.
     """
 
     def __init__(
@@ -127,9 +133,10 @@ class TestCaseReviewService:
         client: RateLimitOpenAIClient,
         model: str,
         model_kwargs: dict = {},
+        pyjama_config: Optional[PyJamaNodeConfig] = None,
     ):
         self.graph = TCReviewerRunnable(
-            client, model, model_kwargs, checkpointer=MemorySaver()
+            client, model, model_kwargs, checkpointer=MemorySaver(), pyjama_config=pyjama_config
         )
 
     async def run(self, request: TestCaseReviewRequest) -> TestCaseReviewResponse:

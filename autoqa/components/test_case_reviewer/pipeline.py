@@ -2,11 +2,13 @@
 LangGraph pipeline for the single-test-case reviewer.
 
 A TestCase plus its traced Requirements (and a review-objectives checklist)
-enter at START. The decomposer splits each requirement into atomic specs.
-A no-op coverage_router then fans out three independent waves of Sends —
-one per review axis — to per-spec evaluators that run in parallel. The
-aggregator synthesizes the three accumulated SpecAnalysis lists into a
-single TestCaseAssessment with the review-objectives checklist populated.
+enter at START. The data_integration node conditionally fetches from JAMA
+(if pyjama_request present) or passes through local data. The transform node
+converts JAMA data to state format. The decomposer splits each requirement
+into atomic specs. A no-op coverage_router then fans out three independent
+waves of Sends — one per review axis — to per-spec evaluators that run in
+parallel. The aggregator synthesizes the three accumulated SpecAnalysis lists
+into a single TestCaseAssessment with the review-objectives checklist populated.
 """
 from pathlib import Path
 from typing import Optional, Union
@@ -16,6 +18,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
 from autoqa.components.clients import RateLimitOpenAIClient
+from autoqa.components.shared.nodes import (
+    make_data_integration_node,
+    make_transform_node_test_case_review,
+)
+from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from autoqa.core.config import settings
 from autoqa.utils import save_graph_png
 
@@ -36,6 +43,14 @@ class TCReviewerRunnable:
 
     Graph structure:
         START
+          ↓
+        ┌──────────────────────────────────────────┐
+        │ DATA_INTEGRATION (fetch/passthru)          │
+        └──────────────────────────────────────────┘
+          ↓
+        ┌──────────────────────────────────────────┐
+        │ TRANSFORM (JAMA→state or no-op)            │
+        └──────────────────────────────────────────┘
           ↓
         ┌──────────────────────────────────────────┐
         │ DECOMPOSER (sequential loop over reqs)    │
@@ -63,15 +78,21 @@ class TCReviewerRunnable:
         model: str,
         model_kwargs: dict = {},
         checkpointer: Union[MemorySaver, None] = None,
+        pyjama_config: Optional[PyJamaNodeConfig] = None,
     ):
         self.client = client
         self.model = model
         self.model_kwargs = model_kwargs
         self.checkpointer = checkpointer
+        self.pyjama_config = pyjama_config
         self.graph = self.build()
 
     def build(self) -> Runnable:
         sg = StateGraph(TCReviewState)
+
+        # Data integration layer
+        data_integration = make_data_integration_node(self.pyjama_config)
+        transform = make_transform_node_test_case_review()
 
         decomposer = make_tc_decomposer_node(
             self.client, self.model, self.model_kwargs,
@@ -89,6 +110,9 @@ class TCReviewerRunnable:
             self.client, self.model, self.model_kwargs,
         )
 
+        # Add all nodes
+        sg.add_node("data_integration", data_integration)
+        sg.add_node("transform", transform)
         sg.add_node("decomposer", decomposer)
         # Join barrier: add_conditional_edges needs a single named source for
         # each fan-out. coverage_router is the shared parent that all three
@@ -99,7 +123,10 @@ class TCReviewerRunnable:
         sg.add_node("prereqs_evaluator", prereqs_eval)
         sg.add_node("aggregator", aggregator)
 
-        sg.add_edge(START, "decomposer")
+        # Wire data integration layer
+        sg.add_edge(START, "data_integration")
+        sg.add_edge("data_integration", "transform")
+        sg.add_edge("transform", "decomposer")
         sg.add_edge("decomposer", "coverage_router")
 
         # Coverage axis fans out per spec via Send. Logical and prereqs are

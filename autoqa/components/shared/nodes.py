@@ -8,6 +8,10 @@ Class hierarchy:
   validate -> build -> call -> parse -> format.
 - DecomposerNode(StandardLLMNode): decomposes a single requirement into atomic
   specifications; reused by every reviewer component.
+
+Data Integration:
+- make_data_integration_node(): factory for conditional JAMA fetch node
+- make_transform_node_*(): factories for JAMA→state transform nodes
 """
 import html
 import json
@@ -21,6 +25,12 @@ from autoqa.prj_logger import ProjectLogger
 from autoqa.core.config import settings
 
 from .core import DecomposedRequirement
+from .data_integration import (
+    DataIntegrationNode,
+    PyJamaNodeConfig,
+    transform_test_suite_review_to_state,
+    transform_test_case_review_to_state,
+)
 
 project_logger = ProjectLogger(name="logger.shared.nodes", log_file=settings.log_file_path)
 project_logger.config()
@@ -360,3 +370,113 @@ def make_decomposer_node(
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
     )
+
+
+# Data Integration Node Factories
+
+def make_data_integration_node(
+    pyjama_config: Optional[PyJamaNodeConfig] = None,
+) -> DataIntegrationNode:
+    """
+    Create a DataIntegrationNode for conditional JAMA fetching.
+    
+    This node serves as the entry point for all pipelines, supporting two modes:
+    - Local mode: pyjama_request absent → no-op passthrough
+    - JAMA mode: pyjama_request present → fetch from baseline
+    
+    Args:
+        pyjama_config: Optional PyJama configuration. If None, will attempt
+                      lazy initialization from environment variables.
+    
+    Returns:
+        DataIntegrationNode: Configured data integration node
+    
+    Example:
+        >>> # In pipeline.py
+        >>> data_integration = make_data_integration_node(pyjama_config)
+        >>> sg.add_node("data_integration", data_integration)
+        >>> sg.add_edge(START, "data_integration")
+    """
+    return DataIntegrationNode(pyjama_config)
+
+
+def make_transform_node_test_suite_review():
+    """
+    Create a transform node for test_suite_reviewer (RTM) pipeline.
+    
+    Converts JAMA test_suite_review data to RTMReviewState format:
+    - jama_data present: transforms to {requirement, test_cases}
+    - jama_data absent: no-op (data already in state)
+    
+    Returns:
+        Callable node function compatible with LangGraph
+    
+    Example:
+        >>> # In test_suite_reviewer/pipeline.py
+        >>> transform = make_transform_node_test_suite_review()
+        >>> sg.add_node("transform", transform)
+        >>> sg.add_edge("data_integration", "transform")
+    """
+    def transform(state) -> dict:
+        jama_data = state.get("jama_data")
+        
+        if jama_data:
+            # JAMA path: transform raw data to state format
+            logger.info("Transforming %d JAMA entries to RTMReviewState format", len(jama_data))
+            transformed = transform_test_suite_review_to_state(jama_data)
+            if transformed:
+                # Return first entry (single requirement per invocation)
+                # For batch processing, caller should loop over jama_data
+                logger.info("Transform successful: requirement=%s, test_cases=%d",
+                          transformed[0].get("requirement", {}).req_id if transformed[0].get("requirement") else "unknown",
+                          len(transformed[0].get("test_cases", [])))
+                return transformed[0]
+            logger.warning("Transform returned empty result")
+            return {}
+        
+        # Local path: data already in state (requirement, test_cases)
+        logger.debug("Local mode: skipping JAMA transform")
+        return {}
+    
+    return transform
+
+
+def make_transform_node_test_case_review():
+    """
+    Create a transform node for test_case_reviewer pipeline.
+    
+    Converts JAMA test_case_review data to TCReviewState format:
+    - jama_data present: transforms to {test_case, requirements}
+    - jama_data absent: no-op (data already in state)
+    
+    Returns:
+        Callable node function compatible with LangGraph
+    
+    Example:
+        >>> # In test_case_reviewer/pipeline.py
+        >>> transform = make_transform_node_test_case_review()
+        >>> sg.add_node("transform", transform)
+        >>> sg.add_edge("data_integration", "transform")
+    """
+    def transform(state) -> dict:
+        jama_data = state.get("jama_data")
+        
+        if jama_data:
+            # JAMA path: transform raw data to state format
+            logger.info("Transforming %d JAMA entries to TCReviewState format", len(jama_data))
+            transformed = transform_test_case_review_to_state(jama_data)
+            if transformed:
+                # Return first entry (single test case per invocation)
+                # For batch processing, caller should loop over jama_data
+                logger.info("Transform successful: test_case=%s, requirements=%d",
+                          transformed[0].get("test_case", {}).test_id if transformed[0].get("test_case") else "unknown",
+                          len(transformed[0].get("requirements", [])))
+                return transformed[0]
+            logger.warning("Transform returned empty result")
+            return {}
+        
+        # Local path: data already in state (test_case, requirements)
+        logger.debug("Local mode: skipping JAMA transform")
+        return {}
+    
+    return transform
