@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from httpx import AsyncClient, ASGITransport
+
 from autoqa.core.config import settings
 from autoqa.prj_logger import ProjectLogger
 
@@ -29,7 +31,48 @@ from autoqa.components.test_suite_reviewer.core import (
     SummarizedTestCase,
     TestSuite,
     EvaluatedSpec,
+    DesignDocument,
 )
+
+from autoqa.api.main import app
+
+
+@pytest.fixture
+def real_client():
+    """Provide a real OpenAI client for integration tests.
+    
+    Security: Validates that PYTEST_BASE_URL is not a production endpoint.
+    """
+    api_key = os.getenv("PYTEST_API_KEY")
+    base_url = os.getenv("PYTEST_BASE_URL")
+    if not api_key:
+        pytest.skip("PYTEST_API_KEY not set — skipping integration test")
+    
+    # Security check: prevent accidental use of production endpoints
+    if base_url and "prod" in base_url.lower():
+        pytest.fail(
+            "PYTEST_BASE_URL appears to be a production endpoint. "
+            "Integration tests must use test/staging endpoints only."
+        )
+    
+    return RateLimitOpenAIClient(api_key=api_key, base_url=base_url)
+
+@pytest.fixture
+async def client():
+    """Async HTTP client for API testing.
+    
+    Uses ASGITransport to test the application in-process without
+    needing to start a separate server.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+def real_model():
+    return os.getenv("PYTEST_MODEL")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def configure_test_logger():
@@ -55,31 +98,31 @@ def configure_test_logger():
             handler.flush()
 
 
+def _load_test_suite_fixture() -> dict:
+    """Load requirement, test_cases, and design_docs from test_suite_review_all_fields.jsonl."""
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "test_suite_review_all_fields.jsonl"
+    with fixture_path.open("r", encoding="utf-8") as f:
+        data = json.loads(f.readline())
+    return {
+        "requirement": Requirement.model_validate(data["requirement"]),
+        "test_cases": [TestCase.model_validate(tc) for tc in data["test_cases"]],
+        "design_docs": [DesignDocument.model_validate(dd) for dd in data.get("design_docs", [])],
+    }
+
+
 @pytest.fixture
 def sample_requirement():
-    return Requirement(
-        req_id="REQ-001",
-        text="The system shall display an alert when sensor reading exceeds 100 mg/dL.",
-    )
+    return _load_test_suite_fixture()["requirement"]
+
 
 @pytest.fixture
 def sample_test_cases():
-    return [
-        TestCase(
-            test_id="TC-001",
-            description="Verify alert fires above threshold",
-            setup="Sensor connected",
-            steps="Set reading to 105",
-            expectedResults="Alert displayed",
-        ),
-        TestCase(
-            test_id="TC-002",
-            description="Verify no alert below threshold",
-            setup="Sensor connected",
-            steps="Set reading to 95",
-            expectedResults="No alert",
-        ),
-    ]
+    return _load_test_suite_fixture()["test_cases"]
+
+
+@pytest.fixture
+def sample_design_docs():
+    return _load_test_suite_fixture()["design_docs"]
 
 
 @pytest.fixture
@@ -108,25 +151,64 @@ def sample_decomposed_requirement(sample_requirement):
 def sample_test_suite(sample_requirement, sample_test_cases):
     summaries = [
         SummarizedTestCase(
-            test_case_id="TC-001",
-            objective="Verify alert above threshold",
-            verifies="REQ-001",
-            protocol=["Set reading to 105", "Check UI for alert"],
-            acceptance_criteria=["Alert shown within 1s"],
-        ),
-        SummarizedTestCase(
-            test_case_id="TC-002",
-            objective="Verify no alert below threshold",
-            verifies="REQ-001",
-            protocol=["Set reading to 95", "Check UI"],
-            acceptance_criteria=["No alert displayed"],
-        ),
+            test_case_id=tc.test_id,
+            objective=tc.description,
+            verifies=sample_requirement.req_id,
+            protocol=[tc.steps],
+            acceptance_criteria=[tc.expectedResults],
+        )
+        for tc in sample_test_cases
     ]
     return TestSuite(
         requirement=sample_requirement,
         test_cases=sample_test_cases,
         summary=summaries,
     )
+
+
+def _load_hazard_fixture(include_design_docs: bool) -> HazardRecord:
+    """Parse hazard_full_traceability.jsonl and flatten requirements_traceability."""
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_full_traceability.jsonl"
+    with fixture_path.open("r", encoding="utf-8") as f:
+        data = json.loads(f.readline())
+
+    reqs_trace = data.pop("requirements_traceability", [])
+    requirements = []
+    test_cases_seen: dict = {}
+    design_docs_seen: dict = {}
+    user_needs_seen: dict = {}
+    sys_reqs_seen: dict = {}
+
+    for trace in reqs_trace:
+        req = trace.get("requirement", {})
+        requirements.append(req)
+        for tc in trace.get("test_cases", []):
+            test_cases_seen.setdefault(tc["test_id"], tc)
+        if include_design_docs:
+            for dd in trace.get("design_docs", []):
+                design_docs_seen.setdefault(dd["doc_id"], dd)
+        for sys_req in trace.get("system_requirements", []):
+            for un in sys_req.get("user_needs", []):
+                user_needs_seen.setdefault(un["req_id"], un)
+            sys_req_flat = {k: v for k, v in sys_req.items() if k != "user_needs"}
+            sys_reqs_seen.setdefault(sys_req_flat["req_id"], sys_req_flat)
+
+    data["requirements"] = requirements
+    data["test_cases"] = list(test_cases_seen.values())
+    data["design_docs"] = list(design_docs_seen.values()) if include_design_docs else []
+    data["user_needs"] = list(user_needs_seen.values()) if include_design_docs else []
+    data["system_requirements"] = list(sys_reqs_seen.values()) if include_design_docs else []
+    return HazardRecord.model_validate(data)
+
+
+@pytest.fixture
+def hazard_full_traceability():
+    """Full-traceability HazardRecord: requirements, test_cases, design_docs, user_needs,
+    and system_requirements all populated.
+
+    Used for the M1-M5 + R6 (6 findings per requirement) test path.
+    """
+    return _load_hazard_fixture(include_design_docs=True)
 
 
 @pytest.fixture(scope="session")
@@ -226,80 +308,3 @@ def jsonl_recorders_hz():
             print(f"\n[viewer_hz] wrote {out}")
 
 
-@pytest.fixture
-def real_client():
-    """Provide a real OpenAI client for integration tests.
-    
-    Security: Validates that PYTEST_BASE_URL is not a production endpoint.
-    """
-    api_key = os.getenv("PYTEST_API_KEY")
-    base_url = os.getenv("PYTEST_BASE_URL")
-    if not api_key:
-        pytest.skip("PYTEST_API_KEY not set — skipping integration test")
-    
-    # Security check: prevent accidental use of production endpoints
-    if base_url and "prod" in base_url.lower():
-        pytest.fail(
-            "PYTEST_BASE_URL appears to be a production endpoint. "
-            "Integration tests must use test/staging endpoints only."
-        )
-    
-    return RateLimitOpenAIClient(api_key=api_key, base_url=base_url)
-
-
-@pytest.fixture
-def real_model():
-    return os.getenv("PYTEST_MODEL")
-
-def _load_hazard_fixture(include_design_docs: bool) -> HazardRecord:
-    """Parse hazard_full_traceability.jsonl and flatten requirements_traceability."""
-    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_full_traceability.jsonl"
-    with fixture_path.open("r", encoding="utf-8") as f:
-        data = json.loads(f.readline())
-
-    reqs_trace = data.pop("requirements_traceability", [])
-    requirements = []
-    test_cases_seen: dict = {}
-    design_docs_seen: dict = {}
-    user_needs_seen: dict = {}
-    sys_reqs_seen: dict = {}
-
-    for trace in reqs_trace:
-        req = trace.get("requirement", {})
-        requirements.append(req)
-        for tc in trace.get("test_cases", []):
-            test_cases_seen.setdefault(tc["test_id"], tc)
-        if include_design_docs:
-            for dd in trace.get("design_docs", []):
-                design_docs_seen.setdefault(dd["doc_id"], dd)
-        for sys_req in trace.get("system_requirements", []):
-            for un in sys_req.get("user_needs", []):
-                user_needs_seen.setdefault(un["req_id"], un)
-            sys_req_flat = {k: v for k, v in sys_req.items() if k != "user_needs"}
-            sys_reqs_seen.setdefault(sys_req_flat["req_id"], sys_req_flat)
-
-    data["requirements"] = requirements
-    data["test_cases"] = list(test_cases_seen.values())
-    data["design_docs"] = list(design_docs_seen.values()) if include_design_docs else []
-    data["user_needs"] = list(user_needs_seen.values()) if include_design_docs else []
-    data["system_requirements"] = list(sys_reqs_seen.values()) if include_design_docs else []
-    return HazardRecord.model_validate(data)
-
-
-@pytest.fixture
-def sample_hazard():
-    """Minimal HazardRecord: requirements + test_cases only, no design_docs or user_needs.
-
-    Used for the M1-M5 only (5 findings per requirement) test path.
-    """
-    return _load_hazard_fixture(include_design_docs=False)
-
-
-@pytest.fixture
-def hazard_full_traceability():
-    """Full-traceability HazardRecord: requirements, test_cases, design_docs, user_needs,
-    and system_requirements all populated.
-
-    Used for the M1-M5 + R6 (6 findings per requirement) test path.
-    """
-    return _load_hazard_fixture(include_design_docs=True)
