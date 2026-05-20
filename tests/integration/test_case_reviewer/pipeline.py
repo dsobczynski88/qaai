@@ -87,9 +87,7 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
 @pytest.mark.parametrize(
     "fixture_name",
     [
-        'converted_PRJ01624_VL_1.1.000_tc_reviewer_format.jsonl'
-        #"test_case_review_min_fields.jsonl",
-        #"test_case_review_all_fields.jsonl",
+        "test_case_review_all_fields.jsonl",
     ],
 )
 async def test_test_case_reviewer(

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from autoqa.utils import make_output_directory
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
         PROMPT_SET: Named prompt set to load (optional, e.g., "test_case_reviewer_v2")
     """
     openai_api_key: str = Field(..., alias='API_KEY')
-    url: str = Field(..., alias='API_BASE_URL')
+    url: Union[str, None] = Field(default=None, alias='API_BASE_URL')
     model: str = Field(..., alias='API_MODEL')
     max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE

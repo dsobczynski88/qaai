@@ -16,5 +16,5 @@ HTML_TEMPLATE = (
     _html
     .replace("{{CSS}}",          _css)
     .replace("{{JS}}",           _js)
-    .replace("{{HEADER_TITLE}}", "Batch Output Viewer")
+    .replace("{{HEADER_TITLE}}", "Test Suite Reviewer")
 )

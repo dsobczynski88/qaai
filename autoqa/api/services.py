@@ -6,6 +6,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 
 from autoqa.api.schemas import (
+    HazardBatchReviewResponse,
+    HazardReviewFromExcelRequest,
     HazardReviewRequest,
     HazardReviewResponse,
     ReviewRequest,
@@ -13,6 +15,7 @@ from autoqa.api.schemas import (
     TestCaseReviewRequest,
     TestCaseReviewResponse,
 )
+from autoqa.components.hazard_risk_reviewer.loader import hazard_dict_to_record, parse_sha_excel
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
@@ -117,6 +120,26 @@ class HazardReviewService:
             hazard=request.hazard,
             hazard_assessment=final_state.get("hazard_assessment"),
             requirement_reviews=final_state.get("requirement_reviews", []),
+        )
+
+    async def run_from_excel(
+        self, request: HazardReviewFromExcelRequest
+    ) -> HazardBatchReviewResponse:
+        logger = logging.getLogger("autoqa.api.hazard")
+        hazard_dicts = parse_sha_excel(request.file_path, request.sheet_name)
+        results = []
+        for d in hazard_dicts:
+            hazard = hazard_dict_to_record(d)
+            thread_id = f"{request.thread_id_prefix}-{hazard.hazard_id}" if hazard.hazard_id else request.thread_id_prefix
+            review_request = HazardReviewRequest(thread_id=thread_id, hazard=hazard)
+            result = await self.run(review_request)
+            results.append(result)
+            logger.info("Completed hazard review for %s", hazard.hazard_id)
+        return HazardBatchReviewResponse(
+            status="completed",
+            thread_id_prefix=request.thread_id_prefix,
+            total=len(results),
+            results=results,
         )
 
 

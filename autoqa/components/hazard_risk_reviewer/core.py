@@ -91,7 +91,7 @@ class HazardRecord(BaseModel):
     ots_software: str = Field(..., description="OTS software component if applicable")
     hazardous_sequence_of_events: str
     software_related_causes: str
-    harm_severity_rationale: str
+    harm_severity_rationale: str = Field(default="")
     harm: str
     severity: str
     exploitability_pre_mitigation: str
@@ -109,8 +109,8 @@ class HazardRecord(BaseModel):
     urra_item: str
     residual_risk_acceptability: str
     requirements: List[Requirement] = Field(
-        ..., min_length=1,
-        description="Requirements traced to this hazard (must include at least one).",
+        default_factory=list,
+        description="Requirements traced to this hazard.",
     )
     test_cases: List[TestCase] = Field(default_factory=list)
     design_docs: List[DesignDocument] = Field(default_factory=list)

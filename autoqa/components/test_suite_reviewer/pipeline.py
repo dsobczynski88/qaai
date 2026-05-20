@@ -141,9 +141,10 @@ class RTMReviewerRunnable:
         sg.add_edge(START, "data_integration")
         sg.add_edge("data_integration", "transform")
 
-        # Decomposer and summarizer run in parallel from transform
+        # Decomposer, summarizer, and design_summarizer run in parallel from transform
         sg.add_edge("transform", "decomposer")
         sg.add_edge("transform", "summarizer")
+        sg.add_edge("transform", "design_summarizer")
 
         # Fan-in to coverage_router, then fan-out via Send to N parallel spec evaluators
         sg.add_edge("decomposer", "coverage_router")

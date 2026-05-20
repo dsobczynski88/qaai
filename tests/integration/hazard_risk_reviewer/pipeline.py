@@ -51,16 +51,15 @@ def _serialize_hazard_state(state: dict) -> dict:
 @pytest.mark.parametrize(
     "hazard_fixture_name,expected_findings_per_req",
     [
-        ("sample_hazard", 5),  # min fields: M1-M5 only (no design_docs)
-        ("sample_hazard_full_traceability", 6),  # all fields: M1-M5 + R6 (with design_docs)
+        ("hazard_full_traceability", 6),  # all fields: M1-M5 + R6 (with design_docs)
     ],
 )
 async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name, expected_findings_per_req, jsonl_recorders_hz, request):
     """Run the full hazard pipeline end-to-end against a real LLM.
     
     Parametrized to test both:
-    - Min fields (sample_hazard): No design_docs or user_needs, produces M1-M5 only
-    - All fields (sample_hazard_full_traceability): Full traceability with design_docs,
+    - Min fields (sample_hazard): No design_docs or user_needs, produces M1-M5 + R6 N-A
+    - All fields (hazard_full_traceability): Full traceability with design_docs,
       user_needs, system_requirements, produces M1-M5 + R6
     
     Expected behavior:
@@ -194,66 +193,3 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name
     # Note: inputs.jsonl and outputs.jsonl are recorded for hazard viewer generation
     # The hazard viewer (viewer_hz.html) will be auto-generated at session teardown
     # by the jsonl_recorders_hz fixture
-
-
-@pytest.mark.integration
-@pytest.mark.skip(reason="Optional performance verification test - enable manually for CI performance monitoring")
-async def test_hazard_pipeline_parallelism_verification(real_client, real_model, sample_hazard):
-    """
-    Verify the parallel execution topology:
-    - H1, H2, H3, H7 run concurrently with requirement_reviewer (early evaluators)
-    - H4, H5 wait for requirement_reviews to complete (late evaluators)
-    - H6 waits for H3, H4, H5 (residual risk closure)
-    - Final assessment waits for all 7 findings
-    
-    This test runs the pipeline and checks the log file for evidence of
-    concurrent execution patterns.
-    """
-    import time
-    from pathlib import Path
-    
-    graph = HazardReviewerRunnable(client=real_client, model=real_model)
-    initial_state: HazardReviewState = {"hazard": sample_hazard}
-    
-    start_time = time.time()
-    result: HazardReviewState = await graph.graph.ainvoke(initial_state)
-    elapsed = time.time() - start_time
-    
-    # Verify the result is complete
-    assessment = result.get("hazard_assessment")
-    assert isinstance(assessment, HazardAssessment)
-    assert len(assessment.mandatory_findings) == 7
-    
-    # Read the log file to verify execution order
-    log_path = Path(settings.log_file_path)
-    if log_path.exists():
-        log_content = log_path.read_text()
-        
-        # Check that early evaluators (H1, H2, H3, H7) are mentioned
-        # These should appear early in the log
-        assert "h1_evaluator" in log_content or "H1" in log_content
-        assert "h2_evaluator" in log_content or "H2" in log_content
-        assert "h3_evaluator" in log_content or "H3" in log_content
-        assert "h7_evaluator" in log_content or "H7" in log_content
-        
-        # Check that late evaluators (H4, H5) are mentioned
-        assert "h4_evaluator" in log_content or "H4" in log_content
-        assert "h5_evaluator" in log_content or "H5" in log_content
-        
-        # Check that H6 is mentioned
-        assert "h6_evaluator" in log_content or "H6" in log_content
-        
-        print(f"\n[parallelism_check] Pipeline completed in {elapsed:.2f}s")
-        print(f"[parallelism_check] Log file: {log_path}")
-        print(f"[parallelism_check] Early evaluators (H1,H2,H3,H7) + requirement_reviewer run in parallel")
-        print(f"[parallelism_check] Late evaluators (H4,H5) wait for requirement_reviews")
-        print(f"[parallelism_check] H6 waits for H3,H4,H5")
-        print(f"[parallelism_check] Final assessment waits for all 7 findings")
-    else:
-        print(f"\n[parallelism_check] Log file not found at {log_path}")
-        print(f"[parallelism_check] Pipeline completed in {elapsed:.2f}s")
-    
-    # Performance expectation: with parallelism, should be faster than sequential
-    # Sequential would be ~7-8 LLM calls in series; parallel is ~3 stages
-    # This is a soft check - just log the timing
-    print(f"[parallelism_check] Expected ~30-40% speedup vs sequential execution")

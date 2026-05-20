@@ -29,6 +29,7 @@ dependencies = [
   "truststore>=0.10.4",
   "pyjama-fastapi",
   "langchain>=1.2.17",
+  "pytest>=9.0.2",
 ]
 
 [dependency-groups]

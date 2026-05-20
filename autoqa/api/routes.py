@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from autoqa.api.schemas import (
+    HazardBatchReviewResponse,
+    HazardReviewFromExcelRequest,
     HazardReviewRequest,
     HazardReviewResponse,
     ReviewRequest,
@@ -256,6 +258,47 @@ async def hazard_review(
         raise HTTPException(
             status_code=500,
             detail=f"An internal error occurred. Please contact support with thread_id: {body.thread_id}"
+        )
+
+
+@router.post("/hazard-review/from-excel", response_model=HazardBatchReviewResponse, tags=["Hazard Review"])
+async def hazard_review_from_excel(
+    body: HazardReviewFromExcelRequest,
+    service: HazardReviewService = Depends(get_hazard_service),
+) -> HazardBatchReviewResponse:
+    """Execute batch hazard review by parsing an SHA Excel file.
+
+    Reads the SHA table from the given Excel file, converts each row to a
+    HazardRecord, and runs the H1-H7 rubric review for each hazard sequentially.
+    Per-hazard thread IDs are formed as "<thread_id_prefix>-<hazard_id>".
+
+    Args:
+        body: Excel file path, sheet name, and thread_id_prefix.
+        service: Injected hazard review service.
+
+    Returns:
+        HazardBatchReviewResponse: All per-hazard assessments in row order.
+
+    Raises:
+        HTTPException: 400 for invalid input or unreadable file, 500 for internal errors.
+    """
+    try:
+        return await service.run_from_excel(body)
+    except (ValueError, FileNotFoundError) as e:
+        logger.warning(
+            f"Invalid Excel hazard request for prefix {body.thread_id_prefix}: {e}",
+            extra={"thread_id": body.thread_id_prefix, "error_code": ErrorCode.VALIDATION_ERROR},
+        )
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(
+            f"Internal error processing Excel hazard batch {body.thread_id_prefix}: {e}",
+            exc_info=True,
+            extra={"thread_id": body.thread_id_prefix, "error_code": ErrorCode.INTERNAL_ERROR},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"An internal error occurred. Please contact support with thread_id_prefix: {body.thread_id_prefix}",
         )
 
 

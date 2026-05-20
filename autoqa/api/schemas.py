@@ -124,6 +124,49 @@ class HazardReviewResponse(BaseModel):
     requirement_reviews: List[RequirementReview] = []
 
 
+class HazardReviewFromExcelRequest(BaseModel):
+    """Request model for batch hazard review from an SHA Excel file.
+
+    Attributes:
+        thread_id_prefix: Prefix for per-hazard thread IDs. Combined with
+            hazard_id to form "<prefix>-<hazard_id>" for each graph invocation.
+        file_path: Absolute server-side path to the SHA Excel file.
+        sheet_name: Excel sheet name containing the SHA table.
+    """
+    thread_id_prefix: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_THREAD_ID_LENGTH,
+        description="Prefix for per-hazard thread IDs (alphanumeric, dash, underscore only)",
+    )
+    file_path: str = Field(..., description="Absolute path to the SHA Excel file on the server")
+    sheet_name: str = Field(default="SHA Table", description="Excel sheet name")
+
+    @field_validator('thread_id_prefix')
+    @classmethod
+    def validate_thread_id_prefix(cls, v: str) -> str:
+        if not v.replace('-', '').replace('_', '').isalnum():
+            raise ValueError(
+                "thread_id_prefix must contain only alphanumeric characters, dashes, and underscores"
+            )
+        return v
+
+
+class HazardBatchReviewResponse(BaseModel):
+    """Response model for batch hazard review from Excel.
+
+    Attributes:
+        status: Lifecycle status ("completed").
+        thread_id_prefix: Echo of the request prefix.
+        total: Number of hazard rows processed.
+        results: Per-hazard review responses in row order.
+    """
+    status: str
+    thread_id_prefix: str
+    total: int
+    results: List[HazardReviewResponse]
+
+
 class TestCaseReviewRequest(BaseModel):
     """Request model for test case review endpoint.
     

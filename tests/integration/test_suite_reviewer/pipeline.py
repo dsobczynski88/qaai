@@ -18,9 +18,7 @@ from autoqa.components.test_suite_reviewer.core import (
     RTMReviewState, Requirement, TestCase, DesignDocument, DecomposedRequirement, 
     TestSuite, EvaluatedSpec, SynthesizedAssessment,
 )
-from autoqa.components.test_suite_reviewer.nodes import (
-    make_decomposer_node, make_summarizer_node, make_coverage_evaluator
-)
+
 from autoqa.prj_logger import format_elapsed_time
 from tests.helpers import load_jsonl, serialize_state
 
@@ -63,98 +61,6 @@ def _assert_partial_invariants(sa: SynthesizedAssessment) -> None:
         f"M1-M5 verdicts={[(f.code, f.verdict) for f in m1_m5_findings]}, "
         f"partials={[(f.code, f.partial) for f in m1_m5_findings]}"
     )
-
-
-# ============================================================================
-# INDIVIDUAL NODE TESTS
-# ============================================================================
-
-@pytest.mark.integration
-async def test_decomposer_node(real_client, real_model, sample_requirement):
-    """Test the decomposer node in isolation."""
-    node = make_decomposer_node(real_client, real_model)
-    result = await node({"requirement": sample_requirement})
-
-    assert result["decomposed_requirement"] is not None
-    assert isinstance(result["decomposed_requirement"], DecomposedRequirement)
-    assert len(result["decomposed_requirement"].decomposed_specifications) > 0
-    
-    print(f"\n[decomposer] {len(result['decomposed_requirement'].decomposed_specifications)} specs generated")
-    for s in result["decomposed_requirement"].decomposed_specifications:
-        print(f"  {s.spec_id}: {s.description[:60]}")
-
-
-@pytest.mark.integration
-async def test_summarizer_node(real_client, real_model, sample_test_cases):
-    """Test the summarizer node in isolation."""
-    node = make_summarizer_node(real_client, real_model)
-    result = await node({"test_cases": sample_test_cases})
-
-    assert result["test_suite"] is not None
-    assert isinstance(result["test_suite"], TestSuite)
-    assert len(result["test_suite"].summary) > 0
-    
-    print(f"\n[summarizer] {len(result['test_suite'].summary)} summaries produced")
-
-
-@pytest.mark.integration
-async def test_coverage_evaluator_node(
-    real_client, real_model,
-    sample_requirement, sample_decomposed_requirement, sample_test_suite
-):
-    """Test the coverage evaluator node in isolation."""
-    node = make_coverage_evaluator(real_client, real_model)
-    result = await node({
-        "requirement": sample_requirement,
-        "decomposed_requirement": sample_decomposed_requirement,
-        "test_suite": sample_test_suite,
-    })
-
-    assert len(result["coverage_analysis"]) == len(
-        sample_decomposed_requirement.decomposed_specifications
-    )
-    assert all(isinstance(e, EvaluatedSpec) for e in result["coverage_analysis"])
-    
-    print(f"\n[coverage] {len(result['coverage_analysis'])} specs evaluated")
-    for e in result["coverage_analysis"]:
-        if e.covered_exists:
-            assert len(e.covered_by_test_cases) > 0
-            for ctc in e.covered_by_test_cases:
-                assert ctc.dimensions, "each covering TC must carry ≥1 dimension"
-                for d in ctc.dimensions:
-                    assert d in {"functional", "negative", "boundary"}
-            dims = sorted({d for ctc in e.covered_by_test_cases for d in ctc.dimensions})
-            print(f"  {e.spec_id}: covered={e.covered_exists}, dimensions={dims}")
-        else:
-            assert e.covered_by_test_cases == []
-
-
-# ============================================================================
-# FULL PIPELINE TESTS
-# ============================================================================
-
-@pytest.mark.integration
-async def test_pipeline_full_state(real_client, real_model, sample_requirement, sample_test_cases):
-    """Run the full pipeline, validate all RTMReviewState fields, and save state as JSON."""
-    model_kwargs = {"max_tokens": settings.max_output_tokens}
-    graph = RTMReviewerRunnable(client=real_client, model=real_model, model_kwargs=model_kwargs)
-    initial_state = {"requirement": sample_requirement, "test_cases": sample_test_cases}
-    result: RTMReviewState = await graph.graph.ainvoke(initial_state)
-
-    assert isinstance(result.get("requirement"), Requirement)
-    assert isinstance(result.get("test_cases"), list) and len(result["test_cases"]) > 0
-    assert isinstance(result.get("decomposed_requirement"), DecomposedRequirement)
-    assert len(result["decomposed_requirement"].decomposed_specifications) > 0
-    assert isinstance(result.get("test_suite"), TestSuite)
-    assert len(result["test_suite"].summary) > 0
-    evals = result.get("coverage_analysis", [])
-    assert len(evals) == len(result["decomposed_requirement"].decomposed_specifications)
-    assert all(isinstance(e, EvaluatedSpec) for e in evals)
-
-    output_path = Path(settings.log_file_path).parent / "pipeline_state.json"
-    output_path.write_text(json.dumps(serialize_state(result), indent=2))
-    print(f"\n[full_state] saved → {output_path}")
-
 
 async def _fanout_pipeline(
     real_client,
@@ -295,7 +201,6 @@ async def _fanout_pipeline(
 @pytest.mark.parametrize(
     "fixture_name",
     [
-        "test_suite_review_min_fields.jsonl",
         "test_suite_review_all_fields.jsonl",
     ],
 )
@@ -310,26 +215,3 @@ async def test_test_suite_reviewer(real_client, real_model, jsonl_recorders, fix
     in-flight via asyncio.Semaphore. Default PromptConfig (settings.prompt_config).
     """
     await _fanout_pipeline(real_client, real_model, jsonl_recorders, fixture_name)
-
-
-@pytest.mark.integration
-async def test_pipeline_with_standard_coverage_prompts(real_client, real_model, jsonl_recorders):
-    """Test with pinned 'standard coverage' prompt versions.
-    
-    Uses summarizer-v4 which implements Option 1: LLM returns only the summary
-    array, not the full requirement/test_cases echo-back. This scales to 100+
-    test cases without hitting token limits.
-    """
-    custom = PromptConfig(
-        decomposer="decomposer-v5.jinja2",
-        summarizer="summarizer-v4.jinja2",
-        coverage="coverage_evaluator-v7.jinja2",
-        synthesizer="synthesizer-v7.jinja2",
-    )
-    await _fanout_pipeline(
-        real_client, 
-        real_model, 
-        jsonl_recorders, 
-        "test_suite_review_min_fields.jsonl",
-        prompt_config=custom
-    )

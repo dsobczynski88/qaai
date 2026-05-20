@@ -7,12 +7,20 @@ import os
 from pathlib import Path
 import pytest
 from dotenv import load_dotenv
+
 load_dotenv()
+
 from autoqa.core.config import settings
 from autoqa.prj_logger import ProjectLogger
 
-from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.hazard_risk_reviewer.core import HazardRecord
+from autoqa.components.clients import (
+    RateLimitOpenAIClient
+)
+
+from autoqa.components.hazard_risk_reviewer.core import (
+    HazardRecord
+)
+
 from autoqa.components.test_suite_reviewer.core import (
     Requirement,
     TestCase,
@@ -243,34 +251,55 @@ def real_client():
 def real_model():
     return os.getenv("PYTEST_MODEL")
 
+def _load_hazard_fixture(include_design_docs: bool) -> HazardRecord:
+    """Parse hazard_full_traceability.jsonl and flatten requirements_traceability."""
+    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_full_traceability.jsonl"
+    with fixture_path.open("r", encoding="utf-8") as f:
+        data = json.loads(f.readline())
+
+    reqs_trace = data.pop("requirements_traceability", [])
+    requirements = []
+    test_cases_seen: dict = {}
+    design_docs_seen: dict = {}
+    user_needs_seen: dict = {}
+    sys_reqs_seen: dict = {}
+
+    for trace in reqs_trace:
+        req = trace.get("requirement", {})
+        requirements.append(req)
+        for tc in trace.get("test_cases", []):
+            test_cases_seen.setdefault(tc["test_id"], tc)
+        if include_design_docs:
+            for dd in trace.get("design_docs", []):
+                design_docs_seen.setdefault(dd["doc_id"], dd)
+        for sys_req in trace.get("system_requirements", []):
+            for un in sys_req.get("user_needs", []):
+                user_needs_seen.setdefault(un["req_id"], un)
+            sys_req_flat = {k: v for k, v in sys_req.items() if k != "user_needs"}
+            sys_reqs_seen.setdefault(sys_req_flat["req_id"], sys_req_flat)
+
+    data["requirements"] = requirements
+    data["test_cases"] = list(test_cases_seen.values())
+    data["design_docs"] = list(design_docs_seen.values()) if include_design_docs else []
+    data["user_needs"] = list(user_needs_seen.values()) if include_design_docs else []
+    data["system_requirements"] = list(sys_reqs_seen.values()) if include_design_docs else []
+    return HazardRecord.model_validate(data)
+
+
 @pytest.fixture
 def sample_hazard():
-    """Load the canonical sample HazardRecord from tests/fixtures/external/hazard_risk_review_min_fields.jsonl.
-    
-    This fixture provides a minimal hazard record without design_docs or user_needs,
-    suitable for testing the core H1-H7 evaluation flow.
+    """Minimal HazardRecord: requirements + test_cases only, no design_docs or user_needs.
+
+    Used for the M1-M5 only (5 findings per requirement) test path.
     """
-    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_risk_review_min_fields.jsonl"
-    with fixture_path.open("r", encoding="utf-8") as f:
-        data = json.loads(f.readline())
-    return HazardRecord.model_validate(data)
+    return _load_hazard_fixture(include_design_docs=False)
 
 
 @pytest.fixture
-def sample_hazard_full_traceability():
-    """Load the full traceability HazardRecord from tests/fixtures/external/hazard_risk_review_all_fields.jsonl.
-    
-    This fixture provides a complete hazard record with:
-    - requirements (REQ-PUMP-101, REQ-PUMP-102)
-    - test_cases (TC-PUMP-201, TC-PUMP-202, TC-PUMP-203)
-    - design_docs (5 design documents)
-    - user_needs (UN-PUMP-003, UN-PUMP-007)
-    - system_requirements (SYS-PUMP-015, SYS-PUMP-016, SYS-PUMP-017)
-    
-    Use this fixture when testing the full pipeline with design_docs and user_needs,
-    which triggers R6 evaluation in the RTM sub-pipeline and H4/H5 summarization.
+def hazard_full_traceability():
+    """Full-traceability HazardRecord: requirements, test_cases, design_docs, user_needs,
+    and system_requirements all populated.
+
+    Used for the M1-M5 + R6 (6 findings per requirement) test path.
     """
-    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_risk_review_all_fields.jsonl"
-    with fixture_path.open("r", encoding="utf-8") as f:
-        data = json.loads(f.readline())
-    return HazardRecord.model_validate(data)
+    return _load_hazard_fixture(include_design_docs=True)
