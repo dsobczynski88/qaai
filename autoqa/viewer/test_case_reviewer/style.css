@@ -1,0 +1,11 @@
+.tc-id { display: inline-block; padding: 2px 8px; border-radius: 4px; background: #eef2ff; color: #2b3a8b; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.tc-desc { margin: 8px 0 18px; }
+.req-list { list-style: none; padding: 0; margin: 0 0 18px; }
+.req-list li { margin: 4px 0; }
+.obj-desc { font-size: 12px; color: var(--mute); margin-bottom: 4px; }
+details pre { background: #f7f7f9; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; font: 12px ui-monospace, Menlo, monospace; margin: 8px 0 0; }
+.axis-cell { font-size: 12px; }
+.axis-cell .mark { font-weight: 700; margin-right: 4px; }
+.axis-cell .mark.yes { color: #1b5e20; }
+.axis-cell .mark.no  { color: #a1390a; }
+.modal { max-width: 1100px; width: 94vw; max-height: 86vh; }
