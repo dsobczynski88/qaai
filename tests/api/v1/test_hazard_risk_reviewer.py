@@ -39,7 +39,7 @@ async def test_hazard_review_happy_path(client, hazard_full_traceability):
     
     # Verify requirement reviews
     assert "requirement_reviews" in data
-    assert len(data["requirement_reviews"]) == len(sample_hazard.requirements)
+    assert len(data["requirement_reviews"]) == len(hazard_full_traceability.requirements)
 
 
 @pytest.mark.asyncio
