@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{TITLE}}</title>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+<header>
+  <strong>Batch Output Viewer</strong>
+  <span class="src">{{SOURCE}}</span>
+  <button id="export-btn">Export feedback JSON</button>
+</header>
+<main>
+  <section class="panel left" id="left"></section>
+  <section class="panel right" id="right">
+    <h2>Reviewer feedback</h2>
+    <label>Rating (1 = inadequate, 5 = excellent)</label>
+    <div class="rating" id="rating"></div>
+    <label>Notes</label>
+    <textarea id="notes" placeholder="Optional — rationale, gaps not captured, next actions..."></textarea>
+    <div class="nav">
+      <button id="prev-btn">Prev</button>
+      <button id="next-btn" class="primary">Save &amp; Next</button>
+    </div>
+    <div class="progress" id="progress"></div>
+  </section>
+</main>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <button class="close" onclick="closeModal()">Close</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script id="DATA" type="application/json">{{DATA}}</script>
+<script>
+{{JS}}
+</script>
+</body>
+</html>
