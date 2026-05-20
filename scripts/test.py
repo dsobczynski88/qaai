@@ -119,7 +119,6 @@ if __name__ == "__main__":
         sheet_name="SHA_Table",
         extract_gids_format="REQ-PUMP-\\d+",
     )
-    print(excel_rows)
     
     build_traceability_jsonl(
         excel_rows=excel_rows,

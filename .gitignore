@@ -6,13 +6,10 @@ CLAUDE.md
 # Config files
 config.yaml
 
-
 # Output files
 *.xlsx
 
 # docs
-docs/*
-!/docs/.gitkeep
 
 # data
 data/*
