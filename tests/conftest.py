@@ -167,9 +167,37 @@ def sample_test_suite(sample_requirement, sample_test_cases):
 
 
 def _load_hazard_fixture(include_design_docs: bool) -> HazardRecord:
-    """Parse hazard_full_traceability.jsonl and flatten requirements_traceability."""
-    fixture_path = Path(__file__).parent / "fixtures" / "external" / "hazard_full_traceability.jsonl"
-    with fixture_path.open("r", encoding="utf-8") as f:
+    """Assemble HazardRecord from Excel + pre-captured identifier responses via loader pipeline."""
+    from autoqa.components.hazard_risk_reviewer.loader import (
+        parse_sha_excel_to_jsonl,
+        build_traceability_jsonl,
+    )
+
+    fixtures_dir = Path(__file__).parent / "fixtures" / "external"
+
+    excel_rows = parse_sha_excel_to_jsonl(
+        file_path=str(fixtures_dir / "software_hazard_analysis.xlsx"),
+        output_path=str(fixtures_dir / "hazard_rows_from_excel.jsonl"),
+        sheet_name="SHA_Table",
+        extract_gids_format="REQ-PUMP-\\d+",
+    )
+
+    with (fixtures_dir / "identifiers_response_upstream.jsonl").open(encoding="utf-8") as f:
+        identifiers_upstream_links = [json.loads(line) for line in f if line.strip()]
+
+    with (fixtures_dir / "identifiers_response_downstream.jsonl").open(encoding="utf-8") as f:
+        identifier_downstream_links = [json.loads(line) for line in f if line.strip()]
+
+    output_path = fixtures_dir / "hazard_traceability_output.jsonl"
+    build_traceability_jsonl(
+        excel_rows=excel_rows,
+        identifiers=excel_rows["all_controls_references"],
+        identifiers_upstream_links=identifiers_upstream_links,
+        identifier_downstream_links=identifier_downstream_links,
+        output_filename=str(output_path),
+    )
+
+    with output_path.open(encoding="utf-8") as f:
         data = json.loads(f.readline())
 
     reqs_trace = data.pop("requirements_traceability", [])
