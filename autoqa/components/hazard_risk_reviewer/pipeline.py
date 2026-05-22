@@ -38,9 +38,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from autoqa.components.clients import RateLimitOpenAIClient
+from autoqa.components.shared.data_integration import PyJamaNodeConfig
+from autoqa.components.shared.nodes import make_data_integration_node
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.config import PromptConfig, settings
 from autoqa.utils import save_graph_png
+from autoqa.prj_logger import ProjectLogger
 
 from .core import HazardReviewState
 from .nodes import (
@@ -59,6 +62,10 @@ from .nodes import (
     make_hazard_needs_summarizer_node,
     make_requirement_reviewer_node,
 )
+
+project_logger = ProjectLogger(name="logger.hazard_pipeline", log_file=settings.log_file_path)
+project_logger.config()
+logger = project_logger.get_logger()
 
 
 class HazardReviewerRunnable:
@@ -107,6 +114,9 @@ class HazardReviewerRunnable:
     def build(self) -> Runnable:
         sg = StateGraph(HazardReviewState)
 
+        # Create data integration node (entry point for conditional JAMA fetch)
+        data_integration = make_data_integration_node(pyjama_config=None)
+
         # Create all 7 evaluator nodes
         h1 = make_h1_evaluator_node(
             self.client, self.model, self.model_kwargs,
@@ -153,6 +163,7 @@ class HazardReviewerRunnable:
         )
 
         # Add all nodes to the graph
+        sg.add_node("data_integration", data_integration)
         sg.add_node("h1_evaluator", h1)
         sg.add_node("h2_evaluator", h2)
         sg.add_node("h3_evaluator", h3)
@@ -165,19 +176,22 @@ class HazardReviewerRunnable:
         sg.add_node("needs_summarizer", needs_summarizer)
         sg.add_node("final_assessment", final_assessor)
 
-        # Early evaluators (H1, H2, H3, H7) run immediately from START
+        # Data integration runs first (conditionally fetches from JAMA or passes through)
+        sg.add_edge(START, "data_integration")
+
+        # Early evaluators (H1, H2, H3, H7) run after data integration
         sg.add_conditional_edges(
-            START,
+            "data_integration",
             dispatch_hazard_evaluators_early,
             ["h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"],
         )
 
-        # Requirement reviews also start from START (parallel with early evaluators)
-        sg.add_conditional_edges(START, dispatch_requirement_reviews, ["requirement_reviewer"])
+        # Requirement reviews also flow from data_integration
+        sg.add_conditional_edges("data_integration", dispatch_requirement_reviews, ["requirement_reviewer"])
         
-        # Summarizers run from START in parallel
-        sg.add_edge(START, "design_summarizer")
-        sg.add_edge(START, "needs_summarizer")
+        # Summarizers also flow from data_integration
+        sg.add_edge("data_integration", "design_summarizer")
+        sg.add_edge("data_integration", "needs_summarizer")
 
         # Late evaluators (H4, H5) wait for requirement_reviews AND summarizers
         # We need a join node to synchronize requirement_reviewer + design_summarizer + needs_summarizer

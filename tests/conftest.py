@@ -20,7 +20,7 @@ from autoqa.components.clients import (
 )
 
 from autoqa.components.hazard_risk_reviewer.core import (
-    HazardRecord
+    HazardRowWithTraceMatrix
 )
 
 from autoqa.components.test_suite_reviewer.core import (
@@ -166,41 +166,44 @@ def sample_test_suite(sample_requirement, sample_test_cases):
     )
 
 
-def _load_hazard_fixture(include_design_docs: bool) -> HazardRecord:
-    """Assemble HazardRecord from Excel + pre-captured identifier responses via loader pipeline."""
+def _load_hazard_fixture(include_design_docs: bool) -> HazardRowWithTraceMatrix:
+    """Assemble HazardRowWithTraceMatrix from Excel + unified pyjama traceability response."""
     from autoqa.components.hazard_risk_reviewer.loader import (
-        parse_sha_excel_to_jsonl,
-        build_traceability_jsonl,
+        parse_sha_excel,
+        merge_hazard_with_pyjama_traceability,
     )
 
     fixtures_dir = Path(__file__).parent / "fixtures" / "external"
 
-    excel_rows = parse_sha_excel_to_jsonl(
+    # Step 1: Parse Excel to extract hazard rows and control references
+    excel_results = parse_sha_excel(
         file_path=str(fixtures_dir / "software_hazard_analysis.xlsx"),
-        output_path=str(fixtures_dir / "hazard_rows_from_excel.jsonl"),
-        sheet_name="SHA_Table",
+        sheet_name="SHA Table",
         extract_gids_format="REQ-PUMP-\\d+",
     )
 
-    with (fixtures_dir / "identifiers_response_upstream.jsonl").open(encoding="utf-8") as f:
-        identifiers_upstream_links = [json.loads(line) for line in f if line.strip()]
+    excel_rows = excel_results["rows"]
 
-    with (fixtures_dir / "identifiers_response_downstream.jsonl").open(encoding="utf-8") as f:
-        identifier_downstream_links = [json.loads(line) for line in f if line.strip()]
+    # Step 2: Load and index unified pyjama response
+    pyjama_lookup = {}
+    with (fixtures_dir / "pyjama_response_unified.jsonl").open(encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                data = json.loads(line)
+                req_id = data.get("requirement", {}).get("req_id")
+                if req_id:
+                    pyjama_lookup[req_id] = data
 
-    output_path = fixtures_dir / "hazard_traceability_output.jsonl"
-    build_traceability_jsonl(
-        excel_rows=excel_rows,
-        identifiers=excel_rows["all_controls_references"],
-        identifiers_upstream_links=identifiers_upstream_links,
-        identifier_downstream_links=identifier_downstream_links,
-        output_filename=str(output_path),
-    )
+    # Step 3: Merge first Excel row with pyjama traceability
+    # (For fixture purposes, we use the first row)
+    if not excel_rows:
+        raise ValueError("No hazard rows found in Excel file")
+    
+    excel_row = excel_rows[0]
+    enhanced_row = merge_hazard_with_pyjama_traceability(excel_row, pyjama_lookup)
 
-    with output_path.open(encoding="utf-8") as f:
-        data = json.loads(f.readline())
-
-    reqs_trace = data.pop("requirements_traceability", [])
+    # Step 4: Extract and flatten requirements traceability data
+    reqs_trace = enhanced_row.get("requirements_traceability", [])
     requirements = []
     test_cases_seen: dict = {}
     design_docs_seen: dict = {}
@@ -221,17 +224,22 @@ def _load_hazard_fixture(include_design_docs: bool) -> HazardRecord:
             sys_req_flat = {k: v for k, v in sys_req.items() if k != "user_needs"}
             sys_reqs_seen.setdefault(sys_req_flat["req_id"], sys_req_flat)
 
-    data["requirements"] = requirements
-    data["test_cases"] = list(test_cases_seen.values())
-    data["design_docs"] = list(design_docs_seen.values()) if include_design_docs else []
-    data["user_needs"] = list(user_needs_seen.values()) if include_design_docs else []
-    data["system_requirements"] = list(sys_reqs_seen.values()) if include_design_docs else []
-    return HazardRecord.model_validate(data)
+    # Remove requirements_traceability from the data dict before building HazardRowWithTraceMatrix
+    enhanced_row.pop("requirements_traceability", None)
+    
+    # Populate flattened fields
+    enhanced_row["requirements"] = requirements
+    enhanced_row["test_cases"] = list(test_cases_seen.values())
+    enhanced_row["design_docs"] = list(design_docs_seen.values()) if include_design_docs else []
+    enhanced_row["user_needs"] = list(user_needs_seen.values()) if include_design_docs else []
+    enhanced_row["system_requirements"] = list(sys_reqs_seen.values()) if include_design_docs else []
+    
+    return HazardRowWithTraceMatrix.model_validate(enhanced_row)
 
 
 @pytest.fixture
 def hazard_full_traceability():
-    """Full-traceability HazardRecord: requirements, test_cases, design_docs, user_needs,
+    """Full-traceability HazardRowWithTraceMatrix: requirements, test_cases, design_docs, user_needs,
     and system_requirements all populated.
 
     Used for the M1-M5 + R6 (6 findings per requirement) test path.

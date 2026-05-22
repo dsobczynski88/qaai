@@ -59,10 +59,12 @@ class HazardDesignSummarizerNode(BaseLLMNode):
 
     def _validate_state(self, state: HazardReviewState) -> bool:
         hazard = state.get("hazard")
+        if hazard is None or hazard.requirements_traceability is None:
+            return False
+        # Design docs are in the requirements_traceability, not on hazard directly
         return (
-            hazard is not None 
-            and hasattr(hazard, 'design_docs')
-            and len(hazard.design_docs) > 0
+            hasattr(hazard.requirements_traceability, 'design_docs')
+            and len(hazard.requirements_traceability.design_docs) > 0
         )
 
     def _build_payload(self, hazard, design_docs: List) -> dict:
@@ -89,7 +91,7 @@ class HazardDesignSummarizerNode(BaseLLMNode):
             return {"summarized_designs": None}
         
         hazard = state.get("hazard")
-        design_docs = hazard.design_docs
+        design_docs = hazard.requirements_traceability.design_docs
         
         all_summaries = []
         num_batches = (len(design_docs) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
@@ -143,10 +145,12 @@ class HazardNeedsSummarizerNode(BaseLLMNode):
 
     def _validate_state(self, state: HazardReviewState) -> bool:
         hazard = state.get("hazard")
+        if hazard is None or hazard.requirements_traceability is None:
+            return False
+        # User needs are in the requirements_traceability, not on hazard directly
         return (
-            hazard is not None 
-            and hasattr(hazard, 'user_needs')
-            and len(hazard.user_needs) > 0
+            hasattr(hazard.requirements_traceability, 'user_needs')
+            and len(hazard.requirements_traceability.user_needs) > 0
         )
 
     def _build_payload(self, hazard, user_needs: List) -> dict:
@@ -170,7 +174,7 @@ class HazardNeedsSummarizerNode(BaseLLMNode):
             return {"summarized_user_needs": None}
         
         hazard = state.get("hazard")
-        user_needs = hazard.user_needs
+        user_needs = hazard.requirements_traceability.user_needs
         
         all_summaries = []
         num_batches = (len(user_needs) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
@@ -225,6 +229,17 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
         logger.warning("dispatch_hazard_evaluators_early: no hazard, skipping")
         return []
     
+    # Log traceability presence for debugging
+    has_traceability = hazard.requirements_traceability is not None
+    num_requirements = (
+        len(hazard.requirements_traceability.requirements)
+        if has_traceability else 0
+    )
+    logger.debug(
+        "dispatch_hazard_evaluators_early: hazard=%s, has_traceability=%s, num_requirements=%d",
+        hazard.hazard_id, has_traceability, num_requirements
+    )
+    
     return [
         Send("h1_evaluator", {"hazard": hazard}),
         Send("h2_evaluator", {"hazard": hazard}),
@@ -235,17 +250,20 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
 
 def dispatch_hazard_evaluators_late(state: HazardReviewState) -> List[Send]:
     """
-    Dispatch H4, H5 after requirement_reviews complete.
-    These need the requirement_reviews list plus optional summarized data.
+    Dispatch H4, H5 after requirement_reviews + summarizers complete.
+    H4, H5 can handle empty requirement_reviews list gracefully.
     """
     hazard = state.get("hazard")
-    requirement_reviews = state.get("requirement_reviews")
+    if not hazard:
+        logger.warning("dispatch_hazard_evaluators_late: missing hazard")
+        return []
+    
+    # requirement_reviews defaults to empty list if not set
+    requirement_reviews = state.get("requirement_reviews", [])
     summarized_designs = state.get("summarized_designs")
     summarized_user_needs = state.get("summarized_user_needs")
     
-    if not hazard or not requirement_reviews:
-        logger.warning("dispatch_hazard_evaluators_late: missing hazard or requirement_reviews")
-        return []
+    logger.debug("dispatch_hazard_evaluators_late: dispatching H4, H5 with %d requirement_reviews", len(requirement_reviews))
     
     # Build state dict with optional summarized data
     h4_state = {
@@ -276,12 +294,18 @@ def dispatch_requirement_reviews(state: HazardReviewState) -> List[Send]:
     Returns an empty list when the hazard or its requirements are missing.
     """
     hazard = state.get("hazard")
-    if not hazard or not hazard.requirements:
-        logger.warning("dispatch_requirement_reviews: no hazard/requirements, skipping fan-out")
+    if not hazard or not hazard.requirements_traceability:
+        logger.warning("dispatch_requirement_reviews: no hazard/requirements_traceability, skipping fan-out")
         return []
+    
+    requirements = hazard.requirements_traceability.requirements
+    if not requirements:
+        logger.warning("dispatch_requirement_reviews: no requirements in traceability, skipping fan-out")
+        return []
+    
     return [
         Send("requirement_reviewer", {"hazard": hazard, "requirement": req})
-        for req in hazard.requirements
+        for req in requirements
     ]
 
 
@@ -303,13 +327,21 @@ class RequirementReviewerNode:
             logger.warning("RequirementReviewerNode: missing hazard or requirement, skipping")
             return {"requirement_reviews": []}
 
+        # Test cases come from requirements_traceability
+        test_cases = []
+        if hazard.requirements_traceability:
+            test_cases = hazard.requirements_traceability.test_cases or []
+        
         rtm_input = {
             "requirement": requirement,
-            "test_cases": hazard.test_cases,
+            "test_cases": test_cases,
         }
-        # Pass design_docs to RTM sub-pipeline if available
-        if hasattr(hazard, 'design_docs') and hazard.design_docs:
-            rtm_input["design_docs"] = hazard.design_docs
+        
+        # Pass design_docs to RTM sub-pipeline if available (from traceability)
+        if (hazard.requirements_traceability 
+            and hasattr(hazard.requirements_traceability, 'design_docs') 
+            and hazard.requirements_traceability.design_docs):
+            rtm_input["design_docs"] = hazard.requirements_traceability.design_docs
         try:
             rtm_result = await self.rtm.graph.ainvoke(rtm_input)
         except Exception as e:
@@ -485,11 +517,8 @@ class HazardEvaluatorNode(StandardLLMNode):
         # H1, H2, H3, H7 only need hazard
         if self.dimension_code in ["H1", "H2", "H3", "H7"]:
             return state.get("hazard") is not None
-        # H4, H5 need hazard + requirement_reviews
-        return (
-            state.get("hazard") is not None
-            and state.get("requirement_reviews") is not None
-        )
+        # H4, H5 need hazard (requirement_reviews can be empty list or missing)
+        return state.get("hazard") is not None
 
     def _build_payload(self, state: Any) -> dict:
         hazard = state["hazard"]
@@ -501,7 +530,12 @@ class HazardEvaluatorNode(StandardLLMNode):
             payload["requirement_reviews"] = _summarise_reviews(reviews)
             # H4, H5 also get the full requirements and test_cases lists
             payload["requirements"] = [r.requirement.model_dump() for r in reviews]
-            payload["test_cases"] = [tc.model_dump() for tc in hazard.test_cases]
+            
+            # Test cases come from requirements_traceability
+            test_cases = []
+            if hazard.requirements_traceability:
+                test_cases = hazard.requirements_traceability.test_cases or []
+            payload["test_cases"] = [tc.model_dump() for tc in test_cases]
             
             # H4 gets summarized_designs if available
             if self.dimension_code == "H4":

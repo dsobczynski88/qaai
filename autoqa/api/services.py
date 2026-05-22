@@ -1,6 +1,7 @@
+import asyncio
 import logging
 import time
-from typing import Optional
+from typing import List, Optional
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
@@ -15,9 +16,12 @@ from autoqa.api.schemas import (
     TestCaseReviewRequest,
     TestCaseReviewResponse,
 )
-from autoqa.components.hazard_risk_reviewer.loader import hazard_dict_to_record, parse_sha_excel
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
+from autoqa.components.hazard_risk_reviewer.core import HazardRowWithTraceMatrix
+from autoqa.components.shared.data_integration import (
+    PyJamaNodeConfig,
+    transform_hazard_record_to_state,
+)
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.components.test_case_reviewer.pipeline import TCReviewerRunnable
@@ -125,16 +129,97 @@ class HazardReviewService:
     async def run_from_excel(
         self, request: HazardReviewFromExcelRequest
     ) -> HazardBatchReviewResponse:
+        """
+        Batch hazard review from Excel + JAMA traceability files.
+        
+        Workflow:
+        1. Transform Excel rows with JAMA traceability using transform_hazard_record_to_state()
+           - Parses Excel to extract hazard rows and control references
+           - Loads unified JAMA response JSONL with bidirectional traceability
+           - Merges each row with filtered traceability to create HazardRowWithTraceMatrix
+           - Writes enhanced inputs to JSONL for inspection
+        2. Invoke graph concurrently for each enhanced hazard row
+           - Creates thread_id from prefix + hazard_id
+           - Builds HazardReviewRequest with fully-traced hazard
+           - Invokes graph via asyncio.gather() for parallel processing
+        3. Aggregate and return results as batch response
+        
+        Args:
+            request: HazardReviewFromExcelRequest with Excel path, JAMA JSONL path, and prefix
+        
+        Returns:
+            HazardBatchReviewResponse with per-hazard review results
+        """
         logger = logging.getLogger("autoqa.api.hazard")
-        hazard_dicts = parse_sha_excel(request.file_path, request.sheet_name)
-        results = []
-        for d in hazard_dicts:
-            hazard = hazard_dict_to_record(d)
-            thread_id = f"{request.thread_id_prefix}-{hazard.hazard_id}" if hazard.hazard_id else request.thread_id_prefix
-            review_request = HazardReviewRequest(thread_id=thread_id, hazard=hazard)
-            result = await self.run(review_request)
-            results.append(result)
-            logger.info("Completed hazard review for %s", hazard.hazard_id)
+        start_time = time.perf_counter()
+        
+        logger.info(
+            "Starting batch hazard review from Excel: file_path=%s, pyjama_response_file_path=%s, "
+            "thread_id_prefix=%s",
+            request.file_path,
+            request.pyjama_response_file_path,
+            request.thread_id_prefix,
+        )
+        
+        # Step 1: Transform Excel + Pyjama into enhanced HazardRowWithTraceMatrix list
+        logger.info("[Step 1] Transforming Excel rows with JAMA traceability")
+        try:
+            enhanced_rows: List[HazardRowWithTraceMatrix] = transform_hazard_record_to_state(
+                excel_file_path=request.file_path,
+                pyjama_response_file_path=request.pyjama_response_file_path,
+                output_jsonl_path="inputs.jsonl",
+            )
+            logger.info("[Step 1] Transformation complete: %d enhanced rows", len(enhanced_rows))
+        except Exception as e:
+            logger.error("[Step 1] Transformation failed: %s", str(e), exc_info=True)
+            raise
+        
+        # Step 2: Define async worker to invoke graph for a single row
+        async def invoke_row(
+            row: HazardRowWithTraceMatrix, index: int
+        ) -> HazardReviewResponse:
+            """Invoke the graph for a single hazard row."""
+            # Build thread_id from prefix + hazard_id, fallback to index if hazard_id missing
+            thread_id = (
+                f"{request.thread_id_prefix}-{row.hazard_id}"
+                if row.hazard_id
+                else f"{request.thread_id_prefix}-{index}"
+            )
+            
+            # Create request with enhanced row
+            review_request = HazardReviewRequest(
+                thread_id=thread_id,
+                hazard=row,
+            )
+            
+            # Invoke graph via existing run() method
+            return await self.run(review_request)
+        
+        # Step 3: Invoke graph concurrently for all rows
+        logger.info("[Step 2] Invoking graph concurrently for %d rows", len(enhanced_rows))
+        try:
+            results: List[HazardReviewResponse] = await asyncio.gather(
+                *[invoke_row(row, i) for i, row in enumerate(enhanced_rows)],
+                return_exceptions=False,
+            )
+            logger.info("[Step 2] Graph invocation complete: %d results collected", len(results))
+        except Exception as e:
+            logger.error("[Step 2] Graph invocation failed: %s", str(e), exc_info=True)
+            raise
+        
+        # Step 4: Build and return batch response
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+        elapsed_str = format_elapsed_time(elapsed)
+        
+        logger.info(
+            "Batch hazard review from Excel completed in %s: "
+            "%d rows processed, %d results returned",
+            elapsed_str,
+            len(enhanced_rows),
+            len(results),
+        )
+        
         return HazardBatchReviewResponse(
             status="completed",
             thread_id_prefix=request.thread_id_prefix,

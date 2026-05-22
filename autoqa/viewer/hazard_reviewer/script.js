@@ -82,7 +82,7 @@ function renderLeft() {
 
   const reviews = rec.requirement_reviews ?? [];
   const reviewByReqId = Object.fromEntries(reviews.map(r => [r.requirement?.req_id, r]));
-  const reqList = (haz.requirements ?? []).map(req => {
+  const reqList = (haz.requirements_traceability?.requirements ?? []).map(req => {
     const r = reviewByReqId[req.req_id];
     const sa = r?.synthesized_assessment;
     const mfChips = (sa?.mandatory_findings ?? []).map(f => {
@@ -108,7 +108,7 @@ function renderLeft() {
     </div>`;
   }).join("");
 
-  const tcList = (haz.test_cases ?? []).map((tc, i) => {
+  const tcList = (haz.requirements_traceability?.test_cases ?? []).map((tc, i) => {
     const inBaseline = tc.in_baseline ?? false;
     const checkmark = inBaseline ? '✓' : '○';
     return `<li>
@@ -183,7 +183,7 @@ function closeModal() { document.getElementById("modal").classList.remove("open"
 
 function openTC(i) {
   const rec = RECORDS[idx];
-  const tc = rec.hazard?.test_cases?.[i];
+  const tc = rec.hazard?.requirements_traceability?.test_cases?.[i];
   if (!tc) return;
   const rows = [
     ["Test ID", tc.test_id],

@@ -22,9 +22,9 @@ assessment by the API layer.
 """
 
 import operator
-from typing import Annotated, List, Literal, Optional, TypedDict
+from typing import Annotated, Any, List, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from autoqa.components.shared.core import (
     DecomposedRequirement,
@@ -38,9 +38,18 @@ from autoqa.components.test_suite_reviewer.core import (
     TestSuite,
 )
 
+# Import PyJamaRequest for type hints (optional import)
+try:
+    from pyjama.langgraph.nodes import PyJamaRequest
+except ImportError:
+    PyJamaRequest = Any  # type: ignore
+
 
 __all__ = [
-    "HazardRecord",
+    "HazardRowFromExcel",
+    "HazardPackageFromExcel",
+    "HazardTraceMatrix",
+    "HazardRowWithTraceMatrix",
     "HazardPackage",
     "RequirementReview",
     "HazardSummarizedDesignSpec",
@@ -75,7 +84,124 @@ HazardVerdictNA = Literal["Yes", "No", "N-A"]
 DesignDocument = SharedDesignDocument
 
 
-class HazardRecord(BaseModel):
+class HazardRowFromExcel(BaseModel):
+    """
+    Models a single row from the SHA (Software Hazard Analysis) Excel table.
+    
+    Field names use snake_case, but they are mapped to Excel column headers via aliases.
+    The Excel loader strips whitespace from column headers before populating row dictionaries.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    hazard_id: str = Field(
+        default="",
+        alias='SHA ID Number',
+        description="Unique hazard identifier"
+    )
+    hazardous_situation_id: str = Field(
+        default="",
+        alias='Hazardous Situation ID'
+    )
+    hazard: str = Field(
+        default="",
+        alias='Hazard'
+    )
+    hazardous_situation: str = Field(
+        default="",
+        alias='Hazardous Situation'
+    )
+    function: str = Field(
+        default="",
+        alias='Function'
+    )
+    ots_software: str = Field(
+        default="",
+        alias='OTS Software (if OTS, identify component)',
+        description="OTS software component if applicable"
+    )
+    hazardous_sequence_of_events: str = Field(
+        default="",
+        alias='Hazardous sequence of events'
+    )
+    software_related_causes: str = Field(
+        default="",
+        alias='S/W Related Cause(s)'
+    )
+    harm: str = Field(
+        default="",
+        alias='Harm'
+    )
+    severity: str = Field(
+        default="",
+        alias='Severity'
+    )
+    exploitability_pre_mitigation: str = Field(
+        default="",
+        alias='Exploitability - (Cyber) (Pre-Mitigation)'
+    )
+    probability_of_harm_pre_mitigation: str = Field(
+        default="",
+        alias='Probability of Harm (software/Use-Related) (Pre-Mitigation)'
+    )
+    initial_risk_rating: str = Field(
+        default="",
+        alias='Initial Risk Rating'
+    )
+    risk_control_measures: str = Field(
+        default="",
+        alias='Risk Control Measures'
+    )
+    demonstration_of_effectiveness: str = Field(
+        default="",
+        alias='Demonstration of Effectiveness (Trace to Verification)'
+    )
+    severity_of_harm_post_mitigation: str = Field(
+        default="",
+        alias='Severity of Harm (Post-Mitigation)'
+    )
+    exploitability_post_mitigation: str = Field(
+        default="",
+        alias='Exploitability - (Cyber)'
+    )
+    probability_of_harm_post_mitigation: str = Field(
+        default="",
+        alias='Probability of Harm (software/Use-Related)'
+    )
+    final_risk_rating: str = Field(
+        default="",
+        alias='Final Risk Rating'
+    )
+    new_hs_reference: str = Field(
+        default="",
+        alias='New HS if applicable If yes, reference new row with SHA ID'
+    )
+    sw_fmea_trace: str = Field(
+        default="",
+        alias='System DFMEA Trace'
+    )
+    sra_link: str = Field(
+        default="",
+        alias='SRA Link'
+    )
+    urra_item: str = Field(
+        default="",
+        alias='URRA Item'
+    )
+    residual_risk_acceptability: str = Field(
+        default="",
+        alias='Residual Risk Acceptability (Rationale for Acceptability per GQP-10-02, Risk Management Report)'
+    )
+    row_specific_controls_references: Optional[List[str]] = Field(
+        default_factory=list,
+        description="List of unique JAMA IDs from the Risk Control Measures column",
+    )
+
+class HazardPackageFromExcel(BaseModel):
+    rows: List[HazardRowFromExcel]
+    all_controls_references: Optional[List[str]]
+    
+
+class HazardTraceMatrix(BaseModel):
     """
     Single hazard line item in ISO 14971 / IEC 62304 traceable form.
 
@@ -83,31 +209,6 @@ class HazardRecord(BaseModel):
     artifacts (requirements, test_cases, design_docs) bundle everything the
     pipeline needs to evaluate H1-H7 coverage in a single in-memory object.
     """
-    hazard_id: str = Field(..., description="Unique hazard identifier")
-    hazardous_situation_id: str
-    hazard: str
-    hazardous_situation: str
-    function: str
-    ots_software: str = Field(..., description="OTS software component if applicable")
-    hazardous_sequence_of_events: str
-    software_related_causes: str
-    harm_severity_rationale: str = Field(default="")
-    harm: str
-    severity: str
-    exploitability_pre_mitigation: str
-    probability_of_harm_pre_mitigation: str
-    initial_risk_rating: str
-    risk_control_measures: str
-    demonstration_of_effectiveness: str
-    severity_of_harm_post_mitigation: str
-    exploitability_post_mitigation: str
-    probability_of_harm_post_mitigation: str
-    final_risk_rating: str
-    new_hs_reference: str
-    sw_fmea_trace: str
-    sra_link: str
-    urra_item: str
-    residual_risk_acceptability: str
     requirements: List[Requirement] = Field(
         default_factory=list,
         description="Requirements traced to this hazard.",
@@ -124,9 +225,15 @@ class HazardRecord(BaseModel):
     )
 
 
+class HazardRowWithTraceMatrix(HazardRowFromExcel):
+    requirements_traceability: Optional[HazardTraceMatrix] = Field(
+        ..., description="The upstream and downstream relationships for all associated controls in row"
+    )
+
+
 class HazardPackage(BaseModel):
     """A list of HazardRecord items — accepted form for batch review."""
-    hazards: List[HazardRecord]
+    hazards: List[HazardRowWithTraceMatrix]
 
 
 class HazardSummarizedDesignSpec(BaseModel):
@@ -282,7 +389,10 @@ class FinalAssessorProse(BaseModel):
 
 
 class HazardReviewState(TypedDict, total=False):
-    hazard: HazardRecord
+    hazard: HazardRowWithTraceMatrix
+    pyjama_request: Optional[PyJamaRequest]
+    jama_data: Optional[List[Any]]
+    jama_metadata: Optional[Any]
     requirement_reviews: Annotated[List[RequirementReview], operator.add]
     summarized_designs: Optional[List[HazardSummarizedDesignSpec]]
     summarized_user_needs: Optional[List[HazardSummarizedUserNeed]]

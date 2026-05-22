@@ -13,11 +13,28 @@ The DataIntegrationNode is a conditional node that:
 Transform utilities convert raw JAMA responses into pipeline state formats.
 """
 
+import asyncio
+import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
+
+# Import hazard-related models
+try:
+    from autoqa.components.hazard_risk_reviewer.core import (
+        HazardPackageFromExcel,
+        HazardRowFromExcel,
+        HazardRowWithTraceMatrix,
+    )
+    HAZARD_MODELS_AVAILABLE = True
+except ImportError:
+    HAZARD_MODELS_AVAILABLE = False
+    HazardPackageFromExcel = None
+    HazardRowFromExcel = None
+    HazardRowWithTraceMatrix = None
 
 # Re-export PyJama classes for convenience
 try:
@@ -50,6 +67,7 @@ __all__ = [
     "DataIntegrationNode",
     "transform_test_suite_review_to_state",
     "transform_test_case_review_to_state",
+    "transform_hazard_record_to_state",
     "PYJAMA_AVAILABLE",
 ]
 
@@ -292,3 +310,129 @@ def transform_test_case_review_to_state(
     except Exception as e:
         logger.error("Transform failed: %s", str(e), exc_info=True)
         raise ValueError(f"Failed to transform JAMA data: {e}") from e
+
+
+def transform_hazard_record_to_state(
+    excel_file_path: str,
+    pyjama_response_file_path: str,
+    output_jsonl_path: str = "inputs.jsonl",
+) -> List[HazardRowWithTraceMatrix]:
+    """
+    Data transformation: Excel → PyJama Fixture → Enhanced JSONL
+
+    Implements the data preparation pipeline for hazard risk review:
+    1. Parse Excel via parse_sha_excel() to extract hazard rows and control references
+    2. Load unified pyjama fixture (single JSONL with bidirectional trace for all identifiers)
+    3. For each Excel row:
+       a. Build requirements_traceability field using merge_hazard_with_pyjama_traceability()
+       b. Filter pyjama responses: keep only items where req_id is in row_specific_controls_references
+       c. Write to output JSONL
+    
+    This function handles data transformation only. Graph invocation and orchestration
+    are the responsibility of the caller (see scripts/run_hazard_pipeline.py for an example).
+
+    Args:
+        excel_file_path: Path to software_hazard_analysis.xlsx
+        pyjama_response_file_path: Path to unified pyjama response JSONL.
+                                   Each line has: {requirement, system_requirements, test_cases, design_docs}
+        output_jsonl_path: Where to write the enhanced inputs.jsonl with requirements_traceability
+
+    Returns:
+        List of HazardRowWithTraceMatrix, one per Excel row with requirements_traceability populated
+
+    Raises:
+        FileNotFoundError: If Excel or pyjama fixture files not found
+        ValueError: If data structure validation fails
+    
+    Example:
+        >>> enhanced_rows = transform_hazard_record_to_state(
+        ...     excel_file_path="hazards.xlsx",
+        ...     pyjama_response_file_path="pyjama.jsonl",
+        ...     output_jsonl_path="enhanced_inputs.jsonl"
+        ... )
+        >>> # Now invoke graph separately:
+        >>> graph = HazardReviewerRunnable(client=client, model=model)
+        >>> outputs = await asyncio.gather(*[
+        ...     graph.graph.ainvoke({"hazard": row})
+        ...     for row in enhanced_rows
+        ... ])
+    """
+    from autoqa.components.hazard_risk_reviewer.loader import (
+        parse_sha_excel,
+        merge_hazard_with_pyjama_traceability,
+    )
+
+    excel_path = Path(excel_file_path)
+    pyjama_path = Path(pyjama_response_file_path)
+    output_path = Path(output_jsonl_path)
+
+    if not excel_path.exists():
+        raise FileNotFoundError(f"Excel file not found: {excel_path}")
+    if not pyjama_path.exists():
+        raise FileNotFoundError(f"Pyjama response file not found: {pyjama_path}")
+
+    logger.info("=" * 80)
+    logger.info("HAZARD RECORD TRANSFORMATION WORKFLOW")
+    logger.info("=" * 80)
+
+    # Step 1: Parse Excel to extract hazard rows and all control references
+    logger.info("[Step 1] Parsing Excel file: %s", excel_path)
+    excel_results: HazardPackageFromExcel = parse_sha_excel(
+        str(excel_path),
+        sheet_name="SHA Table",
+        extract_gids_format="GID-\\d+", #TODO Make this an input pattern Adjust pattern as needed 
+    )
+    excel_rows: List[HazardRowFromExcel] = excel_results.rows
+    all_controls_references: List[str] = excel_results.all_controls_references or []
+    logger.info("[Step 1] Extracted %d hazard rows, %d unique control references", len(excel_rows), len(all_controls_references))
+
+    # Step 2: Load and index unified pyjama response
+    logger.info("[Step 2] Loading unified pyjama response from: %s", pyjama_path)
+    pyjama_lookup: Dict[str, Dict[str, Any]] = {}
+    with pyjama_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            data = json.loads(line)
+            req_id = data.get("requirement", {}).get("req_id")
+            if req_id:
+                pyjama_lookup[req_id] = data
+    logger.info("[Step 2] Indexed %d pyjama traceability entries", len(pyjama_lookup))
+
+    # Step 3: Merge each Excel row with filtered pyjama traceability and write to JSONL
+    logger.info("[Step 3] Merging Excel rows with pyjama traceability")
+    enhanced_rows: List[HazardRowWithTraceMatrix] = []
+    with output_path.open("w", encoding="utf-8") as f:
+        for i, row in enumerate(excel_rows):
+            # Merge row with pyjama traceability to create HazardRowWithTraceMatrix
+            enhanced_row: HazardRowWithTraceMatrix = merge_hazard_with_pyjama_traceability(row, pyjama_lookup)
+            enhanced_rows.append(enhanced_row)
+            
+            # Serialize model to JSON for JSONL output
+            f.write(enhanced_row.model_dump_json(ensure_ascii=False) + "\n")
+            
+            # Log traceability count from the structured HazardTraceMatrix
+            num_trace = (
+                len(enhanced_row.requirements_traceability.requirements)
+                if enhanced_row.requirements_traceability else 0
+            )
+            logger.debug(
+                "  Row %d: %s → %d traceability items",
+                i,
+                enhanced_row.hazardous_situation_id,
+                num_trace
+            )
+
+    logger.info("[Step 3] Written %d enhanced rows to: %s", len(enhanced_rows), output_path)
+
+    # Transformation complete
+    logger.info("=" * 80)
+    logger.info("HAZARD RECORD TRANSFORMATION COMPLETE")
+    logger.info("=" * 80)
+    logger.info("Output Summary:")
+    logger.info("  - Rows processed: %d HazardRowWithTraceMatrix models", len(enhanced_rows))
+    logger.info("  - JSONL written to: %s", output_path)
+    logger.info("  - Graph invocation is the responsibility of the caller")
+    logger.info("=" * 80)
+
+    return enhanced_rows

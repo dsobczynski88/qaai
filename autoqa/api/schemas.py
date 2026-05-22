@@ -12,7 +12,7 @@ from autoqa.components.test_suite_reviewer.core import (
 )
 from autoqa.components.hazard_risk_reviewer.core import (
     HazardAssessment,
-    HazardRecord,
+    HazardRowWithTraceMatrix,
     RequirementReview,
 )
 from autoqa.components.test_case_reviewer.core import (
@@ -93,7 +93,7 @@ class HazardReviewRequest(BaseModel):
         max_length=MAX_THREAD_ID_LENGTH,
         description="Review session ID (alphanumeric, dash, underscore only)"
     )
-    hazard: HazardRecord
+    hazard: HazardRowWithTraceMatrix
     
     @field_validator('thread_id')
     @classmethod
@@ -119,7 +119,7 @@ class HazardReviewRequest(BaseModel):
 class HazardReviewResponse(BaseModel):
     status: str
     thread_id: str
-    hazard: HazardRecord
+    hazard: HazardRowWithTraceMatrix
     hazard_assessment: Optional[HazardAssessment] = None
     requirement_reviews: List[RequirementReview] = []
 
@@ -127,11 +127,19 @@ class HazardReviewResponse(BaseModel):
 class HazardReviewFromExcelRequest(BaseModel):
     """Request model for batch hazard review from an SHA Excel file.
 
+    This endpoint performs hazard review by:
+    1. Transforming Excel rows with JAMA traceability via transform_hazard_record_to_state()
+    2. Invoking the graph concurrently for each enhanced hazard row
+    3. Aggregating results into a batch response
+
     Attributes:
         thread_id_prefix: Prefix for per-hazard thread IDs. Combined with
             hazard_id to form "<prefix>-<hazard_id>" for each graph invocation.
-        file_path: Absolute server-side path to the SHA Excel file.
-        sheet_name: Excel sheet name containing the SHA table.
+        file_path: Absolute server-side path to the SHA Excel file (software_hazard_analysis.xlsx).
+        pyjama_response_file_path: Absolute server-side path to unified JAMA response JSONL
+            containing bidirectional traceability (requirements, test cases, design docs).
+            Each line has format: {requirement, system_requirements, test_cases, design_docs, user_needs}
+        sheet_name: Excel sheet name containing the SHA table (default: "SHA Table").
     """
     thread_id_prefix: str = Field(
         ...,
@@ -139,8 +147,18 @@ class HazardReviewFromExcelRequest(BaseModel):
         max_length=MAX_THREAD_ID_LENGTH,
         description="Prefix for per-hazard thread IDs (alphanumeric, dash, underscore only)",
     )
-    file_path: str = Field(..., description="Absolute path to the SHA Excel file on the server")
-    sheet_name: str = Field(default="SHA Table", description="Excel sheet name")
+    file_path: str = Field(
+        ..., 
+        description="Absolute path to the SHA Excel file (software_hazard_analysis.xlsx) on the server"
+    )
+    pyjama_response_file_path: str = Field(
+        ...,
+        description=(
+            "Absolute path to unified JAMA response JSONL with traceability data. "
+            "Each line: {requirement, system_requirements, test_cases, design_docs, user_needs}"
+        ),
+    )
+    sheet_name: str = Field(default="SHA Table", description="Excel sheet name containing the SHA table")
 
     @field_validator('thread_id_prefix')
     @classmethod
