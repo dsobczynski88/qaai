@@ -316,6 +316,8 @@ def transform_hazard_record_to_state(
     excel_file_path: str,
     pyjama_response_file_path: str,
     output_jsonl_path: str = "inputs.jsonl",
+    sheet_name: str = "SHA Table",
+    extract_gids_format: str = "GID-\\d+",
 ) -> List[HazardRowWithTraceMatrix]:
     """
     Data transformation: Excel → PyJama Fixture → Enhanced JSONL
@@ -379,8 +381,8 @@ def transform_hazard_record_to_state(
     logger.info("[Step 1] Parsing Excel file: %s", excel_path)
     excel_results: HazardPackageFromExcel = parse_sha_excel(
         str(excel_path),
-        sheet_name="SHA Table",
-        extract_gids_format="GID-\\d+", #TODO Make this an input pattern Adjust pattern as needed 
+        sheet_name=sheet_name,
+        extract_gids_format=extract_gids_format
     )
     excel_rows: List[HazardRowFromExcel] = excel_results.rows
     all_controls_references: List[str] = excel_results.all_controls_references or []
@@ -417,7 +419,7 @@ def transform_hazard_record_to_state(
                 if enhanced_row.requirements_traceability else 0
             )
             logger.debug(
-                "  Row %d: %s → %d traceability items",
+                "  Row %d: %s -> %d traceability items",
                 i,
                 enhanced_row.hazardous_situation_id,
                 num_trace

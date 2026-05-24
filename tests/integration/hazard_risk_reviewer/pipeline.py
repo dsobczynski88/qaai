@@ -256,6 +256,8 @@ async def test_hazard_risk_reviewer_batch_via_transformation(
     real_client,
     real_model,
     jsonl_recorders_hz,
+    hazard_analysis_wb_sheetname,
+    hazard_analysis_requirement_id_format
 ):
     """
     Test the complete batch transformation workflow end-to-end.
@@ -272,11 +274,11 @@ async def test_hazard_risk_reviewer_batch_via_transformation(
     
     This validates the entire `transform_hazard_record_to_state()` workflow.
     """
-    fixtures_dir = Path(__file__).parent.parent.parent / "fixtures" / "local"
+    fixtures_dir = Path(__file__).parent.parent.parent / "fixtures" / "external"
     
     # Verify fixture files exist
     excel_file = fixtures_dir / "software_hazard_analysis.xlsx"
-    pyjama_file = fixtures_dir / "bidirectional_trace_from_gids.jsonl"
+    pyjama_file = fixtures_dir / "pyjama_response_unified.jsonl"
     
     assert excel_file.exists(), f"Excel file not found: {excel_file}"
     assert pyjama_file.exists(), f"Pyjama fixture not found: {pyjama_file}"
@@ -310,6 +312,8 @@ async def test_hazard_risk_reviewer_batch_via_transformation(
         excel_file_path=str(excel_file),
         pyjama_response_file_path=str(pyjama_file),
         output_jsonl_path=str(output_jsonl),
+        sheet_name=hazard_analysis_wb_sheetname,
+        extract_gids_format=hazard_analysis_requirement_id_format
     )
 
     print(f"\n[Transform] Transformation complete!")

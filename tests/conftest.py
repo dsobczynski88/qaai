@@ -13,6 +13,7 @@ load_dotenv()
 from httpx import AsyncClient, ASGITransport
 
 from autoqa.core.config import settings
+from autoqa.core.telemetry import TokenUsageTracker
 from autoqa.prj_logger import ProjectLogger
 
 from autoqa.components.clients import (
@@ -37,25 +38,50 @@ from autoqa.components.test_suite_reviewer.core import (
 from autoqa.api.main import app
 
 
+@pytest.fixture(scope="session")
+def token_tracker():
+    """Session-scoped token usage tracker.
+
+    Accumulates prompt/completion tokens and simulated cost across all
+    integration tests in the session. Calls log_summary() at teardown so
+    the totals appear in autoqa.log and are written to token_usage.jsonl.
+
+    Cost rates are read from settings (TOKEN_COST_INPUT_PER_M /
+    TOKEN_COST_OUTPUT_PER_M in .env). Defaults: $0.15 / $0.60 per 1M tokens.
+    """
+    tracker = TokenUsageTracker(
+        file_path=settings.telemetry_file_path,
+        input_cost_per_million=settings.token_cost_input_per_m,
+        output_cost_per_million=settings.token_cost_output_per_m,
+    )
+    yield tracker
+    tracker.log_summary()
+
+
 @pytest.fixture
-def real_client():
+def real_client(token_tracker):
     """Provide a real OpenAI client for integration tests.
-    
+
     Security: Validates that PYTEST_BASE_URL is not a production endpoint.
+    Injects the session-scoped token_tracker so all LLM calls are recorded.
     """
     api_key = os.getenv("PYTEST_API_KEY")
     base_url = os.getenv("PYTEST_BASE_URL")
     if not api_key:
-        pytest.skip("PYTEST_API_KEY not set — skipping integration test")
-    
+        pytest.skip("PYTEST_API_KEY not set -- skipping integration test")
+
     # Security check: prevent accidental use of production endpoints
     if base_url and "prod" in base_url.lower():
         pytest.fail(
             "PYTEST_BASE_URL appears to be a production endpoint. "
             "Integration tests must use test/staging endpoints only."
         )
-    
-    return RateLimitOpenAIClient(api_key=api_key, base_url=base_url)
+
+    return RateLimitOpenAIClient(
+        api_key=api_key,
+        base_url=base_url,
+        telemetry_tracker=token_tracker,
+    )
 
 @pytest.fixture
 async def client():
@@ -73,6 +99,14 @@ async def client():
 def real_model():
     return os.getenv("PYTEST_MODEL")
 
+
+@pytest.fixture
+def hazard_analysis_wb_sheetname():
+    return "SHA Table"
+
+@pytest.fixture
+def hazard_analysis_requirement_id_format():
+    return "REQ-PUMP-\\d+"
 
 @pytest.fixture(scope="session", autouse=True)
 def configure_test_logger():
@@ -178,8 +212,6 @@ def _load_hazard_fixture(include_design_docs: bool) -> HazardRowWithTraceMatrix:
     # Step 1: Parse Excel to extract hazard rows and control references
     excel_results = parse_sha_excel(
         file_path=str(fixtures_dir / "software_hazard_analysis.xlsx"),
-        sheet_name="SHA Table",
-        extract_gids_format="REQ-PUMP-\\d+",
     )
 
     excel_rows = excel_results["rows"]

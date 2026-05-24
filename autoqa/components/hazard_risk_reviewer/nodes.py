@@ -127,7 +127,7 @@ class HazardDesignSummarizerNode(BaseLLMNode):
             else:
                 all_summaries.extend(parsed)
         
-        logger.info("%s: completed %d design docs → %d summaries",
+        logger.info("%s: completed %d design docs -> %d summaries",
                    self.__class__.__name__, len(design_docs), len(all_summaries))
         
         return {"summarized_designs": all_summaries}
@@ -210,7 +210,7 @@ class HazardNeedsSummarizerNode(BaseLLMNode):
             else:
                 all_summaries.extend(parsed)
         
-        logger.info("%s: completed %d user needs → %d summaries",
+        logger.info("%s: completed %d user needs -> %d summaries",
                    self.__class__.__name__, len(user_needs), len(all_summaries))
         
         return {"summarized_user_needs": all_summaries}
