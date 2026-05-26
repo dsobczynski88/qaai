@@ -33,7 +33,7 @@ mandatory_findings[i].verdict ∈ {Yes, N-A} (only H5 may be N-A).
 """
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from langchain_core.runnables import Runnable
 from langgraph.checkpoint.memory import MemorySaver
@@ -43,6 +43,7 @@ from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from autoqa.components.shared.nodes import make_data_integration_node
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from autoqa.core.cache import HazardCacheManager
 from autoqa.core.config import PromptConfig, settings
 from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
@@ -96,6 +97,8 @@ class HazardReviewerRunnable:
         checkpointer: Union[MemorySaver, None] = None,
         prompt_config: Optional[PromptConfig] = None,
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
+        cache_manager: Optional[HazardCacheManager] = None,
+        telemetry_tracker: Optional[Any] = None,
     ):
         self.client = client
         self.model = model
@@ -111,6 +114,26 @@ class HazardReviewerRunnable:
             model_kwargs=model_kwargs,
             prompt_config=self.prompt_config,
         )
+
+        # Build cache manager if not injected and caching is enabled.
+        # Callers can pass a pre-wired HazardCacheManager (e.g. to share
+        # between this reviewer and the RTMReviewService), or let the
+        # pipeline auto-build one from settings.
+        if cache_manager is not None:
+            self.cache_manager: Optional[HazardCacheManager] = cache_manager
+        elif settings.enable_hazard_cache:
+            # Reuse the tracker already wired into the client so cache events
+            # land in the same JSONL file as normal LLM-call records.
+            # A brand-new TokenUsageTracker would clear the file on init.
+            resolved_tracker = telemetry_tracker or getattr(client, "telemetry_tracker", None)
+            self.cache_manager = HazardCacheManager(
+                cache_dir=settings.hazard_cache_dir,
+                redis_url=settings.redis_url,
+                telemetry_tracker=resolved_tracker,
+            )
+        else:
+            self.cache_manager = None
+
         self.graph = self.build()
 
     def build(self) -> Runnable:
@@ -119,49 +142,67 @@ class HazardReviewerRunnable:
         # Create data integration node (entry point for conditional JAMA fetch)
         data_integration = make_data_integration_node(pyjama_config=None)
 
+        cm = self.cache_manager
+
         # Create all 7 evaluator nodes
         h1 = make_h1_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h1,
+            cache_manager=cm,
         )
         h2 = make_h2_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h2,
+            cache_manager=cm,
         )
         h3 = make_h3_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h3,
+            cache_manager=cm,
         )
         h4 = make_h4_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h4,
+            cache_manager=cm,
         )
         h5 = make_h5_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h5,
+            cache_manager=cm,
         )
         h6 = make_h6_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h6,
+            cache_manager=cm,
         )
         h7 = make_h7_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h7,
+            cache_manager=cm,
         )
         final_assessor = make_final_assessor_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_final,
+            cache_manager=cm,
         )
-        requirement_reviewer = make_requirement_reviewer_node(self.rtm)
-        
+        requirement_reviewer = make_requirement_reviewer_node(
+            self.rtm,
+            cache_manager=cm,
+            rtm_prompt_version=HazardCacheManager.extract_prompt_version(
+                self.prompt_config.synthesizer
+            ),
+        )
+
         # Create summarizer nodes
         design_summarizer = make_hazard_design_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_design_summarizer,
+            cache_manager=cm,
         )
         needs_summarizer = make_hazard_needs_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_needs_summarizer,
+            cache_manager=cm,
         )
 
         # Add all nodes to the graph
