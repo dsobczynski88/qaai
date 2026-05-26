@@ -200,23 +200,24 @@ def sample_test_suite(sample_requirement, sample_test_cases):
     )
 
 
-def _load_hazard_fixture(include_design_docs: bool) -> HazardRowWithTraceMatrix:
+def _load_hazard_fixture(include_design_docs: bool, gids_format: str = "REQ-PUMP-\\d+") -> HazardRowWithTraceMatrix:
     """Assemble HazardRowWithTraceMatrix from Excel + unified pyjama traceability response."""
     from autoqa.components.hazard_risk_reviewer.loader import (
         parse_sha_excel,
         merge_hazard_with_pyjama_traceability,
     )
+    from autoqa.components.hazard_risk_reviewer.core import HazardTraceMatrix
 
     fixtures_dir = Path(__file__).parent / "fixtures" / "external"
 
-    # Step 1: Parse Excel to extract hazard rows and control references
     excel_results = parse_sha_excel(
         file_path=str(fixtures_dir / "software_hazard_analysis.xlsx"),
+        extract_gids_format=gids_format,
     )
+    excel_rows = excel_results.rows
+    if not excel_rows:
+        raise ValueError("No hazard rows found in Excel file")
 
-    excel_rows = excel_results["rows"]
-
-    # Step 2: Load and index unified pyjama response
     pyjama_lookup = {}
     with (fixtures_dir / "pyjama_response_unified.jsonl").open(encoding="utf-8") as f:
         for line in f:
@@ -226,57 +227,33 @@ def _load_hazard_fixture(include_design_docs: bool) -> HazardRowWithTraceMatrix:
                 if req_id:
                     pyjama_lookup[req_id] = data
 
-    # Step 3: Merge first Excel row with pyjama traceability
-    # (For fixture purposes, we use the first row)
-    if not excel_rows:
-        raise ValueError("No hazard rows found in Excel file")
-    
-    excel_row = excel_rows[0]
-    enhanced_row = merge_hazard_with_pyjama_traceability(excel_row, pyjama_lookup)
+    enhanced_row = merge_hazard_with_pyjama_traceability(excel_rows[0], pyjama_lookup)
 
-    # Step 4: Extract and flatten requirements traceability data
-    reqs_trace = enhanced_row.get("requirements_traceability", [])
-    requirements = []
-    test_cases_seen: dict = {}
-    design_docs_seen: dict = {}
-    user_needs_seen: dict = {}
-    sys_reqs_seen: dict = {}
+    if not include_design_docs:
+        trace = enhanced_row.requirements_traceability
+        new_trace = HazardTraceMatrix(
+            requirements=trace.requirements if trace else [],
+            test_cases=trace.test_cases if trace else [],
+            design_docs=[],
+            user_needs=[],
+            system_requirements=trace.system_requirements if trace else [],
+        )
+        enhanced_row = HazardRowWithTraceMatrix(
+            **enhanced_row.model_dump(exclude={"requirements_traceability"}),
+            requirements_traceability=new_trace,
+        )
 
-    for trace in reqs_trace:
-        req = trace.get("requirement", {})
-        requirements.append(req)
-        for tc in trace.get("test_cases", []):
-            test_cases_seen.setdefault(tc["test_id"], tc)
-        if include_design_docs:
-            for dd in trace.get("design_docs", []):
-                design_docs_seen.setdefault(dd["doc_id"], dd)
-        for sys_req in trace.get("system_requirements", []):
-            for un in sys_req.get("user_needs", []):
-                user_needs_seen.setdefault(un["req_id"], un)
-            sys_req_flat = {k: v for k, v in sys_req.items() if k != "user_needs"}
-            sys_reqs_seen.setdefault(sys_req_flat["req_id"], sys_req_flat)
-
-    # Remove requirements_traceability from the data dict before building HazardRowWithTraceMatrix
-    enhanced_row.pop("requirements_traceability", None)
-    
-    # Populate flattened fields
-    enhanced_row["requirements"] = requirements
-    enhanced_row["test_cases"] = list(test_cases_seen.values())
-    enhanced_row["design_docs"] = list(design_docs_seen.values()) if include_design_docs else []
-    enhanced_row["user_needs"] = list(user_needs_seen.values()) if include_design_docs else []
-    enhanced_row["system_requirements"] = list(sys_reqs_seen.values()) if include_design_docs else []
-    
-    return HazardRowWithTraceMatrix.model_validate(enhanced_row)
+    return enhanced_row
 
 
 @pytest.fixture
-def hazard_full_traceability():
+def hazard_full_traceability(hazard_analysis_requirement_id_format):
     """Full-traceability HazardRowWithTraceMatrix: requirements, test_cases, design_docs, user_needs,
     and system_requirements all populated.
 
     Used for the M1-M5 + R6 (6 findings per requirement) test path.
     """
-    return _load_hazard_fixture(include_design_docs=True)
+    return _load_hazard_fixture(include_design_docs=True, gids_format=hazard_analysis_requirement_id_format)
 
 
 @pytest.fixture(scope="session")

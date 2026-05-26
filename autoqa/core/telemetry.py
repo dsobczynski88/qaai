@@ -34,8 +34,8 @@ class TokenUsageTracker:
     def __init__(
         self,
         file_path: str,
-        input_cost_per_million: float = 0.15,
-        output_cost_per_million: float = 0.60,
+        input_cost_per_million: float = 1.00,
+        output_cost_per_million: float = 5.00,
     ):
         self.file_path = file_path
         self.input_cost_per_million = input_cost_per_million
@@ -44,6 +44,13 @@ class TokenUsageTracker:
         self._total_prompt_tokens: int = 0
         self._total_completion_tokens: int = 0
         self._call_count: int = 0
+
+        # Cache telemetry
+        self._cache_hits_redis: int = 0
+        self._cache_hits_disk: int = 0
+        self._cache_misses: int = 0
+        self._tokens_saved_prompt: int = 0
+        self._tokens_saved_completion: int = 0
 
         Path(file_path).write_text("", encoding="utf-8")
 
@@ -67,6 +74,56 @@ class TokenUsageTracker:
         except Exception as e:
             logger.error("TokenUsageTracker: failed to write record: %s", e)
 
+    async def record_cache_hit(
+        self,
+        node: str,
+        hazard_id: str,
+        tier: int,
+        tokens_saved_prompt: int,
+        tokens_saved_completion: int,
+        model: str,
+    ) -> None:
+        """Append a cache_hit event and update running cache counters."""
+        if tier == 2:
+            self._cache_hits_redis += 1
+        else:
+            self._cache_hits_disk += 1
+        self._tokens_saved_prompt += tokens_saved_prompt
+        self._tokens_saved_completion += tokens_saved_completion
+
+        entry = {
+            "type": "cache_hit",
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "tier": tier,
+            "node": node,
+            "hazard_id": hazard_id,
+            "tokens_saved_prompt": tokens_saved_prompt,
+            "tokens_saved_completion": tokens_saved_completion,
+            "tokens_saved_total": tokens_saved_prompt + tokens_saved_completion,
+            "cost_saved_usd": self._calculate_cost(tokens_saved_prompt, tokens_saved_completion),
+            "model": model,
+        }
+        try:
+            with open(self.file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.error("TokenUsageTracker: failed to write cache_hit record: %s", e)
+
+    async def record_cache_miss(self, node: str, hazard_id: str) -> None:
+        """Append a cache_miss event and increment the miss counter."""
+        self._cache_misses += 1
+        entry = {
+            "type": "cache_miss",
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "node": node,
+            "hazard_id": hazard_id,
+        }
+        try:
+            with open(self.file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.error("TokenUsageTracker: failed to write cache_miss record: %s", e)
+
     def summary(self) -> dict:
         """Return accumulated totals for the current session."""
         return {
@@ -79,14 +136,23 @@ class TokenUsageTracker:
             ),
             "input_cost_per_million_usd": self.input_cost_per_million,
             "output_cost_per_million_usd": self.output_cost_per_million,
+            "cache_hits_redis": self._cache_hits_redis,
+            "cache_hits_disk": self._cache_hits_disk,
+            "cache_misses": self._cache_misses,
+            "tokens_saved_by_cache": self._tokens_saved_prompt + self._tokens_saved_completion,
+            "cost_saved_by_cache_usd": self._calculate_cost(
+                self._tokens_saved_prompt, self._tokens_saved_completion
+            ),
         }
 
     def log_summary(self) -> None:
         """Log the session summary and append a summary record to the JSONL file."""
         s = self.summary()
+        cache_hits = s["cache_hits_redis"] + s["cache_hits_disk"]
         logger.info(
             "Token usage summary — calls: %d | prompt: %s | completion: %s | "
-            "total: %s | cost: $%.4f (rates: $%.2f/$%.2f per 1M in/out)",
+            "total: %s | cost: $%.4f (rates: $%.2f/$%.2f per 1M in/out) | "
+            "cache hits: %d (redis=%d disk=%d) misses: %d tokens_saved: %s cost_saved: $%.4f",
             s["llm_calls"],
             f"{s['total_prompt_tokens']:,}",
             f"{s['total_completion_tokens']:,}",
@@ -94,6 +160,12 @@ class TokenUsageTracker:
             s["total_cost_usd"],
             s["input_cost_per_million_usd"],
             s["output_cost_per_million_usd"],
+            cache_hits,
+            s["cache_hits_redis"],
+            s["cache_hits_disk"],
+            s["cache_misses"],
+            f"{s['tokens_saved_by_cache']:,}",
+            s["cost_saved_by_cache_usd"],
         )
         summary_record = {"type": "summary", **s}
         try:

@@ -11,10 +11,9 @@ concurrently with requirement_reviewer, H4, H5 wait for requirement_reviews,
 and H6 waits for H3, H4, H5.
 """
 
-import asyncio
 import json
+import tempfile
 from pathlib import Path
-from datetime import datetime
 
 import pytest
 from pydantic import BaseModel
@@ -23,12 +22,44 @@ from autoqa.components.hazard_risk_reviewer.core import (
     HazardAssessment,
     HazardReviewState,
     RequirementReview,
-    HazardRowWithTraceMatrix,
 )
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from autoqa.components.shared.data_integration import transform_hazard_record_to_state
 from autoqa.components.test_suite_reviewer.core import SynthesizedAssessment
 from autoqa.core.config import settings
+
+
+# --- Collection-time row enumeration -----------------------------------------
+# pytest resolves parametrization at collection time, before fixtures run, so we
+# load the hazard rows here rather than from fixtures. These constants mirror the
+# conftest fixtures hazard_analysis_wb_sheetname / hazard_analysis_requirement_id_format,
+# which return plain literals.
+_FIXTURES_DIR = Path(__file__).parent.parent.parent / "fixtures" / "external"
+_EXCEL_FILE = _FIXTURES_DIR / "software_hazard_analysis.xlsx"
+_PYJAMA_FILE = _FIXTURES_DIR / "pyjama_response_unified.jsonl"
+_SHEET_NAME = "SHA Table"
+_GID_FORMAT = "REQ-PUMP-\\d+"
+
+
+def _load_enhanced_rows():
+    """Enumerate HazardRowWithTraceMatrix rows from the Excel fixture for
+    parametrization. Writes the transform's JSONL to a throwaway temp path so
+    collection never touches the run directory (each item records its own input
+    via record_input). Returns [] if fixtures are missing so collection skips
+    gracefully instead of erroring."""
+    try:
+        return transform_hazard_record_to_state(
+            excel_file_path=str(_EXCEL_FILE),
+            pyjama_response_file_path=str(_PYJAMA_FILE),
+            output_jsonl_path=str(Path(tempfile.gettempdir()) / "hazard_rows_collection.jsonl"),
+            sheet_name=_SHEET_NAME,
+            extract_gids_format=_GID_FORMAT,
+        )
+    except FileNotFoundError:
+        return []
+
+
+_ENHANCED_ROWS = _load_enhanced_rows()
 
 
 def _serialize_hazard_state(state: dict) -> dict:
@@ -95,8 +126,8 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name
 
     # Per-requirement RTM evidence — one review per traced requirement.
     reviews = result.get("requirement_reviews", [])
-    assert len(reviews) == len(hazard.requirements), \
-        f"Expected {len(hazard.requirements)} reviews, got {len(reviews)}"
+    assert len(reviews) == len(hazard.requirements_traceability.requirements), \
+        f"Expected {len(hazard.requirements_traceability.requirements)} reviews, got {len(reviews)}"
     
     for r in reviews:
         assert isinstance(r, RequirementReview), f"Expected RequirementReview, got {type(r)}"
@@ -121,17 +152,17 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name
 
     # Verify summarized_designs were produced (if design_docs present)
     summarized_designs = result.get("summarized_designs")
-    if hazard.design_docs:
+    if hazard.requirements_traceability.design_docs:
         assert summarized_designs is not None, "Expected summarized_designs when design_docs are present"
         assert len(summarized_designs) > 0, "Expected at least one summarized design"
-        print(f"\n[{hazard_fixture_name}] Produced {len(summarized_designs)} summarized designs from {len(hazard.design_docs)} design docs")
+        print(f"\n[{hazard_fixture_name}] Produced {len(summarized_designs)} summarized designs from {len(hazard.requirements_traceability.design_docs)} design docs")
     
     # Verify summarized_user_needs were produced (if user_needs present)
     summarized_user_needs = result.get("summarized_user_needs")
-    if hazard.user_needs:
+    if hazard.requirements_traceability.user_needs:
         assert summarized_user_needs is not None, "Expected summarized_user_needs when user_needs are present"
         assert len(summarized_user_needs) > 0, "Expected at least one summarized user need"
-        print(f"[{hazard_fixture_name}] Produced {len(summarized_user_needs)} summarized user needs from {len(hazard.user_needs)} user needs")
+        print(f"[{hazard_fixture_name}] Produced {len(summarized_user_needs)} summarized user needs from {len(hazard.requirements_traceability.user_needs)} user needs")
 
     # Hazard-level H1-H7 verdict (binary Yes/No; H5 may also be N-A).
     assessment = result.get("hazard_assessment")
@@ -252,172 +283,44 @@ def _validate_hazard_assessment(output_state: dict, row_index: int) -> dict:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "enhanced_row",
+    _ENHANCED_ROWS,
+    ids=[row.hazard_id or f"row{i}" for i, row in enumerate(_ENHANCED_ROWS)],
+)
 async def test_hazard_risk_reviewer_batch_via_transformation(
-    real_client,
-    real_model,
-    jsonl_recorders_hz,
-    hazard_analysis_wb_sheetname,
-    hazard_analysis_requirement_id_format
+    enhanced_row, real_client, real_model, jsonl_recorders_hz
 ):
-    """
-    Test the complete batch transformation workflow end-to-end.
-    
-    This test orchestrates:
-    1. Parse Excel file to extract hazard rows
-    2. Load unified pyjama fixture with bidirectional traceability
-    3. Merge hazard rows with pyjama data
-    4. Write enhanced inputs to inputs.jsonl
-    5. Invoke HazardReviewerRunnable graph asynchronously for all rows
-    6. Validate H1-H7 findings for each output
-    7. Record outputs to outputs.jsonl
-    8. Generate summary report
-    
-    This validates the entire `transform_hazard_record_to_state()` workflow.
-    """
-    fixtures_dir = Path(__file__).parent.parent.parent / "fixtures" / "external"
-    
-    # Verify fixture files exist
-    excel_file = fixtures_dir / "software_hazard_analysis.xlsx"
-    pyjama_file = fixtures_dir / "pyjama_response_unified.jsonl"
-    
-    assert excel_file.exists(), f"Excel file not found: {excel_file}"
-    assert pyjama_file.exists(), f"Pyjama fixture not found: {pyjama_file}"
-    
-    # Set up output directory with timestamp
-    run_dir = Path(settings.log_file_path).parent
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    batch_output_dir = run_dir / f"batch_{timestamp}"
-    batch_output_dir.mkdir(parents=True, exist_ok=True)
-    
-    output_jsonl = batch_output_dir / "inputs.jsonl"
-    
-    record_input, record_output = jsonl_recorders_hz
-    
-    print("\n" + "=" * 80)
-    print("HAZARD RISK REVIEWER BATCH INTEGRATION TEST")
-    print("=" * 80)
-    
-    # Build the HazardReviewerRunnable graph once (reused for all rows)
-    print("\n[Setup] Building HazardReviewerRunnable graph...")
-    graph = HazardReviewerRunnable(client=real_client, model=real_model)
-    print(f"[Setup] Graph built with model={real_model}")
-    
-    # Call the batch transformation workflow
-    print(f"\n[Transform] Calling transform_hazard_record_to_state()...")
-    print(f"  - Excel: {excel_file}")
-    print(f"  - PyJama: {pyjama_file}")
-    print(f"  - Output: {output_jsonl}")
-    
-    enhanced_rows = transform_hazard_record_to_state(
-        excel_file_path=str(excel_file),
-        pyjama_response_file_path=str(pyjama_file),
-        output_jsonl_path=str(output_jsonl),
-        sheet_name=hazard_analysis_wb_sheetname,
-        extract_gids_format=hazard_analysis_requirement_id_format
-    )
+    """Review one Excel-derived hazard row end-to-end against a real LLM.
 
-    print(f"\n[Transform] Transformation complete!")
-    print(f"  - Rows processed: {len(enhanced_rows)}")
-    
-    # Validate that we have at least one row
-    assert len(enhanced_rows) > 0, "Expected at least one hazard row from Excel"
-    
-    # Invoke graph for each enhanced row asynchronously
-    print(f"\n[Invocation] Invoking graph for {len(enhanced_rows)} rows...")
-    
-    async def invoke_row(row: HazardRowWithTraceMatrix, index: int) -> dict:
-        """Invoke the graph for a single row."""
-        return await graph.graph.ainvoke({"hazard": row})
-    
-    outputs_generated = await asyncio.gather(
-        *[invoke_row(row, i) for i, row in enumerate(enhanced_rows)],
-        return_exceptions=False
+    The hazard rows from software_hazard_analysis.xlsx are enumerated at
+    collection time (see _ENHANCED_ROWS) and parametrized so each row is its own
+    pytest item (id = hazard_id) — they pass/fail independently and can be
+    selected individually. Rows run sequentially (pytest default), so the
+    req_id-keyed disk cache populated by earlier rows is reused by later ones.
+    """
+    record_input, record_output = jsonl_recorders_hz
+    record_input({"hazard": enhanced_row.model_dump()})
+
+    graph = HazardReviewerRunnable(client=real_client, model=real_model)
+    output_state = await graph.graph.ainvoke({"hazard": enhanced_row})
+    record_output(_serialize_hazard_state(output_state))
+
+    hazard_id = enhanced_row.hazard_id or "<no-id>"
+    summary = _validate_hazard_assessment(output_state, hazard_id)
+
+    # Per-requirement RTM evidence — each traced requirement must have a
+    # synthesized assessment from the wrapped RTM subgraph.
+    reviews = output_state.get("requirement_reviews", [])
+    for review in reviews:
+        assert isinstance(review, RequirementReview), \
+            f"[{hazard_id}] Expected RequirementReview, got {type(review)}"
+        assert review.synthesized_assessment is not None, \
+            f"[{hazard_id}] synthesized_assessment is None for {review.requirement.req_id}"
+        assert isinstance(review.synthesized_assessment, SynthesizedAssessment), \
+            f"[{hazard_id}] Expected SynthesizedAssessment, got {type(review.synthesized_assessment)}"
+
+    print(
+        f"  {summary['hazard_id']} -> {summary['overall_verdict']} "
+        f"({len(reviews)} reqs) | {summary['verdicts']}"
     )
-    
-    print(f"\n[Invocation] Graph invocation complete!")
-    print(f"  - Outputs generated: {len(outputs_generated)}")
-    
-    # Validate that we have output for each row
-    assert len(outputs_generated) == len(enhanced_rows), \
-        f"Output count mismatch: {len(outputs_generated)} vs {len(enhanced_rows)}"
-    
-    # Validate each output and collect summaries
-    print(f"\n[Validation] Validating {len(outputs_generated)} output rows...")
-    summaries = []
-    for i, output_state in enumerate(outputs_generated):
-        summary = _validate_hazard_assessment(output_state, i)
-        summaries.append(summary)
-        
-        # Record this row's output
-        record_output(_serialize_hazard_state(output_state))
-        
-        print(f"  ✓ Row {i}: {summary['hazard_id']} → {summary['overall_verdict']}")
-    
-    # Validate per-requirement findings
-    print(f"\n[Validation] Checking per-requirement findings...")
-    for i, output_state in enumerate(outputs_generated):
-        reviews = output_state.get("requirement_reviews", [])
-        print(f"  Row {i}: {len(reviews)} requirement reviews")
-        
-        for review in reviews:
-            assert isinstance(review, RequirementReview), \
-                f"[Row {i}] Expected RequirementReview, got {type(review)}"
-            
-            assert review.synthesized_assessment is not None, \
-                f"[Row {i}] synthesized_assessment is None for {review.requirement.req_id}"
-            
-            assert isinstance(review.synthesized_assessment, SynthesizedAssessment), \
-                f"[Row {i}] Expected SynthesizedAssessment, got {type(review.synthesized_assessment)}"
-    
-    # Generate summary report
-    print(f"\n" + "=" * 80)
-    print("BATCH PROCESSING SUMMARY")
-    print("=" * 80)
-    
-    print(f"\nRows Processed: {len(summaries)}")
-    print(f"Verdicts Breakdown:")
-    
-    verdict_counts = {"Yes": 0, "No": 0}
-    for summary in summaries:
-        verdict = summary["overall_verdict"]
-        verdict_counts[verdict] += 1
-    
-    for verdict, count in verdict_counts.items():
-        print(f"  {verdict}: {count}")
-    
-    print(f"\nDetailed Results:")
-    print(f"{'Row':<4} {'Hazard ID':<30} {'Verdict':<8} {'Reqs':<5} {'H1':<4} {'H2':<4} {'H3':<4} {'H4':<4} {'H5':<4} {'H6':<4} {'H7':<4}")
-    print("-" * 100)
-    
-    for i, summary in enumerate(summaries):
-        verdicts_str = " ".join([
-            summary["verdicts"].get("H1", "?"),
-            summary["verdicts"].get("H2", "?"),
-            summary["verdicts"].get("H3", "?"),
-            summary["verdicts"].get("H4", "?"),
-            summary["verdicts"].get("H5", "?"),
-            summary["verdicts"].get("H6", "?"),
-            summary["verdicts"].get("H7", "?"),
-        ])
-        print(f"{i:<4} {summary['hazard_id']:<30} {summary['overall_verdict']:<8} {summary['num_requirements']:<5} {verdicts_str}")
-    
-    print("-" * 100)
-    
-    # Verify output files were created
-    assert output_jsonl.exists(), f"Output JSONL not created: {output_jsonl}"
-    with output_jsonl.open("r") as f:
-        output_lines = f.readlines()
-    print(f"\nOutput Files:")
-    print(f"  inputs.jsonl: {output_jsonl} ({len(output_lines)} rows)")
-    
-    # Report
-    print(f"\n" + "=" * 80)
-    print("✓ BATCH INTEGRATION TEST COMPLETE")
-    print("=" * 80)
-    print(f"\nLogs & artifacts:")
-    print(f"  - Batch output dir: {batch_output_dir}")
-    print(f"  - Enhanced inputs: {output_jsonl}")
-    print(f"  - JSONL recorders: inputs.jsonl & outputs.jsonl (in {run_dir})")
-    print(f"  - Full state dumps: {run_dir}/hazard_pipeline_state.json")
-    print(f"\nNote: Hazard viewer will be generated at session teardown")
-    print("=" * 80)

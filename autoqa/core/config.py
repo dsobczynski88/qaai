@@ -96,9 +96,14 @@ class Settings(BaseSettings):
     log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
 
     # Token cost rates in USD per million tokens — set in .env to match your model pricing.
-    token_cost_input_per_m: float = Field(default=0.15, alias="TOKEN_COST_INPUT_PER_M")
-    token_cost_output_per_m: float = Field(default=0.60, alias="TOKEN_COST_OUTPUT_PER_M")
-    
+    token_cost_input_per_m: float = Field(default=1.00, alias="TOKEN_COST_INPUT_PER_M")
+    token_cost_output_per_m: float = Field(default=5.00, alias="TOKEN_COST_OUTPUT_PER_M")
+
+    # Hazard reviewer cache (set ENABLE_HAZARD_CACHE=false to disable entirely)
+    redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
+    hazard_cache_dir: str = Field(default="./cache/hazard", alias="HAZARD_CACHE_DIR")
+    enable_hazard_cache: bool = Field(default=True, alias="ENABLE_HAZARD_CACHE")
+
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
     

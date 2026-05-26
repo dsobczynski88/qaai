@@ -101,11 +101,21 @@ class BaseLLMNode(ABC):
     Does NOT impose the single-call Template Method — that lives in StandardLLMNode.
     """
 
-    def __init__(self, client: RateLimitOpenAIClient, model: str, system_prompt: str, model_kwargs: dict | None = None):
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        system_prompt: str,
+        model_kwargs: dict | None = None,
+        cache_manager: Optional[Any] = None,
+        prompt_version: str = "",
+    ):
         self.client = client
         self.model = model
         self.system_prompt = system_prompt
         self.model_kwargs = model_kwargs or {}
+        self.cache_manager = cache_manager
+        self.prompt_version = prompt_version
 
     @abstractmethod
     def _validate_state(self, state: Any) -> bool:
@@ -282,11 +292,43 @@ class StandardLLMNode(BaseLLMNode, ABC):
     Single-call Template Method node. Subclasses implement _build_payload and
     _format_response; __call__ orchestrates the full flow. Generic over the
     concrete TypedDict state — subclasses pin their own state type.
+
+    Cache support: assign a HazardCacheManager to self.cache_manager and set
+    self.prompt_version, then override _get_cache_entity_id() to return the
+    entity key (e.g. hazard_id). When both are non-None, __call__ checks the
+    cache before the LLM call and writes through after a miss.
     """
 
-    def __init__(self, client: RateLimitOpenAIClient, model: str, response_model, system_prompt: str, model_kwargs: dict | None = None):
-        super().__init__(client, model, system_prompt, model_kwargs)
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        response_model,
+        system_prompt: str,
+        model_kwargs: dict | None = None,
+        cache_manager: Optional[Any] = None,
+        prompt_version: str = "",
+    ):
+        super().__init__(client, model, system_prompt, model_kwargs, cache_manager, prompt_version)
         self.response_model = response_model
+
+    def _get_cache_entity_id(self, state: Any) -> Optional[str]:
+        """Return the entity identifier used as the cache key partition.
+
+        Default returns None (no caching). Subclasses that participate in
+        caching override this to return e.g. state["hazard"].hazard_id.
+        """
+        return None
+
+    def _get_cache_node_name(self) -> str:
+        """Node component of the cache key. Defaults to the class name.
+
+        Subclasses that share one class across several distinct graph nodes
+        (e.g. a single evaluator class parametrised per dimension) MUST
+        override this so each logical node gets its own key — otherwise they
+        collide on class name and read back each other's cached results.
+        """
+        return self.__class__.__name__.lower()
 
     @abstractmethod
     def _build_payload(self, state: Any) -> Any:
@@ -305,6 +347,23 @@ class StandardLLMNode(BaseLLMNode, ABC):
         if not self._validate_state(state):
             logger.debug("%s: skipping — validation failed", self.__class__.__name__)
             return self._get_skip_response()
+
+        node_name = self._get_cache_node_name()
+
+        # --- Tier 2/3: cache check ---
+        if self.cache_manager is not None and self.prompt_version:
+            entity_id = self._get_cache_entity_id(state)
+            if entity_id:
+                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+                if cached is not None:
+                    try:
+                        restored = self.response_model.model_validate(cached["result"])
+                        return self._format_response(restored)
+                    except Exception as e:
+                        logger.warning(
+                            "%s: cache restore failed, falling through to LLM — %s",
+                            self.__class__.__name__, e,
+                        )
 
         try:
             payload = self._build_payload(state)
@@ -327,6 +386,26 @@ class StandardLLMNode(BaseLLMNode, ABC):
         if parsed is None:
             logger.warning("%s: all choices failed to parse, returning skip response", self.__class__.__name__)
             return self._get_skip_response()
+
+        # --- Tier 2/3: write-through cache ---
+        if self.cache_manager is not None and self.prompt_version:
+            entity_id = self._get_cache_entity_id(state)
+            if entity_id:
+                usage = getattr(result, "usage", None)
+                prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+                try:
+                    await self.cache_manager.set(
+                        hazard_id=entity_id,
+                        node_name=node_name,
+                        prompt_version=self.prompt_version,
+                        result_dict=parsed.model_dump(),
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        model=self.model,
+                    )
+                except Exception as e:
+                    logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
 
         return self._format_response(parsed)
 

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 from typing import List, Optional
@@ -138,10 +137,11 @@ class HazardReviewService:
            - Loads unified JAMA response JSONL with bidirectional traceability
            - Merges each row with filtered traceability to create HazardRowWithTraceMatrix
            - Writes enhanced inputs to JSONL for inspection
-        2. Invoke graph concurrently for each enhanced hazard row
+        2. Invoke graph sequentially for each enhanced hazard row
            - Creates thread_id from prefix + hazard_id
            - Builds HazardReviewRequest with fully-traced hazard
-           - Invokes graph via asyncio.gather() for parallel processing
+           - Invokes graphs one at a time so shared requirement reviews are
+             served from the req_id-keyed cache instead of recomputed
         3. Aggregate and return results as batch response
         
         Args:
@@ -195,13 +195,17 @@ class HazardReviewService:
             # Invoke graph via existing run() method
             return await self.run(review_request)
         
-        # Step 3: Invoke graph concurrently for all rows
-        logger.info("[Step 2] Invoking graph concurrently for %d rows", len(enhanced_rows))
+        # Step 3: Invoke graph sequentially so each hazard's requirement reviews
+        # populate the req_id-keyed cache before the next hazard runs. The
+        # RequirementReviewerNode dedup ("once per unique requirement per run",
+        # nodes.py:406-409) only holds when hazards are serialized — under
+        # asyncio.gather every hazard sharing a requirement misses the cache and
+        # recomputes the non-deterministic RTM subgraph, diverging H4/H5/H6.
+        logger.info("[Step 2] Invoking graph sequentially for %d rows", len(enhanced_rows))
         try:
-            results: List[HazardReviewResponse] = await asyncio.gather(
-                *[invoke_row(row, i) for i, row in enumerate(enhanced_rows)],
-                return_exceptions=False,
-            )
+            results: List[HazardReviewResponse] = []
+            for i, row in enumerate(enhanced_rows):
+                results.append(await invoke_row(row, i))
             logger.info("[Step 2] Graph invocation complete: %d results collected", len(results))
         except Exception as e:
             logger.error("[Step 2] Graph invocation failed: %s", str(e), exc_info=True)
