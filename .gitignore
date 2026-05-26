@@ -11,6 +11,10 @@ config.yaml
 
 # docs
 
+# cache
+cache/*
+!/cache/.gitkeep
+
 # data
 data/*
 !/data/.gitkeep

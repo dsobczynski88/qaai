@@ -34,8 +34,8 @@ class TokenUsageTracker:
     def __init__(
         self,
         file_path: str,
-        input_cost_per_million: float = 0.15,
-        output_cost_per_million: float = 0.60,
+        input_cost_per_million: float = 1.00,
+        output_cost_per_million: float = 5.00,
     ):
         self.file_path = file_path
         self.input_cost_per_million = input_cost_per_million

@@ -320,6 +320,16 @@ class StandardLLMNode(BaseLLMNode, ABC):
         """
         return None
 
+    def _get_cache_node_name(self) -> str:
+        """Node component of the cache key. Defaults to the class name.
+
+        Subclasses that share one class across several distinct graph nodes
+        (e.g. a single evaluator class parametrised per dimension) MUST
+        override this so each logical node gets its own key — otherwise they
+        collide on class name and read back each other's cached results.
+        """
+        return self.__class__.__name__.lower()
+
     @abstractmethod
     def _build_payload(self, state: Any) -> Any:
         """Build the payload to send to the LLM from the state."""
@@ -338,7 +348,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
             logger.debug("%s: skipping — validation failed", self.__class__.__name__)
             return self._get_skip_response()
 
-        node_name = self.__class__.__name__.lower()
+        node_name = self._get_cache_node_name()
 
         # --- Tier 2/3: cache check ---
         if self.cache_manager is not None and self.prompt_version:

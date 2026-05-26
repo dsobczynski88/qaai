@@ -673,6 +673,11 @@ class HazardEvaluatorNode(StandardLLMNode):
         hazard = state.get("hazard")
         return hazard.hazard_id if hazard else None
 
+    def _get_cache_node_name(self) -> str:
+        # H1..H7 are all instances of this one class — disambiguate by
+        # dimension so they don't share (and clobber) one cache key.
+        return f"hazardevaluatornode_{self.dimension_code.lower()}"
+
     def _validate_state(self, state: Any) -> bool:
         # H1, H2, H3, H7 only need hazard
         if self.dimension_code in ["H1", "H2", "H3", "H7"]:
