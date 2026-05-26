@@ -94,12 +94,20 @@ class Settings(BaseSettings):
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
+
+    # Token cost rates in USD per million tokens — set in .env to match your model pricing.
+    token_cost_input_per_m: float = Field(default=0.15, alias="TOKEN_COST_INPUT_PER_M")
+    token_cost_output_per_m: float = Field(default=0.60, alias="TOKEN_COST_OUTPUT_PER_M")
     
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
     
     _prompt_config_cache: Optional[PromptConfig] = None
     
+    @property
+    def telemetry_file_path(self) -> str:
+        return str(Path(self.log_file_path).parent / "token_usage.jsonl")
+
     @property
     def prompt_config(self) -> PromptConfig:
         """Get prompt configuration, loading from prompt_set if specified."""

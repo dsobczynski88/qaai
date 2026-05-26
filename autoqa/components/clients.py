@@ -10,6 +10,9 @@ from tqdm.asyncio import tqdm_asyncio
 from langchain_core.runnables import RunnableSequence
 from openai import OpenAI, AsyncOpenAI, RateLimitError
 from openai.types.chat import ChatCompletion
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from autoqa.core.telemetry import TokenUsageTracker
 
 # Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()
@@ -294,6 +297,7 @@ class RateLimitOpenAIClient:
         max_requests_per_minute: int = 490,
         max_tokens_per_minute: Optional[int] = 200000,
         token_estimator: Optional[Callable[[List[Dict[str, Any]], str], int]] = None,
+        telemetry_tracker: Optional["TokenUsageTracker"] = None,
         ):
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.max_rpm = max_requests_per_minute
@@ -301,6 +305,7 @@ class RateLimitOpenAIClient:
         self.rate_limiter = OpenAIRateLimiter(max_requests_per_minute)
         self.token_limiter = OpenAITokenLimiter(max_tokens_per_minute) if max_tokens_per_minute else None
         self._token_estimator_fn = token_estimator or (lambda messages, model: _estimate_tokens_from_messages(messages, model))
+        self.telemetry_tracker = telemetry_tracker
 
     def _estimate_total_tokens(self, model: str, messages: List[Dict[str, Any]], kwargs: Dict[str, Any]) -> int:
         """
@@ -349,21 +354,25 @@ class RateLimitOpenAIClient:
         )
 
         # Record actual token usage (if available)
-        if self.token_limiter:
+        usage = getattr(completion, "usage", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", None) or (prompt_tokens + completion_tokens)
             try:
-                usage = getattr(completion, "usage", None)
-                if usage is not None:
-                    total_tokens = getattr(usage, "total_tokens", None)
-                    if total_tokens is None:
-                        # Fallback if total isn't present
-                        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-                        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-                        total_tokens = prompt_tokens + completion_tokens
-                    if total_tokens:
-                        await self.token_limiter.record(int(total_tokens))
+                if self.token_limiter and total_tokens:
+                    await self.token_limiter.record(int(total_tokens))
             except Exception:
-                # Do not fail the request if usage parsing fails
                 pass
+            if self.telemetry_tracker:
+                try:
+                    await self.telemetry_tracker.record(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        model=model,
+                    )
+                except Exception:
+                    pass
 
         return completion
 
@@ -392,17 +401,25 @@ class RateLimitOpenAIClient:
         )
 
         # 3. Record actual token usage
-        if self.token_limiter:
+        usage = getattr(completion, "usage", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", None) or (prompt_tokens + completion_tokens)
             try:
-                usage = getattr(completion, "usage", None)
-                if usage is not None:
-                    total_tokens = getattr(usage, "total_tokens", None) or (
-                        getattr(usage, "prompt_tokens", 0) + getattr(usage, "completion_tokens", 0)
-                    )
-                    if total_tokens:
-                        await self.token_limiter.record(int(total_tokens))
+                if self.token_limiter and total_tokens:
+                    await self.token_limiter.record(int(total_tokens))
             except Exception:
                 pass
+            if self.telemetry_tracker:
+                try:
+                    await self.telemetry_tracker.record(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        model=model,
+                    )
+                except Exception:
+                    pass
 
         return completion
 
@@ -424,18 +441,24 @@ class RateLimitOpenAIClient:
             **kwargs,
         )
 
-        if self.token_limiter:
+        usage = getattr(completion, "usage", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", None) or (prompt_tokens + completion_tokens)
             try:
-                usage = getattr(completion, "usage", None)
-                if usage is not None:
-                    total_tokens = getattr(usage, "total_tokens", None)
-                    if total_tokens is None:
-                        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-                        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-                        total_tokens = prompt_tokens + completion_tokens
-                    if total_tokens:
-                        await self.token_limiter.record(int(total_tokens))
+                if self.token_limiter and total_tokens:
+                    await self.token_limiter.record(int(total_tokens))
             except Exception:
                 pass
+            if self.telemetry_tracker:
+                try:
+                    await self.telemetry_tracker.record(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        model=model,
+                    )
+                except Exception:
+                    pass
 
         return completion

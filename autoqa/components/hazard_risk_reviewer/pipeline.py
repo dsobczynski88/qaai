@@ -5,16 +5,16 @@ Per-dimension graph with binary Yes/No verdicts (H1-H7):
     START
       ├──→ h1_evaluator ────────────────────────┐
       ├──→ h2_evaluator ────────────────────────┤
-      ├──→ h3_evaluator ──────────┐             │
-      ├──→ h7_evaluator ──────────┼─────────────┤
+      ├──→ h3_evaluator ────────────────────────┤  (finding accumulated via reducer)
+      ├──→ h7_evaluator ────────────────────────┤
       └──→ dispatch_requirement_reviews         │
-              ↓                   │             │
-          requirement_reviewer × N│             │
-              ↓                   │             │
-          ┌───┴────┐              │             │
-          h4       h5             │             │
-          └───┬────┘              │             │
-              └──→ h6 ────────────┘             │
+              ↓                                 │
+          requirement_reviewer × N              │
+              ↓                                 │
+          ┌───┴────┐                            │
+          h4       h5                           │
+          └───┬────┘                            │
+              └──→ h6 ──────────────────────────┤
                    ↓                            │
               final_assessment ←────────────────┘
                    ↓
@@ -23,7 +23,9 @@ Per-dimension graph with binary Yes/No verdicts (H1-H7):
 Key improvements:
 - H1, H2, H3, H7 run immediately (parallel with requirement_reviewer)
 - H4, H5 run after requirement_reviews complete
-- H6 runs after H3, H4, H5 complete (validates residual risk against upstream evidence)
+- H6 runs after H4 and H5 complete (2-way fan-in, same superstep); H3's finding
+  is already in the hazard_findings reducer by that point — no direct H3→H6 edge
+  is needed and adding one would cause H6 to fire prematurely (before H4/H5 exist)
 - Final assessor waits for all 7 findings
 
 overall_verdict is computed deterministically: Yes iff every
@@ -209,8 +211,10 @@ class HazardReviewerRunnable:
             ["h4_evaluator", "h5_evaluator"],
         )
 
-        # H6 waits for H3, H4, H5 (3-way join)
-        sg.add_edge("h3_evaluator", "h6_evaluator")
+        # H6 waits for H4 and H5 (2-way join, same superstep).
+        # H3 runs early and its finding reaches H6 via the hazard_findings
+        # reducer — a direct h3→h6 edge would fire H6 a full superstep early,
+        # before H4/H5 exist, causing a spurious "validation failed" skip.
         sg.add_edge("h4_evaluator", "h6_evaluator")
         sg.add_edge("h5_evaluator", "h6_evaluator")
 
