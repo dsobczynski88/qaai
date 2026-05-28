@@ -27,7 +27,7 @@ async def test_tc_review_happy_path(client):
     payload = {
         "thread_id": "test-tc-happy-001",
         "test_case": test_case.model_dump(),
-        "upstream_requirements": [requirement.model_dump()],
+        "requirements": [requirement.model_dump()],
     }
     response = await client.post("/api/v1/test-case-review", json=payload)
     assert response.status_code == status.HTTP_200_OK
@@ -62,7 +62,7 @@ async def test_tc_review_missing_test_case(client):
     """POST /api/v1/test-case-review without test_case returns 422."""
     payload = {
         "thread_id": "test-tc-missing-tc",
-        "upstream_requirements": [],
+        "requirements": [],
     }
     response = await client.post("/api/v1/test-case-review", json=payload)
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -81,7 +81,7 @@ async def test_tc_review_empty_requirements(client):
     payload = {
         "thread_id": "test-tc-empty-req",
         "test_case": test_case.model_dump(),
-        "upstream_requirements": [],
+        "requirements": [],
     }
     response = await client.post("/api/v1/test-case-review", json=payload)
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
