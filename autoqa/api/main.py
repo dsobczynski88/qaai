@@ -11,12 +11,13 @@ from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from langgraph.checkpoint.memory import MemorySaver
 
-from autoqa.api.routes import router
-from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
-from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.config import settings
 from autoqa.core.constants import MAX_REQUEST_BODY_SIZE
+from autoqa.components.clients import RateLimitOpenAIClient
+from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
+from autoqa.api.routes import router
+
 
 logger = logging.getLogger("autoqa.api.main")
 

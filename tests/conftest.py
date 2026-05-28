@@ -35,7 +35,7 @@ from autoqa.components.test_suite_reviewer.core import (
     DesignDocument,
 )
 
-from autoqa.api.main import app
+from autoqa.api.main import app, lifespan
 
 
 @pytest.fixture(scope="session")
@@ -83,21 +83,24 @@ def real_client(token_tracker):
         telemetry_tracker=token_tracker,
     )
 
-@pytest.fixture
-async def client():
-    """Async HTTP client for API testing.
-    
-    Uses ASGITransport to test the application in-process without
-    needing to start a separate server.
-    """
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
-
 
 @pytest.fixture
 def real_model():
     return os.getenv("PYTEST_MODEL")
+
+
+@pytest.fixture
+async def client():
+    """Async HTTP client for API testing.
+
+    Uses ASGITransport to test the application in-process without
+    needing to start a separate server. Wraps the app with its lifespan
+    context manager to ensure startup events (service initialization) run.
+    """
+    async with lifespan(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
 
 @pytest.fixture
@@ -107,6 +110,7 @@ def hazard_analysis_wb_sheetname():
 @pytest.fixture
 def hazard_analysis_requirement_id_format():
     return "REQ-PUMP-\\d+"
+
 
 @pytest.fixture(scope="session", autouse=True)
 def configure_test_logger():

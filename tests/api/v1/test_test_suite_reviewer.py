@@ -7,7 +7,6 @@ from autoqa.components.test_case_reviewer.core import (
     Requirement as TCRequirement,
     TestCase as TCTestCase,
 )
-from autoqa.components.hazard_risk_reviewer.core import HazardRecord
 
 
 @pytest.mark.asyncio
