@@ -101,7 +101,21 @@ async def lifespan(app: FastAPI):
     logger.info(f"Model: {settings.model}")
     logger.info(f"Max requests per minute: {settings.max_requests_per_minute}")
     logger.info(f"Max tokens per minute: {settings.max_tokens_per_minute}")
-    
+
+    # Build optional PyJama config from settings (requires JAMA_* env vars)
+    pyjama_config = None
+    if settings.jama_host_address:
+        try:
+            from autoqa.components.shared.data_integration import PyJamaNodeConfig
+            pyjama_config = PyJamaNodeConfig(
+                host_address=settings.jama_host_address,
+                client_id=settings.jama_client_id,
+                client_secret=settings.jama_client_secret,
+            )
+            logger.info("PyJama config initialized (host: %s)", settings.jama_host_address)
+        except Exception as exc:
+            logger.warning("Could not initialize PyJama config: %s", exc)
+
     # Build the RTM subgraph once and share it between both services so the
     # compiled graph + Mermaid PNG render only happen on a single import.
     rtm_runnable = RTMReviewerRunnable(
@@ -111,17 +125,18 @@ async def lifespan(app: FastAPI):
         checkpointer=MemorySaver(),
     )
     app.state.rtm_service = RTMReviewService(
-        client, settings.model, rtm_runnable=rtm_runnable
+        client, settings.model, rtm_runnable=rtm_runnable, pyjama_config=pyjama_config
     )
     app.state.hazard_service = HazardReviewService(
-        client, settings.model, rtm_runnable=rtm_runnable
+        client, settings.model, rtm_runnable=rtm_runnable, pyjama_config=pyjama_config
     )
-    
+
     # Initialize test case service (independent graph, no sharing)
     app.state.test_case_service = TestCaseReviewService(
         client=client,
         model=settings.model,
         model_kwargs=model_kwargs,
+        pyjama_config=pyjama_config,
     )
     
     # Backwards-compat: existing callers reference app.state.service for the RTM service.
@@ -189,7 +204,14 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     
     app.include_router(router)
-    
+
+    # Serve the HTML frontend from autoqa/api/static/ at the root path.
+    # Must be mounted AFTER the API router so API routes take precedence.
+    from fastapi.staticfiles import StaticFiles
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    os.makedirs(static_dir, exist_ok=True)
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+
     logger.info(f"AutoQA API created (environment: {environment})")
     return app
 

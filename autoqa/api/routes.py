@@ -1,15 +1,17 @@
 from typing import Any
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 
 from autoqa.api.schemas import (
     HazardBatchReviewResponse,
     HazardReviewFromExcelRequest,
     HazardReviewRequest,
     HazardReviewResponse,
+    ReviewFromBaselineRequest,
     ReviewRequest,
     ReviewResponse,
+    TestCaseReviewFromBaselineRequest,
     TestCaseReviewRequest,
     TestCaseReviewResponse,
 )
@@ -349,4 +351,113 @@ async def test_case_review(
         raise HTTPException(
             status_code=500,
             detail=f"An internal error occurred. Please contact support with thread_id: {body.thread_id}"
+        )
+
+
+@router.post("/review/from-baseline", tags=["RTM Review"])
+async def review_from_baseline(
+    body: ReviewFromBaselineRequest,
+    service: RTMReviewService = Depends(get_rtm_service),
+) -> FileResponse:
+    """Fetch a JAMA baseline and run the RTM review for every requirement.
+
+    Returns a self-contained viewer.html download with M1-M5 rubric results
+    for all requirements in the baseline.
+
+    Requires JAMA credentials (JAMA_HOST_ADDRESS, JAMA_CLIENT_ID,
+    JAMA_CLIENT_SECRET) configured in the server's .env.
+    """
+    try:
+        viewer_path = await service.run_from_baseline(body)
+        return FileResponse(
+            viewer_path,
+            filename="autoqa_rtm_review.html",
+            media_type="text/html",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(
+            "Internal error in review/from-baseline for prefix %s: %s",
+            body.thread_id_prefix, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"An internal error occurred (prefix: {body.thread_id_prefix})",
+        )
+
+
+@router.post("/test-case-review/from-baseline", tags=["Test Case Review"])
+async def tc_review_from_baseline(
+    body: TestCaseReviewFromBaselineRequest,
+    service: TestCaseReviewService = Depends(get_test_case_service),
+) -> FileResponse:
+    """Fetch a JAMA baseline and run the test-case review for every test case.
+
+    Returns a self-contained viewer_tc.html download with 5-objective
+    checklist results for all test cases in the baseline.
+
+    Requires JAMA credentials configured in the server's .env.
+    """
+    try:
+        viewer_path = await service.run_from_baseline(body)
+        return FileResponse(
+            viewer_path,
+            filename="autoqa_tc_review.html",
+            media_type="text/html",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(
+            "Internal error in test-case-review/from-baseline for prefix %s: %s",
+            body.thread_id_prefix, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"An internal error occurred (prefix: {body.thread_id_prefix})",
+        )
+
+
+@router.post("/hazard-review/from-excel-upload", tags=["Hazard Review"])
+async def hazard_review_from_excel_upload(
+    thread_id_prefix: str = Form(..., description="Prefix for per-hazard thread IDs"),
+    project_name: str = Form(..., description="Project or product name"),
+    file: UploadFile = File(..., description="SHA Excel file (.xlsx) containing the hazard table"),
+    sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
+    service: HazardReviewService = Depends(get_hazard_service),
+) -> FileResponse:
+    """Upload an SHA Excel file and run the hazard review for every row.
+
+    Returns a self-contained viewer_hz.html download with H1-H7 rubric results.
+    Note: this endpoint runs with Excel-derived data only (no JAMA traceability).
+    For full H1-H7 analysis use /hazard-review/from-excel with a JAMA JSONL file.
+    """
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an Excel file (.xlsx or .xls)")
+
+    try:
+        file_bytes = await file.read()
+        viewer_path = await service.run_from_excel_upload(
+            file_bytes=file_bytes,
+            filename=file.filename,
+            project_name=project_name,
+            thread_id_prefix=thread_id_prefix,
+            sheet_name=sheet_name,
+        )
+        return FileResponse(
+            viewer_path,
+            filename="autoqa_hazard_review.html",
+            media_type="text/html",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(
+            "Internal error in hazard-review/from-excel-upload for prefix %s: %s",
+            thread_id_prefix, e, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"An internal error occurred (prefix: {thread_id_prefix})",
         )

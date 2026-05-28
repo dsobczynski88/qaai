@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     hazard_cache_dir: str = Field(default="./cache/hazard", alias="HAZARD_CACHE_DIR")
     enable_hazard_cache: bool = Field(default=True, alias="ENABLE_HAZARD_CACHE")
 
+    # Optional JAMA / Pyjama integration settings
+    jama_host_address: Optional[str] = Field(default=None, alias='JAMA_HOST_ADDRESS')
+    jama_client_id: Optional[str] = Field(default=None, alias='JAMA_CLIENT_ID')
+    jama_client_secret: Optional[str] = Field(default=None, alias='JAMA_CLIENT_SECRET')
+
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
     

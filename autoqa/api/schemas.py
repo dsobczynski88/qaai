@@ -41,6 +41,7 @@ class ReviewRequest(BaseModel):
     requirement: Requirement
     test_cases: List[TestCase] = Field(
         ...,
+        min_length=1,
         max_length=MAX_TEST_CASES_PER_REQUIREMENT,
         description="Test cases to evaluate against the requirement"
     )
@@ -233,6 +234,46 @@ class TestCaseReviewRequest(BaseModel):
         if not v.replace('-', '').replace('_', '').isalnum():
             raise ValueError(
                 "thread_id must contain only alphanumeric characters, dashes, and underscores"
+            )
+        return v
+
+
+class ReviewFromBaselineRequest(BaseModel):
+    """Request model for batch RTM review fetched from a JAMA baseline."""
+    thread_id_prefix: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_THREAD_ID_LENGTH,
+        description="Prefix for per-requirement thread IDs (alphanumeric, dash, underscore only)",
+    )
+    baseline_id: str = Field(..., description="JAMA baseline ID, e.g. 'BASE-84429'")
+
+    @field_validator('thread_id_prefix')
+    @classmethod
+    def validate_thread_id_prefix(cls, v: str) -> str:
+        if not v.replace('-', '').replace('_', '').isalnum():
+            raise ValueError(
+                "thread_id_prefix must contain only alphanumeric characters, dashes, and underscores"
+            )
+        return v
+
+
+class TestCaseReviewFromBaselineRequest(BaseModel):
+    """Request model for batch test-case review fetched from a JAMA baseline."""
+    thread_id_prefix: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_THREAD_ID_LENGTH,
+        description="Prefix for per-test-case thread IDs (alphanumeric, dash, underscore only)",
+    )
+    baseline_id: str = Field(..., description="JAMA baseline ID for test case review")
+
+    @field_validator('thread_id_prefix')
+    @classmethod
+    def validate_thread_id_prefix(cls, v: str) -> str:
+        if not v.replace('-', '').replace('_', '').isalnum():
+            raise ValueError(
+                "thread_id_prefix must contain only alphanumeric characters, dashes, and underscores"
             )
         return v
 
