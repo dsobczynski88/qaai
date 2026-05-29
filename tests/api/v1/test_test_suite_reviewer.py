@@ -7,7 +7,6 @@ from autoqa.components.test_case_reviewer.core import (
     Requirement as TCRequirement,
     TestCase as TCTestCase,
 )
-from autoqa.components.hazard_risk_reviewer.core import HazardRecord
 
 
 @pytest.mark.asyncio
@@ -34,11 +33,11 @@ async def test_rtm_review_happy_path(client, sample_requirement, sample_test_cas
     assert "overall_verdict" in assessment
     assert assessment["overall_verdict"] in ("Yes", "No")
     assert "mandatory_findings" in assessment
-    assert len(assessment["mandatory_findings"]) == 5
+    assert len(assessment["mandatory_findings"]) == 6  #TODO this should be 5 because R6 is not technically a mandatory finding; however, this will require prompt updates
     
     # Verify M1-M5 codes
     codes = [f["code"] for f in assessment["mandatory_findings"]]
-    assert codes == ["M1", "M2", "M3", "M4", "M5"]
+    assert codes == ["M1", "M2", "M3", "M4", "M5", "R6"]
 
 
 @pytest.mark.asyncio

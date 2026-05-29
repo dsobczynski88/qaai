@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoQA — AI-Assisted DHF Reviewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #070A0E;
+    --surface:  #0E1219;
+    --border:   #1C2330;
+    --amber:    #E8930A;
+    --amber-dim:#7A4D05;
+    --green:    #2CB67D;
+    --red:      #C0392B;
+    --text:     #D8DFE8;
+    --muted:    #5A6478;
+    --mono:     'JetBrains Mono', monospace;
+    --display:  'Syne', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  body {
+    background-image:
+      linear-gradient(rgba(232,147,10,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(232,147,10,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 20px 80px;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    width: 100%;
+    max-width: 640px;
+    margin-bottom: 56px;
+    animation: fadeUp 0.6s ease both;
+  }
+
+  .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .logo-mark {
+    width: 32px;
+    height: 32px;
+    border: 1.5px solid var(--amber);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--amber);
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+  }
+
+  .logo-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--amber);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    border: 1px solid var(--amber-dim);
+    padding: 3px 8px;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(28px, 5vw, 42px);
+    font-weight: 800;
+    color: #EEF1F5;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    animation: shimmer 3s ease 0.4s both;
+  }
+
+  .subtitle {
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  .divider {
+    margin-top: 24px;
+    height: 1px;
+    background: linear-gradient(90deg, var(--amber) 0%, var(--border) 60%);
+  }
+
+  /* ─── Reviewer selector ─── */
+  .selector {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    animation: fadeUp 0.6s ease 0.15s both;
+  }
+
+  .selector-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    overflow: hidden;
+  }
+
+  .card:hover { border-color: var(--amber-dim); }
+  .card.active { border-color: var(--amber); background: #0F1520; }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 20px;
+    user-select: none;
+  }
+
+  .radio-dot {
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--muted);
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.2s;
+  }
+
+  .card.active .radio-dot { border-color: var(--amber); }
+
+  .radio-dot::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    opacity: 0;
+    transform: scale(0);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  .card.active .radio-dot::after { opacity: 1; transform: scale(1); }
+
+  .card-title {
+    font-family: var(--display);
+    font-size: 15px;
+    font-weight: 600;
+    color: #C8D0DC;
+    transition: color 0.2s;
+  }
+
+  .card.active .card-title { color: #EEF1F5; }
+
+  .card-badge {
+    margin-left: auto;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    transition: color 0.2s, border-color 0.2s;
+  }
+
+  .card.active .card-badge { color: var(--amber); border-color: var(--amber-dim); }
+
+  /* ─── Form panel ─── */
+  .form-panel {
+    display: none;
+    padding: 0 20px 20px;
+    animation: slideDown 0.25s ease both;
+  }
+
+  .card.active .form-panel { display: block; }
+
+  .panel-rule {
+    height: 1px;
+    background: var(--border);
+    margin-bottom: 20px;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .field label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .field input[type="text"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+
+  .field input[type="text"]:focus { border-color: var(--amber); }
+  .field input[type="text"]::placeholder { color: var(--muted); }
+
+  /* ─── Drop zone ─── */
+  .dropzone {
+    border: 1px dashed var(--border);
+    background: var(--bg);
+    padding: 28px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+  }
+
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--amber);
+    background: rgba(232,147,10,0.03);
+  }
+
+  .dropzone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+
+  .dropzone-icon {
+    font-size: 22px;
+    margin-bottom: 8px;
+    color: var(--amber-dim);
+  }
+
+  .dropzone-text {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .dropzone-text strong {
+    color: var(--amber);
+    font-weight: 500;
+  }
+
+  .dropzone-filename {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--green);
+    font-weight: 500;
+    display: none;
+  }
+
+  /* ─── Submit button ─── */
+  .btn-submit {
+    width: 100%;
+    margin-top: 6px;
+    padding: 13px 24px;
+    background: linear-gradient(135deg, #C07A08 0%, #E8930A 50%, #C07A08 100%);
+    background-size: 200% 200%;
+    background-position: 100% 0;
+    border: none;
+    color: #0A0600;
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background-position 0.4s ease, opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .btn-submit:hover { background-position: 0% 0; }
+  .btn-submit:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ─── Status / result ─── */
+  .status-area {
+    width: 100%;
+    max-width: 640px;
+    margin-top: 28px;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .status-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px 24px;
+    display: none;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .status-box.visible { display: flex; }
+
+  /* Spinner */
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--amber);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+
+  .status-text {
+    flex: 1;
+  }
+
+  .status-text strong {
+    display: block;
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 600;
+    color: #EEF1F5;
+    margin-bottom: 3px;
+  }
+
+  .status-text span {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* Result */
+  .result-box {
+    background: rgba(44,182,125,0.05);
+    border: 1px solid rgba(44,182,125,0.3);
+    padding: 20px 24px;
+    display: none;
+    align-items: center;
+    gap: 16px;
+    margin-top: 12px;
+  }
+
+  .result-box.visible { display: flex; }
+
+  .result-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s, color 0.2s;
+    margin-top: 10px;
+  }
+
+  .btn-download:hover { background: var(--green); color: #060E0A; }
+
+  /* Error */
+  .error-box {
+    background: rgba(192,57,43,0.06);
+    border: 1px solid rgba(192,57,43,0.35);
+    padding: 16px 20px;
+    display: none;
+    gap: 12px;
+    align-items: flex-start;
+    margin-top: 12px;
+  }
+
+  .error-box.visible { display: flex; }
+
+  .error-box pre {
+    font-size: 12px;
+    color: #E07060;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* ─── Footer ─── */
+  .footer {
+    margin-top: auto;
+    padding-top: 48px;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-align: center;
+  }
+
+  /* ─── Animations ─── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes shimmer {
+    0%   { background-size: 200%; background-position: 100% 0; }
+    100% { background-size: 200%; background-position: 0% 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo-row">
+    <div class="logo-mark">AQ</div>
+    <div class="logo-tag">v0.2 · Medical Device DHF</div>
+  </div>
+  <h1>AUTOQA</h1>
+  <p class="subtitle">AI-Assisted Reviewer for Quality Assurance &nbsp;·&nbsp; IEC 62304 / ISO 14971</p>
+  <div class="divider"></div>
+</div>
+
+<div class="selector">
+  <p class="selector-label">What would you like to review today?</p>
+
+  <!-- ── Card 1: RTM ── -->
+  <div class="card" id="card-rtm" onclick="selectCard('rtm')">
+    <div class="card-header">
+      <div class="radio-dot"></div>
+      <span class="card-title">Requirement Coverage</span>
+      <span class="card-badge">Test Suite Review</span>
+    </div>
+    <div class="form-panel" id="panel-rtm">
+      <div class="panel-rule"></div>
+      <div class="field">
+        <label>JAMA Baseline ID</label>
+        <input type="text" id="rtm-baseline" placeholder="e.g. BASE-84429" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Thread ID Prefix</label>
+        <input type="text" id="rtm-prefix" placeholder="e.g. rtm-review-001" autocomplete="off">
+      </div>
+      <button class="btn-submit" id="btn-rtm" onclick="submitBaseline('rtm')">
+        <span>▶</span> Run Requirement Coverage Review
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Card 2: TC ── -->
+  <div class="card" id="card-tc" onclick="selectCard('tc')">
+    <div class="card-header">
+      <div class="radio-dot"></div>
+      <span class="card-title">Test Case Adequacy</span>
+      <span class="card-badge">Test Case Review</span>
+    </div>
+    <div class="form-panel" id="panel-tc">
+      <div class="panel-rule"></div>
+      <div class="field">
+        <label>JAMA Baseline ID</label>
+        <input type="text" id="tc-baseline" placeholder="e.g. BASE-84429" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Thread ID Prefix</label>
+        <input type="text" id="tc-prefix" placeholder="e.g. tc-review-001" autocomplete="off">
+      </div>
+      <button class="btn-submit" id="btn-tc" onclick="submitBaseline('tc')">
+        <span>▶</span> Run Test Case Adequacy Review
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Card 3: Hazard ── -->
+  <div class="card" id="card-hz" onclick="selectCard('hz')">
+    <div class="card-header">
+      <div class="radio-dot"></div>
+      <span class="card-title">Software Hazard Analysis</span>
+      <span class="card-badge">Hazard Risk Reviewer</span>
+    </div>
+    <div class="form-panel" id="panel-hz">
+      <div class="panel-rule"></div>
+      <div class="field">
+        <label>Project Name</label>
+        <input type="text" id="hz-project" placeholder="e.g. Infusion Pump SW v3.0" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>Thread ID Prefix</label>
+        <input type="text" id="hz-prefix" placeholder="e.g. sha-review-001" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>SHA Excel Table</label>
+        <div class="dropzone" id="hz-dropzone">
+          <input type="file" id="hz-file" accept=".xlsx,.xls"
+                 onchange="handleFileSelect(this)"
+                 onclick="event.stopPropagation()">
+          <div class="dropzone-icon">⬆</div>
+          <p class="dropzone-text">
+            <strong>Click to browse</strong> or drag & drop your SHA Excel file<br>
+            Expects a sheet named <code>SHA Table</code> · .xlsx / .xls
+          </p>
+          <p class="dropzone-filename" id="hz-filename"></p>
+        </div>
+      </div>
+      <div class="field">
+        <label>Sheet Name <span style="color:var(--muted);font-size:10px">(optional)</span></label>
+        <input type="text" id="hz-sheet" placeholder="SHA Table" autocomplete="off">
+      </div>
+      <button class="btn-submit" id="btn-hz" onclick="submitHazard()">
+        <span>▶</span> Run Hazard Risk Review
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Status / result area ── -->
+<div class="status-area" id="status-area" style="display:none">
+  <div class="status-box" id="status-box">
+    <div class="spinner"></div>
+    <div class="status-text">
+      <strong id="status-title">Running LangGraph pipeline…</strong>
+      <span id="status-sub">This may take several minutes. Do not close this tab.</span>
+    </div>
+  </div>
+
+  <div class="result-box" id="result-box">
+    <span class="result-icon">✓</span>
+    <div class="status-text">
+      <strong>Review complete</strong>
+      <span>Your report is ready. Click below to download the self-contained HTML viewer.</span>
+      <br>
+      <a class="btn-download" id="download-link" href="#" download>⬇ Download Report</a>
+    </div>
+  </div>
+
+  <div class="error-box" id="error-box">
+    <span style="color:var(--red);font-size:18px;flex-shrink:0">✕</span>
+    <pre id="error-msg"></pre>
+  </div>
+</div>
+
+<div class="footer">
+  AutoQA · Anthropic LangGraph · FastAPI &nbsp;·&nbsp; <a href="/docs" style="color:var(--amber-dim);text-decoration:none">API Docs</a>
+</div>
+
+<script>
+  let activeCard = null;
+
+  function selectCard(id) {
+    if (activeCard === id) return;
+    if (activeCard) document.getElementById('card-' + activeCard).classList.remove('active');
+    activeCard = id;
+    document.getElementById('card-' + id).classList.add('active');
+    hideStatus();
+  }
+
+  function hideStatus() {
+    document.getElementById('status-area').style.display = 'none';
+    document.getElementById('status-box').classList.remove('visible');
+    document.getElementById('result-box').classList.remove('visible');
+    document.getElementById('error-box').classList.remove('visible');
+  }
+
+  function showLoading(title, sub) {
+    document.getElementById('status-area').style.display = 'block';
+    document.getElementById('status-title').textContent = title;
+    document.getElementById('status-sub').textContent = sub;
+    document.getElementById('status-box').classList.add('visible');
+    document.getElementById('result-box').classList.remove('visible');
+    document.getElementById('error-box').classList.remove('visible');
+    document.getElementById('status-area').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function showResult(blob, filename) {
+    document.getElementById('status-box').classList.remove('visible');
+    document.getElementById('result-box').classList.add('visible');
+    const url = URL.createObjectURL(blob);
+    const link = document.getElementById('download-link');
+    link.href = url;
+    link.download = filename;
+  }
+
+  function showError(msg) {
+    document.getElementById('status-box').classList.remove('visible');
+    document.getElementById('error-box').classList.add('visible');
+    document.getElementById('error-msg').textContent = msg;
+  }
+
+  function setButtons(disabled) {
+    ['btn-rtm', 'btn-tc', 'btn-hz'].forEach(id => {
+      document.getElementById(id).disabled = disabled;
+    });
+  }
+
+  // ── Baseline submit (RTM + TC) ──
+  async function submitBaseline(type) {
+    const isRtm = type === 'rtm';
+    const baseline = document.getElementById(type + '-baseline').value.trim();
+    const prefix   = document.getElementById(type + '-prefix').value.trim();
+
+    if (!baseline) { alert('Please enter a JAMA Baseline ID.'); return; }
+    if (!prefix)   { alert('Please enter a Thread ID Prefix.'); return; }
+
+    const endpoint = isRtm
+      ? '/api/v1/review/from-baseline'
+      : '/api/v1/test-case-review/from-baseline';
+    const filename = isRtm ? 'autoqa_rtm_review.html' : 'autoqa_tc_review.html';
+    const label    = isRtm ? 'Requirement Coverage Review' : 'Test Case Adequacy Review';
+
+    showLoading(
+      `Running ${label}…`,
+      `Fetching baseline ${baseline} from JAMA and processing requirements. This may take several minutes.`
+    );
+    setButtons(true);
+
+    try {
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_id_prefix: prefix, baseline_id: baseline }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(`${resp.status}: ${err.detail || JSON.stringify(err)}`);
+      }
+
+      const blob = await resp.blob();
+      showResult(blob, filename);
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      setButtons(false);
+    }
+  }
+
+  // ── Hazard submit ──
+  async function submitHazard() {
+    const project = document.getElementById('hz-project').value.trim();
+    const prefix  = document.getElementById('hz-prefix').value.trim();
+    const sheet   = document.getElementById('hz-sheet').value.trim() || 'SHA Table';
+    const fileInput = document.getElementById('hz-file');
+
+    if (!project)              { alert('Please enter a project name.'); return; }
+    if (!prefix)               { alert('Please enter a Thread ID Prefix.'); return; }
+    if (!fileInput.files[0])   { alert('Please upload a SHA Excel file.'); return; }
+
+    showLoading(
+      'Running Hazard Risk Review…',
+      `Processing ${fileInput.files[0].name} · ${project}. This may take several minutes per hazard row.`
+    );
+    setButtons(true);
+
+    try {
+      const form = new FormData();
+      form.append('thread_id_prefix', prefix);
+      form.append('project_name', project);
+      form.append('file', fileInput.files[0]);
+      form.append('sheet_name', sheet);
+
+      const resp = await fetch('/api/v1/hazard-review/from-excel-upload', {
+        method: 'POST',
+        body: form,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(`${resp.status}: ${err.detail || JSON.stringify(err)}`);
+      }
+
+      const blob = await resp.blob();
+      showResult(blob, 'autoqa_hazard_review.html');
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      setButtons(false);
+    }
+  }
+
+  // ── File select handler ──
+  function handleFileSelect(input) {
+    const fn = input.files[0] ? input.files[0].name : null;
+    const el = document.getElementById('hz-filename');
+    el.textContent = fn ? '✓ ' + fn : '';
+    el.style.display = fn ? 'block' : 'none';
+  }
+
+  // ── Drag-and-drop ──
+  const dz = document.getElementById('hz-dropzone');
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      document.getElementById('hz-file').files = dt.files;
+      handleFileSelect(document.getElementById('hz-file'));
+    }
+  });
+</script>
+</body>
+</html>
