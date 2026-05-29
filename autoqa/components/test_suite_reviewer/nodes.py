@@ -3,7 +3,7 @@ Node implementations for RTM review agent (test suite reviewer).
 
 Generic base classes and the reusable DecomposerNode/make_decomposer_node
 are imported from autoqa.components.shared.nodes. This module defines the
-suite-specific nodes: SummaryNode, TestGeneratorNode, SingleSpecEvaluatorNode,
+suite-specific nodes: SummaryNode, SingleSpecEvaluatorNode,
 and SynthesizerNode, plus the dispatch_coverage Send fan-out.
 """
 import json
@@ -136,12 +136,9 @@ class SummaryNode(BaseLLMNode):
                 )
                 continue
             
-            # Unwrap if using SummarizedTestCaseList wrapper (v4+ prompts)
-            if isinstance(parsed, SummarizedTestCaseList):
-                all_summaries.extend(parsed.root)
-            else:
-                # For backward compatibility with v2/v3 prompts that return TestSuite
-                all_summaries.extend(parsed)
+            # Unwrap if using SummarizedTestCaseList wrapper (v4+ prompts);
+            # v2/v3 prompts return a TestSuite which is directly iterable
+            all_summaries.extend(parsed.root if isinstance(parsed, SummarizedTestCaseList) else parsed)
             logger.info("%s: batch %d/%d completed, accumulated %d summaries so far",
                        self.__class__.__name__, batch_num, num_batches, len(all_summaries))
         
@@ -186,9 +183,8 @@ class DesignSummarizerNode(BaseLLMNode):
     def _validate_state(self, state: RTMReviewState) -> bool:
         # Only validate if design_docs exist; if not, skip gracefully
         return (
-            state.get("requirement") is not None 
-            and state.get("design_docs") is not None
-            and len(state.get("design_docs", [])) > 0
+            state.get("requirement") is not None
+            and bool(state.get("design_docs"))
         )
 
     def _build_payload(self, requirement, design_docs: List) -> dict:
@@ -259,11 +255,7 @@ class DesignSummarizerNode(BaseLLMNode):
                 )
                 continue
             
-            # Unwrap if using SummarizedDesignSpecList wrapper
-            if isinstance(parsed, SummarizedDesignSpecList):
-                all_summaries.extend(parsed.root)
-            else:
-                all_summaries.extend(parsed)
+            all_summaries.extend(parsed.root if isinstance(parsed, SummarizedDesignSpecList) else parsed)
             
             logger.info("%s: batch %d/%d completed, accumulated %d summaries so far",
                        self.__class__.__name__, batch_num, num_batches, len(all_summaries))
@@ -312,11 +304,11 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
     """
 
     def _validate_state(self, state: Any) -> bool:
-        return all([
+        return all((
             state.get("requirement") is not None,
             state.get("decomposed_spec") is not None,
             state.get("test_suite") is not None,
-        ])
+        ))
 
     async def __call__(self, state: Any) -> RTMReviewState:
         if not self._validate_state(state):
@@ -347,42 +339,17 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
         return {"coverage_analysis": [parsed]} if parsed else {"coverage_analysis": []}
 
 
-class TestGeneratorNode(StandardLLMNode):
-    """Generates adversarial test cases to fill coverage gaps."""
-
-    def _validate_state(self, state: RTMReviewState) -> bool:
-        decomposed = state.get("decomposed_requirement")
-        test_suite = state.get("test_suite")
-        return decomposed is not None and test_suite is not None
-
-    def _build_payload(self, state: RTMReviewState) -> dict:
-        decomposed_requirement = state.get("decomposed_requirement")
-        test_suite = state.get("test_suite")
-        assert decomposed_requirement is not None
-        assert test_suite is not None
-        return {
-            "decomposed_requirement": decomposed_requirement.model_dump(),
-            "test_suite": test_suite.model_dump(),
-        }
-
-    def _format_response(self, parsed_result: Optional[TestSuite]) -> RTMReviewState:
-        return {"test_suite": parsed_result}
-
-    def _get_skip_response(self) -> RTMReviewState:
-        return {"test_suite": None}
-
-
 class SynthesizerNode(StandardLLMNode):
     """MoA-inspired node that synthesizes coverage evaluations into a holistic assessment."""
 
     def _validate_state(self, state: RTMReviewState) -> bool:
         coverage_analysis = state.get("coverage_analysis")
-        return all([
+        return all((
             state.get("requirement") is not None,
             state.get("decomposed_requirement") is not None,
             state.get("test_suite") is not None,
-            coverage_analysis is not None and len(coverage_analysis) > 0,
-        ])
+            bool(coverage_analysis),
+        ))
 
     def _build_payload(self, state: RTMReviewState) -> dict:
         requirement = state.get("requirement")
@@ -390,11 +357,7 @@ class SynthesizerNode(StandardLLMNode):
         test_suite = state.get("test_suite")
         coverage_analysis = state.get("coverage_analysis")
         summarized_designs = state.get("summarized_designs")
-        assert requirement is not None
-        assert decomposed_requirement is not None
-        assert test_suite is not None
-        assert coverage_analysis is not None
-        
+
         payload = {
             "requirement": requirement.model_dump(),
             "decomposed_specifications": [
@@ -406,16 +369,12 @@ class SynthesizerNode(StandardLLMNode):
             "coverage_evaluations": [
                 e.model_dump() for e in coverage_analysis
             ],
+            # Include summarized_designs if present (for R6 Design Alignment criterion)
+            "summarized_designs": (
+                [s.model_dump() for s in summarized_designs] if summarized_designs else None
+            ),
         }
-        
-        # Include summarized_designs if present (for R6 Design Alignment criterion)
-        if summarized_designs is not None and len(summarized_designs) > 0:
-            payload["summarized_designs"] = [
-                s.model_dump() for s in summarized_designs
-            ]
-        else:
-            payload["summarized_designs"] = None
-        
+
         return payload
 
     def _format_response(self, parsed_result: Optional[SynthesizedAssessment]) -> RTMReviewState:
@@ -457,7 +416,7 @@ def make_summarizer_node(
     # Determine response model based on prompt version
     # v4+ prompts return only the summary array, wrapped in SummarizedTestCaseList
     # for proper Pydantic validation
-    if "v4" in prompt_template or "v5" in prompt_template or "v6" in prompt_template:
+    if any(v in prompt_template for v in ("v4", "v5", "v6")):
         response_model = SummarizedTestCaseList
     else:
         # v2/v3 prompts return the full TestSuite object
@@ -467,28 +426,6 @@ def make_summarizer_node(
         client=client,
         model=model,
         response_model=response_model,
-        system_prompt=system_prompt,
-        model_kwargs=model_kwargs
-    )
-
-
-def make_generator_node(client: RateLimitOpenAIClient, model: str, model_kwargs: dict, **template_vars) -> TestGeneratorNode:
-    """
-    Create a TestGeneratorNode with prompt loaded from Jinja2 template.
-
-    Args:
-        client: RateLimitOpenAIClient instance
-        model: Model identifier string
-        **template_vars: Optional variables to pass to the Jinja2 template
-
-    Returns:
-        TestGeneratorNode: Configured test generator node
-    """
-    system_prompt = render_prompt('test_generator.jinja2', **template_vars)
-    return TestGeneratorNode(
-        client=client,
-        model=model,
-        response_model=TestSuite,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs
     )

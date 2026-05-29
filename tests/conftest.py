@@ -104,10 +104,6 @@ async def client():
 
 
 @pytest.fixture
-def hazard_analysis_wb_sheetname():
-    return "SHA Table"
-
-@pytest.fixture
 def hazard_analysis_requirement_id_format():
     return "REQ-PUMP-\\d+"
 

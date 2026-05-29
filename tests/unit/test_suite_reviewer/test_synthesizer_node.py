@@ -18,7 +18,7 @@ import json
 import pytest
 
 from tests.helpers import make_mock_client, load_jsonl
-from autoqa.components.test_suite_reviewer.nodes import make_synthesizer
+from autoqa.components.test_suite_reviewer.nodes import make_synthesizer_node as make_synthesizer
 from autoqa.components.test_suite_reviewer.core import (
     SynthesizedAssessment,
     Requirement,

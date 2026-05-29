@@ -7,7 +7,6 @@ from langgraph.graph import StateGraph, START, END
 from autoqa.core.config import settings, PromptConfig
 from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
-from autoqa.components.processors import df_to_prompt_items
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.nodes import (
     make_data_integration_node,
@@ -20,7 +19,6 @@ from .nodes import (
     make_decomposer_node,
     make_summarizer_node,
     make_design_summarizer_node,
-    make_generator_node,
     make_synthesizer_node,
     dispatch_coverage,
 )
