@@ -15,6 +15,12 @@ from httpx import AsyncClient, ASGITransport
 from autoqa.core.config import settings
 from autoqa.core.telemetry import TokenUsageTracker
 from autoqa.prj_logger import ProjectLogger
+from autoqa.utils import make_output_directory
+
+# All test-run artifacts (logs, JSONL records, telemetry) go under logs/tests/
+# to keep them separate from production/API-server runs under logs/.
+_TEST_RUN_DIR = Path(make_output_directory("./logs/tests"))
+_TEST_LOG_FILE = str(_TEST_RUN_DIR / "autoqa.log")
 
 from autoqa.components.clients import (
     RateLimitOpenAIClient
@@ -50,7 +56,7 @@ def token_tracker():
     TOKEN_COST_OUTPUT_PER_M in .env). Defaults: $0.15 / $0.60 per 1M tokens.
     """
     tracker = TokenUsageTracker(
-        file_path=settings.telemetry_file_path,
+        file_path=str(_TEST_RUN_DIR / "token_usage.jsonl"),
         input_cost_per_million=settings.token_cost_input_per_m,
         output_cost_per_million=settings.token_cost_output_per_m,
     )
@@ -112,16 +118,14 @@ def hazard_analysis_requirement_id_format():
 def configure_test_logger():
     """Configure the logger for test runs to write to the run directory's autoqa.log.
     This is autouse=True so it runs automatically for all test sessions."""
-    log_file = settings.log_file_path
-    
     # Configure the test pipeline logger
-    test_logger = ProjectLogger("autoqa.test.pipeline", log_file).config()
+    test_logger = ProjectLogger("autoqa.test.pipeline", _TEST_LOG_FILE).config()
     
     # Also configure other loggers that might be used
     for logger_name in ["autoqa.hazard_pipeline", "autoqa.api.rtm", "autoqa.api.hazard"]:
         logger = logging.getLogger(logger_name)
         if not logger.handlers:  # Only add handlers if not already configured
-            proj_logger = ProjectLogger(logger_name, log_file).config()
+            proj_logger = ProjectLogger(logger_name, _TEST_LOG_FILE).config()
     
     yield
     
@@ -256,100 +260,47 @@ def hazard_full_traceability(hazard_analysis_requirement_id_format):
     return _load_hazard_fixture(include_design_docs=True, gids_format=hazard_analysis_requirement_id_format)
 
 
-@pytest.fixture(scope="session")
-def jsonl_recorders():
-    """Session-scoped fixture that clears inputs.jsonl / outputs.jsonl once at session
-    start, yields (record_input, record_output) append functions, then auto-generates
-    the HTML viewer at session teardown if outputs.jsonl has records."""
-    run_dir = Path(settings.log_file_path).parent
-    inputs_path = run_dir / "inputs.jsonl"
-    outputs_path = run_dir / "outputs.jsonl"
-    inputs_path.write_text("", encoding="utf-8")
-    outputs_path.write_text("", encoding="utf-8")
+def _recorder_fixture(viewer_fn: str, label: str):
+    """Factory for session-scoped JSONL recording fixtures.
 
-    def record_input(data: dict) -> None:
-        with inputs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
-
-    def record_output(data: dict) -> None:
-        with outputs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
-
-    yield record_input, record_output
-
-    try:
-        from autoqa.viewer import write_viewer
-        out = write_viewer(outputs_path)
-    except Exception as exc:
-        print(f"\n[viewer] skipped: {exc}")
-    else:
-        if out is not None:
-            print(f"\n[viewer] wrote {out}")
-
-
-@pytest.fixture(scope="session")
-def jsonl_recorders_tc():
-    """TC-flavored counterpart to jsonl_recorders: same inputs.jsonl/outputs.jsonl
-    contract, but renders the test-case viewer (viewer_tc.html) at session teardown
-    via write_viewer_tc instead of the RTM write_viewer."""
-    run_dir = Path(settings.log_file_path).parent
-    inputs_path = run_dir / "inputs.jsonl"
-    outputs_path = run_dir / "outputs.jsonl"
-    inputs_path.write_text("", encoding="utf-8")
-    outputs_path.write_text("", encoding="utf-8")
-
-    def record_input(data: dict) -> None:
-        with inputs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
-
-    def record_output(data: dict) -> None:
-        with outputs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
-
-    yield record_input, record_output
-
-    try:
-        from autoqa.viewer.generator import write_viewer_tc
-        out = write_viewer_tc(outputs_path)
-    except Exception as exc:
-        print(f"\n[viewer_tc] skipped: {exc}")
-    else:
-        if out is not None:
-            print(f"\n[viewer_tc] wrote {out}")
-
-
-@pytest.fixture(scope="session")
-def jsonl_recorders_hz():
-    """Hazard-flavored counterpart to jsonl_recorders: same inputs.jsonl/outputs.jsonl
-    contract, but renders the hazard viewer (viewer_hz.html) at session teardown
-    via write_viewer_hz instead of the RTM write_viewer.
-    
-    Use this fixture for hazard_risk_reviewer integration tests to generate
-    a viewer that displays HazardReviewState records with H1-H7 findings.
+    Clears inputs.jsonl / outputs.jsonl at session start, yields
+    (record_input, record_output) append functions, then auto-generates the
+    appropriate HTML viewer at session teardown.
     """
-    run_dir = Path(settings.log_file_path).parent
-    inputs_path = run_dir / "inputs.jsonl"
-    outputs_path = run_dir / "outputs.jsonl"
-    inputs_path.write_text("", encoding="utf-8")
-    outputs_path.write_text("", encoding="utf-8")
+    import importlib
 
-    def record_input(data: dict) -> None:
-        with inputs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
+    @pytest.fixture(scope="session")
+    def _fixture():
+        inputs_path = _TEST_RUN_DIR / "inputs.jsonl"
+        outputs_path = _TEST_RUN_DIR / "outputs.jsonl"
+        inputs_path.write_text("", encoding="utf-8")
+        outputs_path.write_text("", encoding="utf-8")
 
-    def record_output(data: dict) -> None:
-        with outputs_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(data) + "\n")
+        def record_input(data: dict) -> None:
+            with inputs_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(data) + "\n")
 
-    yield record_input, record_output
+        def record_output(data: dict) -> None:
+            with outputs_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(data) + "\n")
 
-    try:
-        from autoqa.viewer.generator import write_viewer_hz
-        out = write_viewer_hz(outputs_path)
-    except Exception as exc:
-        print(f"\n[viewer_hz] skipped: {exc}")
-    else:
-        if out is not None:
-            print(f"\n[viewer_hz] wrote {out}")
+        yield record_input, record_output
+
+        try:
+            mod = importlib.import_module("autoqa.viewer.generator")
+            out = getattr(mod, viewer_fn)(outputs_path)
+        except Exception as exc:
+            print(f"\n[{label}] skipped: {exc}")
+        else:
+            if out is not None:
+                print(f"\n[{label}] wrote {out}")
+
+    _fixture.__name__ = label
+    return _fixture
+
+
+jsonl_recorders    = _recorder_fixture("write_viewer",    "jsonl_recorders")
+jsonl_recorders_tc = _recorder_fixture("write_viewer_tc", "jsonl_recorders_tc")
+jsonl_recorders_hz = _recorder_fixture("write_viewer_hz", "jsonl_recorders_hz")
 
 

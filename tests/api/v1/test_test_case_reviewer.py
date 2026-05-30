@@ -1,15 +1,12 @@
 import pytest
 from fastapi import status
 
-from autoqa.components.test_suite_reviewer.core import Requirement, TestCase
-
 from autoqa.components.test_case_reviewer.core import (
     Requirement as TCRequirement,
     TestCase as TCTestCase,
 )
 
 
-@pytest.mark.asyncio
 @pytest.mark.integration
 async def test_tc_review_happy_path(client):
     """POST /api/v1/test-case-review with valid input returns 200."""
@@ -57,7 +54,6 @@ async def test_tc_review_happy_path(client):
     assert checklist_ids == expected_ids
 
 
-@pytest.mark.asyncio
 async def test_tc_review_missing_test_case(client):
     """POST /api/v1/test-case-review without test_case returns 422."""
     payload = {
@@ -68,7 +64,6 @@ async def test_tc_review_missing_test_case(client):
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@pytest.mark.asyncio
 async def test_tc_review_empty_requirements(client):
     """POST /api/v1/test-case-review with empty requirements returns 422."""
     test_case = TCTestCase(

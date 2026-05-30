@@ -1,15 +1,7 @@
 import pytest
 from fastapi import status
 
-from autoqa.components.test_suite_reviewer.core import Requirement, TestCase
 
-from autoqa.components.test_case_reviewer.core import (
-    Requirement as TCRequirement,
-    TestCase as TCTestCase,
-)
-
-
-@pytest.mark.asyncio
 @pytest.mark.integration
 async def test_hazard_review_happy_path(client, hazard_full_traceability):
     """POST /api/v1/hazard-review with valid input returns 200."""
@@ -42,7 +34,6 @@ async def test_hazard_review_happy_path(client, hazard_full_traceability):
     assert len(data["requirement_reviews"]) == len(hazard_full_traceability.requirements_traceability.requirements)
 
 
-@pytest.mark.asyncio
 async def test_hazard_review_missing_hazard(client):
     """POST /api/v1/hazard-review without hazard returns 422."""
     payload = {"thread_id": "test-hazard-missing"}
@@ -50,7 +41,6 @@ async def test_hazard_review_missing_hazard(client):
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@pytest.mark.asyncio
 async def test_hazard_review_invalid_hazard_structure(client):
     """POST /api/v1/hazard-review with malformed hazard returns 422."""
     payload = {

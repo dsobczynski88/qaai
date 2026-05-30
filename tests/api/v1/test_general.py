@@ -1,21 +1,13 @@
+import asyncio
+
 import pytest
-from httpx import AsyncClient, ASGITransport
 from fastapi import status
-
-from autoqa.api.main import app
-from autoqa.components.test_suite_reviewer.core import Requirement, TestCase
-
-from autoqa.components.test_case_reviewer.core import (
-    Requirement as TCRequirement,
-    TestCase as TCTestCase,
-)
 
 # ---------------------------------------------------------------------------
 # Error Handling & Edge Cases
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_invalid_json_body(client):
     """POST with invalid JSON returns 422."""
     response = await client.post(
@@ -26,7 +18,6 @@ async def test_invalid_json_body(client):
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@pytest.mark.asyncio
 async def test_missing_content_type(client, sample_requirement, sample_test_cases, sample_design_docs):
     """POST without Content-Type header still works (FastAPI auto-detects)."""
     payload = {
@@ -41,7 +32,6 @@ async def test_missing_content_type(client, sample_requirement, sample_test_case
     assert response.status_code in (status.HTTP_200_OK, status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
-@pytest.mark.asyncio
 async def test_request_id_header_present(client, sample_requirement, sample_test_cases, sample_design_docs):
     """Verify X-Request-ID header is added to responses."""
     payload = {
@@ -60,13 +50,10 @@ async def test_request_id_header_present(client, sample_requirement, sample_test
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.slow
 async def test_concurrent_rtm_reviews(client, sample_requirement, sample_test_cases, sample_design_docs):
     """Verify API handles concurrent requests without errors."""
-    import asyncio
-
     async def make_request(idx: int):
         payload = {
             "thread_id": f"test-concurrent-{idx}",

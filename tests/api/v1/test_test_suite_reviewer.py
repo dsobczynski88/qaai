@@ -1,15 +1,7 @@
 import pytest
 from fastapi import status
 
-from autoqa.components.test_suite_reviewer.core import Requirement, TestCase
 
-from autoqa.components.test_case_reviewer.core import (
-    Requirement as TCRequirement,
-    TestCase as TCTestCase,
-)
-
-
-@pytest.mark.asyncio
 @pytest.mark.integration
 async def test_rtm_review_happy_path(client, sample_requirement, sample_test_cases, sample_design_docs):
     """POST /api/v1/review with valid input returns 200 and assessment."""
@@ -40,7 +32,6 @@ async def test_rtm_review_happy_path(client, sample_requirement, sample_test_cas
     assert codes == ["M1", "M2", "M3", "M4", "M5", "R6"]
 
 
-@pytest.mark.asyncio
 async def test_rtm_review_missing_requirement(client):
     """POST /api/v1/review without requirement returns 422."""
     payload = {
@@ -51,7 +42,6 @@ async def test_rtm_review_missing_requirement(client):
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@pytest.mark.asyncio
 async def test_rtm_review_empty_test_cases(client, sample_requirement):
     """POST /api/v1/review with empty test_cases returns 422."""
     payload = {
@@ -63,7 +53,6 @@ async def test_rtm_review_empty_test_cases(client, sample_requirement):
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@pytest.mark.asyncio
 async def test_rtm_review_missing_thread_id(client, sample_requirement, sample_test_cases):
     """POST /api/v1/review without thread_id returns 422."""
     payload = {
@@ -74,7 +63,6 @@ async def test_rtm_review_missing_thread_id(client, sample_requirement, sample_t
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-@pytest.mark.asyncio
 async def test_rtm_review_invalid_requirement_structure(client):
     """POST /api/v1/review with malformed requirement returns 422."""
     payload = {
