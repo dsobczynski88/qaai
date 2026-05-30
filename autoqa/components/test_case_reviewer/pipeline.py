@@ -18,11 +18,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.nodes import (
-    make_data_integration_node,
+from autoqa.components.shared.data_integration import (
+    DataIntegrationNode,
     make_transform_node_test_case_review,
+    PyJamaNodeConfig,
 )
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from autoqa.core.config import settings
 from autoqa.utils import save_graph_png
 
@@ -91,7 +91,7 @@ class TCReviewerRunnable:
         sg = StateGraph(TCReviewState)
 
         # Data integration layer
-        data_integration = make_data_integration_node(self.pyjama_config)
+        data_integration = DataIntegrationNode(self.pyjama_config)
         transform = make_transform_node_test_case_review()
 
         decomposer = make_tc_decomposer_node(

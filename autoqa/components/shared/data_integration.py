@@ -68,6 +68,8 @@ __all__ = [
     "transform_test_suite_review_to_state",
     "transform_test_case_review_to_state",
     "transform_hazard_record_to_state",
+    "make_transform_node_test_suite_review",
+    "make_transform_node_test_case_review",
     "PYJAMA_AVAILABLE",
 ]
 
@@ -438,3 +440,63 @@ def transform_hazard_record_to_state(
     logger.info("=" * 80)
 
     return enhanced_rows
+
+
+def make_transform_node_test_suite_review():
+    """
+    Create a LangGraph-compatible transform node for the test_suite_reviewer pipeline.
+
+    Converts JAMA test_suite_review data (jama_data) to RTMReviewState format when
+    present; returns {} (no-op) when data is already in state.
+    """
+    def transform(state) -> dict:
+        jama_data = state.get("jama_data")
+
+        if jama_data:
+            logger.info("Transforming %d JAMA entries to RTMReviewState format", len(jama_data))
+            transformed = transform_test_suite_review_to_state(jama_data)
+            if transformed:
+                req = transformed[0].get("requirement")
+                logger.info(
+                    "Transform successful: requirement=%s, test_cases=%d",
+                    req.req_id if req else "unknown",
+                    len(transformed[0].get("test_cases", [])),
+                )
+                return transformed[0]
+            logger.warning("Transform returned empty result")
+            return {}
+
+        logger.debug("Local mode: skipping JAMA transform")
+        return {}
+
+    return transform
+
+
+def make_transform_node_test_case_review():
+    """
+    Create a LangGraph-compatible transform node for the test_case_reviewer pipeline.
+
+    Converts JAMA test_case_review data (jama_data) to TCReviewState format when
+    present; returns {} (no-op) when data is already in state.
+    """
+    def transform(state) -> dict:
+        jama_data = state.get("jama_data")
+
+        if jama_data:
+            logger.info("Transforming %d JAMA entries to TCReviewState format", len(jama_data))
+            transformed = transform_test_case_review_to_state(jama_data)
+            if transformed:
+                tc = transformed[0].get("test_case")
+                logger.info(
+                    "Transform successful: test_case=%s, requirements=%d",
+                    tc.test_id if tc else "unknown",
+                    len(transformed[0].get("requirements", [])),
+                )
+                return transformed[0]
+            logger.warning("Transform returned empty result")
+            return {}
+
+        logger.debug("Local mode: skipping JAMA transform")
+        return {}
+
+    return transform

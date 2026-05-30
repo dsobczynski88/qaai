@@ -40,8 +40,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
-from autoqa.components.shared.nodes import make_data_integration_node
+from autoqa.components.shared.data_integration import DataIntegrationNode, PyJamaNodeConfig
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import HazardCacheManager
 from autoqa.core.config import PromptConfig, settings
@@ -54,16 +53,11 @@ from .nodes import (
     dispatch_hazard_evaluators_late,
     dispatch_requirement_reviews,
     make_final_assessor_node,
-    make_h1_evaluator_node,
-    make_h2_evaluator_node,
-    make_h3_evaluator_node,
-    make_h4_evaluator_node,
-    make_h5_evaluator_node,
+    make_hazard_evaluator_node,
     make_h6_evaluator_node,
-    make_h7_evaluator_node,
     make_hazard_design_summarizer_node,
     make_hazard_needs_summarizer_node,
-    make_requirement_reviewer_node,
+    RequirementReviewerNode,
 )
 
 project_logger = ProjectLogger(name="logger.hazard_pipeline", log_file=settings.log_file_path)
@@ -140,33 +134,33 @@ class HazardReviewerRunnable:
         sg = StateGraph(HazardReviewState)
 
         # Create data integration node (entry point for conditional JAMA fetch)
-        data_integration = make_data_integration_node(pyjama_config=None)
+        data_integration = DataIntegrationNode(pyjama_config=None)
 
         cm = self.cache_manager
 
         # Create all 7 evaluator nodes
-        h1 = make_h1_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h1 = make_hazard_evaluator_node(
+            "H1", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h1,
             cache_manager=cm,
         )
-        h2 = make_h2_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h2 = make_hazard_evaluator_node(
+            "H2", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h2,
             cache_manager=cm,
         )
-        h3 = make_h3_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h3 = make_hazard_evaluator_node(
+            "H3", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h3,
             cache_manager=cm,
         )
-        h4 = make_h4_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h4 = make_hazard_evaluator_node(
+            "H4", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h4,
             cache_manager=cm,
         )
-        h5 = make_h5_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h5 = make_hazard_evaluator_node(
+            "H5", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h5,
             cache_manager=cm,
         )
@@ -175,8 +169,8 @@ class HazardReviewerRunnable:
             prompt_template=self.prompt_config.hazard_h6,
             cache_manager=cm,
         )
-        h7 = make_h7_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h7 = make_hazard_evaluator_node(
+            "H7", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h7,
             cache_manager=cm,
         )
@@ -185,7 +179,7 @@ class HazardReviewerRunnable:
             prompt_template=self.prompt_config.hazard_final,
             cache_manager=cm,
         )
-        requirement_reviewer = make_requirement_reviewer_node(
+        requirement_reviewer = RequirementReviewerNode(
             self.rtm,
             cache_manager=cm,
             rtm_prompt_version=HazardCacheManager.extract_prompt_version(

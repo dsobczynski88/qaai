@@ -204,7 +204,7 @@ def sample_test_suite(sample_requirement, sample_test_cases):
     )
 
 
-def _load_hazard_fixture(include_design_docs: bool, gids_format: str = "REQ-PUMP-\\d+") -> HazardRowWithTraceMatrix:
+def _load_hazard_fixture(include_design_docs: bool, gids_format: str) -> HazardRowWithTraceMatrix:
     """Assemble HazardRowWithTraceMatrix from Excel + unified pyjama traceability response."""
     from autoqa.components.hazard_risk_reviewer.loader import (
         parse_sha_excel,

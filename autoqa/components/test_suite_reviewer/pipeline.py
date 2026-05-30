@@ -8,11 +8,11 @@ from autoqa.core.config import settings, PromptConfig
 from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.nodes import (
-    make_data_integration_node,
+from autoqa.components.shared.data_integration import (
+    DataIntegrationNode,
     make_transform_node_test_suite_review,
+    PyJamaNodeConfig,
 )
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from .core import RTMReviewState
 from .nodes import (
     make_coverage_evaluator,
@@ -99,7 +99,7 @@ class RTMReviewerRunnable:
         sg = StateGraph(RTMReviewState)
 
         # Data integration layer
-        data_integration = make_data_integration_node(self.pyjama_config)
+        data_integration = DataIntegrationNode(self.pyjama_config)
         transform = make_transform_node_test_suite_review()
 
         decomposer = make_decomposer_node(
