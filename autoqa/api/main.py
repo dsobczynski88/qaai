@@ -1,27 +1,22 @@
 import logging
 import os
-import time
-import uuid
 from contextlib import asynccontextmanager
-from typing import Callable
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.memory import MemorySaver
 
+from autoqa.api.middleware import limit_request_size, log_requests
 from autoqa.api.routes import router
 from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.config import settings
-from autoqa.core.constants import MAX_REQUEST_BODY_SIZE
 
 
 logger = logging.getLogger("autoqa.api.main")
-request_logger = logging.getLogger("autoqa.api.requests")
 
 
 def build_pyjama_config():
@@ -52,9 +47,7 @@ async def lifespan(app: FastAPI):
         max_tokens_per_minute=settings.max_tokens_per_minute,
     )
 
-    # Configure model_kwargs with max_tokens to handle large outputs (100+ test cases).
-    # Haiku supports up to 16K output tokens; this ensures the summarizer can process
-    # all test cases without truncation.
+    # max_tokens handles large outputs (100+ test cases) without truncation.
     model_kwargs = {"max_tokens": settings.max_output_tokens}
 
     logger.info("Initializing AutoQA services...")
@@ -64,8 +57,6 @@ async def lifespan(app: FastAPI):
 
     pyjama_config = build_pyjama_config()
 
-    # Build the RTM subgraph once and share it between both services so the
-    # compiled graph + Mermaid PNG render only happen on a single import.
     rtm_runnable = RTMReviewerRunnable(
         client=client,
         model=settings.model,
@@ -114,71 +105,8 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if not is_production else None,
     )
 
-    @app.middleware("http")
-    async def log_requests(request: Request, call_next: Callable):
-        request_id = str(uuid.uuid4())
-        request.state.request_id = request_id
-
-        start_time = time.perf_counter()
-
-        request_logger.info(
-            "Request started: %s %s",
-            request.method,
-            request.url.path,
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "client": request.client.host if request.client else None,
-            },
-        )
-
-        try:
-            response = await call_next(request)
-        except Exception as exc:
-            elapsed = time.perf_counter() - start_time
-            request_logger.error(
-                "Request failed: %s %s",
-                request.method,
-                request.url.path,
-                extra={
-                    "request_id": request_id,
-                    "error": str(exc),
-                    "elapsed_seconds": elapsed,
-                },
-                exc_info=True,
-            )
-            raise
-
-        elapsed = time.perf_counter() - start_time
-
-        request_logger.info(
-            "Request completed: %s %s - %s",
-            request.method,
-            request.url.path,
-            response.status_code,
-            extra={
-                "request_id": request_id,
-                "status_code": response.status_code,
-                "elapsed_seconds": elapsed,
-            },
-        )
-
-        response.headers["X-Request-ID"] = request_id
-        return response
-
-    @app.middleware("http")
-    async def limit_request_size(request: Request, call_next: Callable):
-        """Reject requests with bodies larger than MAX_REQUEST_BODY_SIZE."""
-        if request.method == "POST":
-            content_length = request.headers.get("content-length")
-            if content_length and int(content_length) > MAX_REQUEST_BODY_SIZE:
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "Request body too large (max 10MB)"},
-                )
-
-        return await call_next(request)
+    app.middleware("http")(log_requests)
+    app.middleware("http")(limit_request_size)
 
     allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
     if allowed_origins != ["*"]:
@@ -194,7 +122,6 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
 
-    # Serve the HTML frontend from autoqa/api/static/ at the root path.
     # Must be mounted AFTER the API router so API routes take precedence.
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     os.makedirs(static_dir, exist_ok=True)
