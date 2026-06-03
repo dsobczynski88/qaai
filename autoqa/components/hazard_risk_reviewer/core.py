@@ -389,6 +389,9 @@ class FinalAssessorProse(BaseModel):
 
 
 class HazardReviewState(TypedDict, total=False):
+    # Caching control: "off" | "partial" (default) | "full". Threaded from the
+    # API/service into every node; see autoqa.core.cache.ReviewCacheManager.
+    cache_mode: str
     hazard: HazardRowWithTraceMatrix
     pyjama_request: Optional[PyJamaRequest]
     jama_data: Optional[List[Any]]

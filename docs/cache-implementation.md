@@ -1,91 +1,141 @@
-# Hazard Reviewer Caching Architecture
+# Reviewer Caching Architecture
 
 ## Overview
 
-The hazard risk reviewer implements a **3-tier write-through cache** across all 10 LLM nodes in the pipeline. The goal is to eliminate redundant LLM compute when the same hazard or requirement is processed more than once — whether due to partial batch failures, iterative re-runs, or (crucially) the same requirement appearing as a risk-control reference in multiple hazard rows.
+All three reviewers (Test Suite / Test Case / Hazard) share a single **3-tier write-through
+cache**, `ReviewCacheManager` (`autoqa/core/cache.py`). The goal is to eliminate redundant LLM
+compute when the same entity is processed more than once — across iterative re-runs, partial
+batch failures, or (for the hazard reviewer) the same requirement appearing as a risk-control
+reference in multiple hazard rows.
 
-On a cache hit, the node returns the previously stored result immediately, skipping the LLM call entirely. On a miss, the LLM runs as normal and the result is written to cache before returning. Every cache event (hit or miss) is recorded in `token_usage.jsonl` with the tokens saved and estimated cost saved.
+On a cache hit, the node returns the previously stored result immediately, skipping the LLM
+call. On a miss, the LLM runs and the result is written to cache before returning. Every cache
+event (hit or miss) is recorded in `token_usage.jsonl` with the tokens and cost saved.
+
+Cache entries are partitioned by an **entity id** — the requirement id (`REQ-*`), test-case id
+(`TEST-*`), or hazard id (`HAZ-*`) — producing **one folder per entity directly under the cache
+directory** (`./cache/` by default).
 
 ---
 
-## The Three Tiers
+## Cache modes: `off` / `partial` / `full`
+
+Per-run behaviour is controlled by `cache_mode`, threaded through the graph state
+(`state["cache_mode"]`) from the API/service into every node. The UI's "Use cached results"
+checkbox maps **checked → `partial`** and **unchecked → `off`**. `full` is internal-only.
+
+| Node kind | `off` | `partial` (default) | `full` |
+|-----------|-------|---------------------|--------|
+| Interim node (decompose, summarize, per-spec eval, H1–H7, …) | no read/write | **read + write** | **read + write** |
+| Final output node (`synthesizer` / `aggregator` / `final_assessment`) | no read/write | **write only — always re-runs** | **read + write** |
+
+- **`partial`** reuses every intermediate result but always regenerates the final assessment,
+  so a re-run is cheap yet produces a fresh top-level verdict/prose.
+- **`full`** also serves the final node from cache. It is used internally for the hazard
+  reviewer's embedded test-suite subgraph (see below); it is never sent from the UI.
+- **`off`** bypasses the cache entirely (no reads, no writes).
+
+The gating lives in `BaseLLMNode._cache_read_allowed(state)` / `_cache_write_allowed(state)`
+(`autoqa/components/shared/nodes.py`). A node is marked final by constructing it with
+`is_final_output=True` (done in the synthesizer/aggregator/final-assessor factories).
+
+The global `ENABLE_CACHE` setting is a hard master switch: when `false`, no cache manager is
+built and `cache_mode` is irrelevant.
+
+---
+
+## The three tiers
 
 | Tier | Storage | TTL | Purpose |
 |------|---------|-----|---------|
-| 1 | LLM Provider | Provider-managed | Pass-through; handled transparently by the API endpoint. No action taken by autoqa. |
-| 2 | Redis (optional) | 24 hours | Hot in-memory cache. Gracefully disabled if Redis is unavailable or the `redis` package is not installed. |
-| 3 | Disk | Permanent | Persistent JSON files under `./cache/hazard/`. Survives restarts. Primary evidence artifact for regulatory review. |
+| 1 | LLM Provider | Provider-managed | Pass-through; handled by the API endpoint. |
+| 2 | Redis (optional) | 24 hours | Hot in-memory cache. Gracefully disabled if Redis is unavailable or the `redis` package is missing. |
+| 3 | Disk | Permanent | Persistent JSON files under `./cache/`. Survives restarts. Primary regulatory evidence artifact. |
 
-**Read order on a cache check:** Redis → Disk → Miss.
-
-When a disk hit occurs, the entry is backfilled into Redis so that the next access within the TTL window is served from memory.
-
-**Write order on an LLM result:** Disk first, then Redis. Both writes are swallowed on failure (warnings logged) so a cache write failure never breaks a review run.
+**Read order on a check:** Redis → Disk → Miss. On a disk hit the entry is backfilled into
+Redis. **Write order:** Disk first, then Redis. All cache I/O failures are swallowed (logged as
+warnings) so a cache problem never breaks a review run.
 
 ---
 
-## Cache Keys and File Layout
-
-Every cache entry is identified by three components:
+## Cache keys and file layout
 
 | Component | Source | Example |
 |-----------|--------|---------|
-| `entity_id` | `hazard.hazard_id` (H1-H7, summarizers, final) or `requirement.req_id` (requirement reviewer) | `GID-1234`, `REQ-001` |
-| `node_name` | `self.__class__.__name__.lower()` | `h1evaluatornode`, `requirementreviewernode` |
-| `prompt_version` | Extracted from the PromptConfig template path at construction time | `v1.0.0` |
+| `entity_id` | `requirement.req_id`, `test_case.test_id`, or `hazard.hazard_id` | `REQ-PUMP-101`, `TEST-PUMP-201`, `HAZ-PUMP-001` |
+| `node_name` | `self.__class__.__name__.lower()`, with `spec_id` appended for per-spec evaluators | `synthesizernode`, `singlespecevaluatornode_S1` |
+| `prompt_version` | `ReviewCacheManager.extract_prompt_version(template_path)` | `v1.0.0`, `v8.0.0` |
 
-**Redis key:** `hazard:{entity_id}:{node_name}:{prompt_version}`
+**Redis key:** `review:{entity_id}:{node_name}:{prompt_version}`
+**Disk path:** `{CACHE_DIR}/{safe_entity_id}/{safe_node_name}_{prompt_version}.json`
 
-**Disk path:** `{HAZARD_CACHE_DIR}/{safe_entity_id}/{node_name}_{prompt_version}.json`
+Both the folder (`entity_id`) and the filename token (`node_name`) are sanitised — non-word
+characters replaced with `_` — so per-spec ids are filesystem-safe.
 
-The `entity_id` is sanitised (non-word characters replaced with `_`) before use in a file path.
-
-### Example disk layout after one hazard + two requirements
+### Example layout after a hazard run referencing two requirements
 
 ```
-./cache/hazard/
-  GID-1234/
-    h1evaluatornode_v1.0.0.json
-    h2evaluatornode_v1.0.0.json
-    h3evaluatornode_v1.0.0.json
-    h4evaluatornode_v1.0.0.json
-    h5evaluatornode_v1.0.0.json
+./cache/
+  HAZ-PUMP-001/
+    hazardevaluatornode_h1_v1.0.0.json    … h2 … h3 … h7
     h6evaluatornode_v1.0.0.json
-    h7evaluatornode_v1.0.0.json
     hazarddesignsummarizernode_v1.0.0.json
     hazardneedssummarizernode_v1.0.0.json
-    _finalassessornode_v1.0.0.json
-  REQ-001/
-    requirementreviewernode_v8.0.0.json
-  REQ-007/
+    _finalassessornode_v1.0.0.json        (written; under `partial` it is re-run each time)
+  REQ-PUMP-101/
+    requirementreviewernode_v8.0.0.json   (the whole RTM subgraph result, "fully cached")
+  REQ-PUMP-102/
     requirementreviewernode_v8.0.0.json
 ```
+
+A **standalone** Test Suite run instead writes per-node files under `REQ-*` (e.g.
+`decomposernode_v5.0.0.json`, `summarizernode_v4.0.0.json`,
+`singlespecevaluatornode_S1_v7.0.0.json`, …). A Test Case run writes per-node files under
+`TEST-*`.
 
 ---
 
-## Cache Invalidation
+## Node coverage
 
-Invalidation is **version-driven**. The cache version is extracted automatically from the PromptConfig template path using a semver regex:
-
-```
-hazard_h1/v1.0.0/template.jinja2  →  v1.0.0
-synthesizer/v8.0.0/template.jinja2  →  v8.0.0
-```
-
-To bust the cache for a node, bump the version in its `PromptConfig` path (e.g., `v1.0.0` → `v1.1.0`). The new version produces a new key; old entries are simply never read again. No manual cache purge is required.
+| Reviewer | Cached nodes | Entity | Final (re-run under `partial`) |
+|----------|--------------|--------|-------------------------------|
+| Test Suite | decomposer, summarizer, design_summarizer, per-spec `spec_evaluator`, synthesizer | `requirement.req_id` | `synthesizer` |
+| Test Case | decomposer, per-spec `coverage_evaluator`, logical_evaluator, prereqs_evaluator, aggregator | `test_case.test_id` | `aggregator` |
+| Hazard | H1–H7, design/needs summarizers, `requirement_reviewer` (RTM blob), final_assessment | `hazard.hazard_id` (req blob: `requirement.req_id`) | `final_assessment` |
 
 ---
 
-## Cache File Schema
+## Hazard ⇄ embedded test-suite subgraph
 
-Each disk file contains the serialised Pydantic model output and metadata needed to reconstruct the result and report savings:
+The hazard reviewer embeds the full Test Suite reviewer as a subgraph, invoked once per traced
+requirement by `RequirementReviewerNode`. That node caches the **entire** subgraph result as one
+blob keyed on `req_id` (`requirementreviewernode_{synthesizer_version}.json`). A hit therefore
+returns the complete review — including the synthesized assessment — without re-running anything,
+i.e. the subgraph is **"fully cached"**.
+
+To avoid double-caching, the embedded RTM is constructed **without** its own cache manager (its
+internal nodes never self-cache); the blob is the subgraph's only cache. This is why the API
+builds a *separate*, uncached embedded RTM for the hazard service rather than sharing the
+cache-enabled RTM used by the standalone `/test-suite-review` endpoint.
+
+### Cross-hazard requirement deduplication
+
+Because the blob is keyed on `req_id` (not `hazard_id`), a requirement that appears as a
+risk-control reference in several hazard rows is reviewed **once**; every later row hits the
+cache. The `prompt_version` for this key comes from `PromptConfig.synthesizer`, so bumping the
+synthesizer version busts requirement-review entries. Token savings are measured by snapshotting
+the telemetry tracker's totals around the subgraph invocation.
+
+---
+
+## Cache file schema
 
 ```json
 {
-  "result": { ...model.model_dump()... },
+  "result": { "...model.model_dump()..." : null },
   "meta": {
-    "hazard_id": "GID-1234",
-    "node": "h1evaluatornode",
+    "entity_id": "HAZ-PUMP-001",
+    "node": "hazardevaluatornode_h1",
     "prompt_version": "v1.0.0",
     "model": "gpt-4o-mini",
     "prompt_tokens": 1234,
@@ -96,150 +146,62 @@ Each disk file contains the serialised Pydantic model output and metadata needed
 }
 ```
 
-`result` holds the raw `model_dump()` output captured **before** `_format_response` runs. On restore, the model is reconstructed via `ResponseModel.model_validate(cached["result"])` and then passed through `_format_response` as normal, so LangGraph state reducers receive properly-typed Pydantic instances.
+`result` holds the raw `model_dump()` captured before `_format_response`. On restore the model
+is reconstructed via `model_validate(cached["result"])` so LangGraph reducers receive
+properly-typed Pydantic instances.
 
 ---
 
-## Node Coverage
+## Cache invalidation
 
-| Node | Cached | Cache key entity | Notes |
-|------|--------|-----------------|-------|
-| `h1_evaluator` – `h7_evaluator` | Yes | `hazard.hazard_id` | Via `HazardEvaluatorNode._get_cache_entity_id` |
-| `h6_evaluator` | Yes | `hazard.hazard_id` | Via `H6EvaluatorNode._get_cache_entity_id` |
-| `design_summarizer` | Yes | `hazard.hazard_id` | Caches the full list of `HazardSummarizedDesignSpec` objects; batch token totals accumulated across all batches before the single cache write |
-| `needs_summarizer` | Yes | `hazard.hazard_id` | Same pattern as `design_summarizer` with `HazardSummarizedUserNeed` |
-| `final_assessment` | Yes | `hazard.hazard_id` | Stores `FinalAssessorProse` only (LLM-written comments). Verdicts are always re-computed deterministically from upstream `HazardFinding` objects in state — the LLM cannot re-grade them |
-| `requirement_reviewer` | Yes | `requirement.req_id` | Keyed on `req_id`, not `hazard_id` — see cross-hazard deduplication below |
-| `data_integration` | No | — | Not an LLM call |
+Invalidation is **version-driven**: the version is parsed from the PromptConfig template path
+(`hazard_h1/v1.0.0/template.jinja2 → v1.0.0`). Bumping a node's prompt version produces a new
+key; old entries are simply never read again. No manual purge required.
 
 ---
 
-## Cross-Hazard Requirement Deduplication
-
-A key design decision in `RequirementReviewerNode` is that its cache key uses **`req_id`**, not `hazard_id`.
-
-When a hazard analysis file is processed, the same requirement (e.g., `REQ-001`) often appears as a risk-control reference in multiple hazard rows. Without this design, the RTM subgraph would run once per hazard row that references `REQ-001` — identical inputs, identical cost, every time.
-
-With `req_id` as the key, the RTM subgraph runs once for `REQ-001`. Every subsequent hazard row that references `REQ-001` hits the cache and returns the stored `RequirementReview` immediately.
-
-The `prompt_version` used for this key is extracted from `PromptConfig.synthesizer` (the RTM synthesizer template path), so bumping the synthesizer version busts requirement review cache entries just as it does for hazard-level nodes.
-
-Token savings for `requirement_reviewer` are measured by snapshotting the telemetry tracker's running totals before and after the RTM subgraph invocation:
-
-```python
-tokens_before_prompt = tracker._total_prompt_tokens
-rtm_result = await self.rtm.graph.ainvoke(rtm_input)
-prompt_tokens = tracker._total_prompt_tokens - tokens_before_prompt
-```
-
----
-
-## Integration into the Pipeline
-
-`HazardCacheManager` is constructed once in `HazardReviewerRunnable.__init__` and passed to all 10 node factories in `build()`. The pipeline reads three environment variables (all have defaults):
+## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENABLE_HAZARD_CACHE` | `true` | Set to `false` to disable caching entirely |
-| `HAZARD_CACHE_DIR` | `./cache/hazard` | Root directory for disk cache files |
-| `REDIS_URL` | `None` | Redis connection URL, e.g. `redis://localhost:6379`. If unset, Tier 2 is disabled |
+| `ENABLE_CACHE` | `true` | Master switch — set `false` to disable caching entirely |
+| `CACHE_DIR` | `./cache` | Root directory for disk cache files (one folder per entity id) |
+| `REDIS_URL` | `None` | Redis connection URL, e.g. `redis://localhost:6379`; unset disables Tier 2 |
 
-The pipeline reuses the `TokenUsageTracker` already wired into the `RateLimitOpenAIClient` so that cache events land in the same `token_usage.jsonl` file as normal LLM call records. A fresh tracker is never constructed here — doing so would clear the file.
-
----
-
-## Code Architecture
-
-### `autoqa/core/cache.py` — `HazardCacheManager`
-
-Central class implementing the 3-tier logic. Key methods:
-
-- `get(entity_id, node_name, prompt_version)` — checks Redis then disk; logs and emits telemetry on hit/miss; returns the raw payload dict or `None`
-- `set(entity_id, node_name, prompt_version, result_dict, prompt_tokens, completion_tokens, model)` — writes to disk then Redis; swallows all exceptions
-- `extract_prompt_version(template_path)` — static helper; parses `v{major}.{minor}.{patch}` from a template path string; falls back to `"default"`
-
-### `autoqa/components/shared/nodes.py` — `StandardLLMNode`
-
-Base class for all single-call LLM nodes. Cache support is added as a Template Method hook:
-
-- `BaseLLMNode.__init__` accepts `cache_manager` and `prompt_version` (both optional, backward-compatible)
-- `StandardLLMNode._get_cache_entity_id(state)` returns `None` by default; hazard subclasses override to return `hazard.hazard_id`
-- `StandardLLMNode.__call__` inserts the cache check between state validation and `_build_payload`, and the cache write between parsing and `_format_response`
-
-Nodes that do not override `_get_cache_entity_id` (or that have no `cache_manager`) skip the cache path entirely at zero cost.
-
-### `autoqa/components/hazard_risk_reviewer/nodes.py`
-
-Each node class participates in caching by overriding `_get_cache_entity_id` or implementing the cache check/write inline (for nodes with custom `__call__` implementations):
-
-- `HazardEvaluatorNode` / `H6EvaluatorNode` — override `_get_cache_entity_id` to return `hazard.hazard_id`; cache logic runs via `StandardLLMNode.__call__`
-- `HazardDesignSummarizerNode` / `HazardNeedsSummarizerNode` — custom `__call__` with inline check/write; token totals are accumulated across all batches before the single cache write
-- `_FinalAssessorNode` — custom `__call__` (required because it must always produce a `HazardAssessment` even on LLM failure); caches `FinalAssessorProse` only; verdicts are re-computed from state regardless
-- `RequirementReviewerNode` — no `StandardLLMNode` base; entirely custom `__call__` with inline check/write keyed on `req_id`
+A single `ReviewCacheManager` is built once in the API lifespan (`autoqa/api/main.py`) and shared
+by all three services. It reuses the `TokenUsageTracker` already wired into the
+`RateLimitOpenAIClient` so cache events land in the same `token_usage.jsonl` as LLM-call records.
 
 ---
 
-## Telemetry — `token_usage.jsonl` Events
-
-Three new event types are appended to the existing JSONL file:
+## Telemetry — `token_usage.jsonl` events
 
 **Cache hit:**
 ```json
-{
-  "type": "cache_hit",
-  "ts": "2026-05-25T10:30:00+00:00",
-  "tier": 3,
-  "node": "h1evaluatornode",
-  "hazard_id": "GID-1234",
-  "tokens_saved_prompt": 1234,
-  "tokens_saved_completion": 456,
-  "tokens_saved_total": 1690,
-  "cost_saved_usd": 0.000460,
-  "model": "gpt-4o-mini"
-}
+{ "type": "cache_hit", "tier": 3, "node": "hazardevaluatornode_h1", "entity_id": "HAZ-PUMP-001",
+  "tokens_saved_prompt": 1234, "tokens_saved_completion": 456, "tokens_saved_total": 1690,
+  "cost_saved_usd": 0.000460, "model": "gpt-4o-mini" }
 ```
 
 **Cache miss:**
 ```json
-{
-  "type": "cache_miss",
-  "ts": "2026-05-25T10:30:00+00:00",
-  "node": "h1evaluatornode",
-  "hazard_id": "GID-1234"
-}
+{ "type": "cache_miss", "node": "hazardevaluatornode_h1", "entity_id": "HAZ-PUMP-001" }
 ```
 
-**Session summary** (appended by `log_summary()`):
-```json
-{
-  "type": "summary",
-  "llm_calls": 10,
-  "total_prompt_tokens": 12500,
-  "total_completion_tokens": 4800,
-  "total_cost_usd": 0.004755,
-  "cache_hits_redis": 0,
-  "cache_hits_disk": 9,
-  "cache_misses": 10,
-  "tokens_saved_by_cache": 15300,
-  "cost_saved_by_cache_usd": 0.005085
-}
-```
-
-Cache stats also appear in the `autoqa.log` summary line:
-
-```
-Token usage summary — calls: 10 | ... | cache hits: 9 (redis=0 disk=9) misses: 10 tokens_saved: 15,300 cost_saved: $0.0051
-```
+A `summary` record (cache hits redis/disk, misses, tokens/cost saved) is appended by
+`log_summary()` and mirrored in the `autoqa.log` summary line.
 
 ---
 
-## Extending to Other Reviewers
+## Adding caching to a new node
 
-The `StandardLLMNode` base class already has all hooks in place. To cache a node in another reviewer pipeline:
-
-1. Inject a `HazardCacheManager` instance into the node constructor via `cache_manager=` and set `prompt_version=HazardCacheManager.extract_prompt_version(prompt_template)`.
-2. Override `_get_cache_entity_id(self, state)` to return the entity identifier (e.g., `state["requirement"].req_id`).
-
-No changes to `StandardLLMNode.__call__` are needed — the cache check and write run automatically when both `cache_manager` and a non-empty `prompt_version` are present.
-
-For nodes with custom `__call__` implementations (like the summarizer nodes or `RequirementReviewerNode`), add the check/write blocks inline following the same pattern.
+1. Construct the node with `cache_manager=` and
+   `prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template)` (the `make_*`
+   factories already do this). Pass `is_final_output=True` if it is the graph's final node.
+2. Override `_get_cache_entity_id(self, state)` to return the entity id.
+3. For a `StandardLLMNode` / `BatchedLLMNode` subclass, nothing else is needed — `__call__`
+   gates read/write via `_cache_read_allowed` / `_cache_write_allowed` automatically.
+4. For a node with a custom `__call__` (the per-spec evaluators, `_FinalAssessorNode`,
+   `RequirementReviewerNode`), add the check/write blocks inline using the same helpers, and
+   make sure any `Send` dispatcher that fans into the node copies `cache_mode` into each `Send`
+   payload (otherwise the fan-out state defaults to `partial`).

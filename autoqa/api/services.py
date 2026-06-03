@@ -9,6 +9,7 @@ from typing import List, Optional
 from langgraph.checkpoint.memory import MemorySaver
 
 from autoqa.components.clients import RateLimitOpenAIClient
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.components.hazard_risk_reviewer.core import HazardRowWithTraceMatrix
 from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
@@ -43,13 +44,17 @@ class RTMReviewService:
         model_kwargs: dict = {},
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
+        cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
         self.graph = rtm_runnable or RTMReviewerRunnable(
-            client, model, model_kwargs, checkpointer=MemorySaver(), pyjama_config=pyjama_config
+            client, model, model_kwargs, checkpointer=MemorySaver(),
+            pyjama_config=pyjama_config, cache_manager=cache_manager,
         )
 
-    async def run_from_baseline(self, baseline_id: str, thread_id_prefix: str) -> str:
+    async def run_from_baseline(
+        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial"
+    ) -> str:
         """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path."""
         from autoqa.components.shared.data_integration import (
             DataIntegrationNode,
@@ -87,7 +92,9 @@ class RTMReviewService:
         for i, state_dict in enumerate(state_dicts):
             thread_id = f"{thread_id_prefix}-{i:03d}"
             config = {"configurable": {"thread_id": thread_id}}
-            final_state = await self.graph.graph.ainvoke(state_dict, config)
+            final_state = await self.graph.graph.ainvoke(
+                {**state_dict, "cache_mode": cache_mode}, config
+            )
             self._logger.info("[%d/%d] Completed requirement review", i + 1, len(state_dicts))
             with outputs_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(final_state, default=_json_default) + "\n")
@@ -122,14 +129,23 @@ class HazardReviewService:
         model_kwargs: dict = {},
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
+        cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
+        # NOTE: we deliberately do NOT reuse a cache-enabled RTM runnable here.
+        # The embedded test-suite subgraph must stay internally uncached — the
+        # whole-subgraph result is cached as one blob per requirement by
+        # RequirementReviewerNode (see ReviewCacheManager / "full" subgraph
+        # caching). HazardReviewerRunnable builds its own uncached RTM when
+        # rtm_runnable is None. The shared cache_manager still caches the
+        # hazard's own H1-H7 / summarizer / req-blob nodes.
         self.graph = HazardReviewerRunnable(
             client,
             model,
             model_kwargs,
             checkpointer=MemorySaver(),
             rtm_runnable=rtm_runnable,
+            cache_manager=cache_manager,
         )
 
     def _parse_uploaded_excel(
@@ -170,6 +186,7 @@ class HazardReviewService:
         project_name: str,
         thread_id_prefix: str,
         sheet_name: str = "SHA Table",
+        cache_mode: str = "partial",
     ) -> str:
         """Parse an uploaded SHA Excel file and run the hazard graph for every row.
 
@@ -193,7 +210,9 @@ class HazardReviewService:
                 else f"{thread_id_prefix}-{i:03d}"
             )
             config = {"configurable": {"thread_id": thread_id}}
-            final_state = await self.graph.graph.ainvoke({"hazard": hazard_row}, config)
+            final_state = await self.graph.graph.ainvoke(
+                {"hazard": hazard_row, "cache_mode": cache_mode}, config
+            )
             self._logger.info(
                 "[%d/%d] Hazard review complete for %s", i + 1, len(hazard_rows), hazard_row.hazard_id
             )
@@ -226,13 +245,17 @@ class TestCaseReviewService:
         model: str,
         model_kwargs: dict = {},
         pyjama_config: Optional[PyJamaNodeConfig] = None,
+        cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
         self.graph = TCReviewerRunnable(
-            client, model, model_kwargs, checkpointer=MemorySaver(), pyjama_config=pyjama_config
+            client, model, model_kwargs, checkpointer=MemorySaver(),
+            pyjama_config=pyjama_config, cache_manager=cache_manager,
         )
 
-    async def run_from_baseline(self, baseline_id: str, thread_id_prefix: str) -> str:
+    async def run_from_baseline(
+        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial"
+    ) -> str:
         """Fetch a JAMA baseline, run the TC graph for every test case, return viewer_tc.html path."""
         from autoqa.components.shared.data_integration import (
             DataIntegrationNode,
@@ -274,6 +297,7 @@ class TestCaseReviewService:
                 **state_dict,
                 "review_objectives": state_dict.get("review_objectives") or default_objectives,
                 "design_docs": state_dict.get("design_docs") or [],
+                "cache_mode": cache_mode,
             }
             config = {"configurable": {"thread_id": thread_id}}
             final_state = await self.graph.graph.ainvoke(graph_input, config)

@@ -99,10 +99,12 @@ class Settings(BaseSettings):
     token_cost_input_per_m: float = Field(default=1.00, alias="TOKEN_COST_INPUT_PER_M")
     token_cost_output_per_m: float = Field(default=5.00, alias="TOKEN_COST_OUTPUT_PER_M")
 
-    # Hazard reviewer cache (set ENABLE_HAZARD_CACHE=false to disable entirely)
+    # Reviewer cache, shared by all three reviewers (set ENABLE_CACHE=false to
+    # disable entirely; CACHE_DIR holds one folder per entity id — e.g.
+    # cache/HAZ-PUMP-001, cache/REQ-PUMP-101, cache/TEST-PUMP-201).
     redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
-    hazard_cache_dir: str = Field(default="./cache/hazard", alias="HAZARD_CACHE_DIR")
-    enable_hazard_cache: bool = Field(default=True, alias="ENABLE_HAZARD_CACHE")
+    cache_dir: str = Field(default="./cache", alias="CACHE_DIR")
+    enable_cache: bool = Field(default=True, alias="ENABLE_CACHE")
 
     # Optional JAMA / Pyjama integration settings
     jama_host_address: Optional[str] = Field(default=None, alias='JAMA_HOST_ADDRESS')

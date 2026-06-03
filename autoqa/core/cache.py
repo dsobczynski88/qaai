@@ -1,12 +1,17 @@
-"""3-tier write-through cache for hazard reviewer LLM nodes.
+"""3-tier write-through cache for reviewer LLM nodes.
+
+Shared by all three reviewers (test suite / test case / hazard). Entries are
+partitioned by an arbitrary *entity id* — the requirement id (REQ-*), test-case
+id (TEST-*), or hazard id (HAZ-*) — producing one folder per entity directly
+under the cache directory.
 
 Tier 1 (Provider): pass-through — the API endpoint handles its own caching.
 Tier 2 (Redis / RAM): optional hot cache; disabled gracefully if unavailable.
-Tier 3 (Disk): persistent JSON files keyed by hazard_id/node/prompt_version;
+Tier 3 (Disk): persistent JSON files keyed by entity_id/node/prompt_version;
                survives server restarts; primary regulatory evidence artifact.
 
-Cache key:  hazard:{hazard_id}:{node_name}:{prompt_version}
-Disk path:  {cache_dir}/{hazard_id}/{node_name}_{prompt_version}.json
+Cache key:  review:{entity_id}:{node_name}:{prompt_version}
+Disk path:  {cache_dir}/{entity_id}/{node_name}_{prompt_version}.json
 """
 
 import json
@@ -29,8 +34,13 @@ except ImportError:
     pass
 
 
-class HazardCacheManager:
-    """Write-through 3-tier cache for hazard reviewer nodes.
+def _sanitize(value: str) -> str:
+    """Make an arbitrary id safe to use as a path segment / filename token."""
+    return re.sub(r"[^\w\-]", "_", value)
+
+
+class ReviewCacheManager:
+    """Write-through 3-tier cache for reviewer nodes.
 
     Check order on get(): Redis (Tier 2) → Disk (Tier 3) → None (miss).
     On a disk hit, the entry is backfilled into Redis for subsequent requests.
@@ -61,12 +71,12 @@ class HazardCacheManager:
         if redis_url and _REDIS_AVAILABLE:
             try:
                 self._redis = aioredis.from_url(redis_url, decode_responses=True)
-                logger.info("HazardCacheManager: Redis Tier 2 enabled (%s)", redis_url)
+                logger.info("ReviewCacheManager: Redis Tier 2 enabled (%s)", redis_url)
             except Exception as e:
-                logger.warning("HazardCacheManager: Redis init failed, Tier 2 disabled — %s", e)
+                logger.warning("ReviewCacheManager: Redis init failed, Tier 2 disabled — %s", e)
         elif redis_url and not _REDIS_AVAILABLE:
             logger.warning(
-                "HazardCacheManager: REDIS_URL set but 'redis' package not installed; "
+                "ReviewCacheManager: REDIS_URL set but 'redis' package not installed; "
                 "install with 'pip install redis>=5.0' to enable Tier 2"
             )
 
@@ -75,15 +85,15 @@ class HazardCacheManager:
     # ------------------------------------------------------------------
 
     async def get(
-        self, hazard_id: str, node_name: str, prompt_version: str
+        self, entity_id: str, node_name: str, prompt_version: str
     ) -> Optional[dict]:
         """Return cached payload or None on a total miss.
 
         Payload schema: {"result": {...model_dump...}, "meta": {prompt_tokens, ...}}
         The caller is responsible for reconstructing Pydantic models from result.
         """
-        redis_key = self._redis_key(hazard_id, node_name, prompt_version)
-        disk_path = self._file_path(hazard_id, node_name, prompt_version)
+        redis_key = self._redis_key(entity_id, node_name, prompt_version)
+        disk_path = self._file_path(entity_id, node_name, prompt_version)
 
         # --- Tier 2: Redis ---
         if self._redis is not None:
@@ -93,12 +103,12 @@ class HazardCacheManager:
                     payload = json.loads(raw)
                     payload["meta"]["cache_tier_origin"] = 2
                     logger.debug(
-                        "Cache HIT (tier=2): node=%s hazard=%s", node_name, hazard_id
+                        "Cache HIT (tier=2): node=%s entity=%s", node_name, entity_id
                     )
-                    await self._emit_hit(payload, node_name, hazard_id, tier=2)
+                    await self._emit_hit(payload, node_name, entity_id, tier=2)
                     return payload
             except Exception as e:
-                logger.warning("HazardCacheManager: Redis get error — %s", e)
+                logger.warning("ReviewCacheManager: Redis get error — %s", e)
 
         # --- Tier 3: Disk ---
         if disk_path.exists():
@@ -107,8 +117,8 @@ class HazardCacheManager:
                 payload = json.loads(raw)
                 payload["meta"]["cache_tier_origin"] = 3
                 logger.info(
-                    "Cache HIT (tier=3): node=%s hazard=%s file=%s",
-                    node_name, hazard_id, disk_path.name,
+                    "Cache HIT (tier=3): node=%s entity=%s file=%s",
+                    node_name, entity_id, disk_path.name,
                 )
                 # Backfill Redis so next request is faster
                 if self._redis is not None:
@@ -116,19 +126,19 @@ class HazardCacheManager:
                         await self._redis.set(redis_key, raw, ex=self._REDIS_TTL)
                     except Exception:
                         pass
-                await self._emit_hit(payload, node_name, hazard_id, tier=3)
+                await self._emit_hit(payload, node_name, entity_id, tier=3)
                 return payload
             except Exception as e:
                 logger.warning(
-                    "HazardCacheManager: disk read error for %s — %s", disk_path, e
+                    "ReviewCacheManager: disk read error for %s — %s", disk_path, e
                 )
 
         # --- Miss ---
-        logger.debug("Cache MISS: node=%s hazard=%s", node_name, hazard_id)
+        logger.debug("Cache MISS: node=%s entity=%s", node_name, entity_id)
         if self.telemetry_tracker:
             try:
                 await self.telemetry_tracker.record_cache_miss(
-                    node=node_name, hazard_id=hazard_id
+                    node=node_name, entity_id=entity_id
                 )
             except Exception:
                 pass
@@ -136,7 +146,7 @@ class HazardCacheManager:
 
     async def set(
         self,
-        hazard_id: str,
+        entity_id: str,
         node_name: str,
         prompt_version: str,
         result_dict: dict,
@@ -148,7 +158,7 @@ class HazardCacheManager:
         payload = {
             "result": result_dict,
             "meta": {
-                "hazard_id": hazard_id,
+                "entity_id": entity_id,
                 "node": node_name,
                 "prompt_version": prompt_version,
                 "model": model,
@@ -161,21 +171,21 @@ class HazardCacheManager:
         raw = json.dumps(payload, indent=2, default=str)
 
         # Write to Disk (Tier 3)
-        disk_path = self._file_path(hazard_id, node_name, prompt_version)
+        disk_path = self._file_path(entity_id, node_name, prompt_version)
         try:
             disk_path.parent.mkdir(parents=True, exist_ok=True)
             disk_path.write_text(raw, encoding="utf-8")
             logger.debug("Cache WRITE (disk): %s", disk_path)
         except Exception as e:
-            logger.warning("HazardCacheManager: disk write failed — %s", e)
+            logger.warning("ReviewCacheManager: disk write failed — %s", e)
 
         # Write to Redis (Tier 2)
         if self._redis is not None:
-            redis_key = self._redis_key(hazard_id, node_name, prompt_version)
+            redis_key = self._redis_key(entity_id, node_name, prompt_version)
             try:
                 await self._redis.set(redis_key, raw, ex=self._REDIS_TTL)
             except Exception as e:
-                logger.warning("HazardCacheManager: Redis write failed — %s", e)
+                logger.warning("ReviewCacheManager: Redis write failed — %s", e)
 
     # ------------------------------------------------------------------
     # Static helpers (usable without an instance)
@@ -196,14 +206,14 @@ class HazardCacheManager:
     # ------------------------------------------------------------------
 
     async def _emit_hit(
-        self, payload: dict, node_name: str, hazard_id: str, tier: int
+        self, payload: dict, node_name: str, entity_id: str, tier: int
     ) -> None:
         if self.telemetry_tracker:
             try:
                 meta = payload.get("meta", {})
                 await self.telemetry_tracker.record_cache_hit(
                     node=node_name,
-                    hazard_id=hazard_id,
+                    entity_id=entity_id,
                     tier=tier,
                     tokens_saved_prompt=meta.get("prompt_tokens", 0),
                     tokens_saved_completion=meta.get("completion_tokens", 0),
@@ -212,10 +222,12 @@ class HazardCacheManager:
             except Exception:
                 pass
 
-    def _redis_key(self, hazard_id: str, node_name: str, prompt_version: str) -> str:
-        return f"hazard:{hazard_id}:{node_name}:{prompt_version}"
+    def _redis_key(self, entity_id: str, node_name: str, prompt_version: str) -> str:
+        return f"review:{entity_id}:{node_name}:{prompt_version}"
 
-    def _file_path(self, hazard_id: str, node_name: str, prompt_version: str) -> Path:
-        safe_id = re.sub(r"[^\w\-]", "_", hazard_id)
-        filename = f"{node_name}_{prompt_version}.json"
+    def _file_path(self, entity_id: str, node_name: str, prompt_version: str) -> Path:
+        # Sanitize both the folder (entity id) and the filename token (node name)
+        # — per-spec node names embed a spec_id which may contain unsafe chars.
+        safe_id = _sanitize(entity_id)
+        filename = f"{_sanitize(node_name)}_{prompt_version}.json"
         return self.cache_dir / safe_id / filename

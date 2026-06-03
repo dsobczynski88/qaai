@@ -103,6 +103,7 @@ class BaseLLMNode(ABC):
         model_kwargs: dict | None = None,
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
+        is_final_output: bool = False,
     ):
         self.client = client
         self.model = model
@@ -110,6 +111,31 @@ class BaseLLMNode(ABC):
         self.model_kwargs = model_kwargs or {}
         self.cache_manager = cache_manager
         self.prompt_version = prompt_version
+        # When True this node produces the graph's final assessment. Under the
+        # "partial" cache mode such a node always re-runs (skips cache read) so
+        # the user gets a fresh output while still reusing cached interim nodes.
+        self.is_final_output = is_final_output
+
+    # ------------------------------------------------------------------
+    # Cache gating (driven by state["cache_mode"]: "off" | "partial" | "full")
+    # ------------------------------------------------------------------
+
+    def _cache_read_allowed(self, state: Any) -> bool:
+        """Whether this node may read from cache for the given state."""
+        if self.cache_manager is None or not self.prompt_version:
+            return False
+        mode = (state or {}).get("cache_mode", "partial")
+        if mode == "off":
+            return False
+        if mode == "partial" and self.is_final_output:
+            return False
+        return True
+
+    def _cache_write_allowed(self, state: Any) -> bool:
+        """Whether this node may write to cache for the given state."""
+        if self.cache_manager is None or not self.prompt_version:
+            return False
+        return (state or {}).get("cache_mode", "partial") != "off"
 
     @abstractmethod
     def _validate_state(self, state: Any) -> bool:
@@ -287,7 +313,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
     _format_response; __call__ orchestrates the full flow. Generic over the
     concrete TypedDict state — subclasses pin their own state type.
 
-    Cache support: assign a HazardCacheManager to self.cache_manager and set
+    Cache support: assign a ReviewCacheManager to self.cache_manager and set
     self.prompt_version, then override _get_cache_entity_id() to return the
     entity key (e.g. hazard_id). When both are non-None, __call__ checks the
     cache before the LLM call and writes through after a miss.
@@ -302,8 +328,12 @@ class StandardLLMNode(BaseLLMNode, ABC):
         model_kwargs: dict | None = None,
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
+        is_final_output: bool = False,
     ):
-        super().__init__(client, model, system_prompt, model_kwargs, cache_manager, prompt_version)
+        super().__init__(
+            client, model, system_prompt, model_kwargs,
+            cache_manager, prompt_version, is_final_output,
+        )
         self.response_model = response_model
 
     def _get_cache_entity_id(self, state: Any) -> Optional[str]:
@@ -345,7 +375,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
         node_name = self._get_cache_node_name()
 
         # --- Tier 2/3: cache check ---
-        if self.cache_manager is not None and self.prompt_version:
+        if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
                 cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
@@ -382,7 +412,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
             return self._get_skip_response()
 
         # --- Tier 2/3: write-through cache ---
-        if self.cache_manager is not None and self.prompt_version:
+        if self._cache_write_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
                 usage = getattr(result, "usage", None)
@@ -390,7 +420,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
                 completion_tokens = getattr(usage, "completion_tokens", 0) or 0
                 try:
                     await self.cache_manager.set(
-                        hazard_id=entity_id,
+                        entity_id=entity_id,
                         node_name=node_name,
                         prompt_version=self.prompt_version,
                         result_dict=parsed.model_dump(),
@@ -435,8 +465,12 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         model_kwargs: dict | None = None,
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
+        is_final_output: bool = False,
     ):
-        super().__init__(client, model, system_prompt, model_kwargs, cache_manager, prompt_version)
+        super().__init__(
+            client, model, system_prompt, model_kwargs,
+            cache_manager, prompt_version, is_final_output,
+        )
         self.response_model = response_model
 
     @abstractmethod
@@ -520,7 +554,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
 
         # --- Cache check ---
         node_name = self._get_cache_node_name()
-        if self.cache_manager is not None and self.prompt_version:
+        if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
                 cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
@@ -570,12 +604,12 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         )
 
         # --- Cache write-through ---
-        if self.cache_manager is not None and self.prompt_version:
+        if self._cache_write_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
                 try:
                     await self.cache_manager.set(
-                        hazard_id=entity_id,
+                        entity_id=entity_id,
                         node_name=node_name,
                         prompt_version=self.prompt_version,
                         result_dict=self._serialize_for_cache(all_summaries),
@@ -594,6 +628,10 @@ class DecomposerNode(StandardLLMNode):
 
     def _validate_state(self, state: Any) -> bool:
         return state.get("requirement") is not None
+
+    def _get_cache_entity_id(self, state: Any) -> Optional[str]:
+        requirement = state.get("requirement")
+        return getattr(requirement, "req_id", None) if requirement else None
 
     def _build_payload(self, state: Any) -> dict:
         requirement = state.get("requirement")
@@ -615,11 +653,13 @@ def make_decomposer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str = "decomposer/v5.0.0/template.jinja2",
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> DecomposerNode:
     """
     Create a DecomposerNode with prompt loaded from a Jinja2 template.
     """
+    from autoqa.core.cache import ReviewCacheManager
     system_prompt = render_prompt(prompt_template, **template_vars)
     return DecomposerNode(
         client=client,
@@ -627,6 +667,8 @@ def make_decomposer_node(
         response_model=DecomposedRequirement,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 

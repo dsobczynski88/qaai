@@ -42,7 +42,7 @@ from langgraph.graph import END, START, StateGraph
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.data_integration import DataIntegrationNode, PyJamaNodeConfig
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from autoqa.core.cache import HazardCacheManager
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import PromptConfig, settings
 from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
@@ -91,7 +91,7 @@ class HazardReviewerRunnable:
         checkpointer: Union[MemorySaver, None] = None,
         prompt_config: Optional[PromptConfig] = None,
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
-        cache_manager: Optional[HazardCacheManager] = None,
+        cache_manager: Optional[ReviewCacheManager] = None,
         telemetry_tracker: Optional[Any] = None,
     ):
         self.client = client
@@ -110,18 +110,18 @@ class HazardReviewerRunnable:
         )
 
         # Build cache manager if not injected and caching is enabled.
-        # Callers can pass a pre-wired HazardCacheManager (e.g. to share
+        # Callers can pass a pre-wired ReviewCacheManager (e.g. to share
         # between this reviewer and the RTMReviewService), or let the
         # pipeline auto-build one from settings.
         if cache_manager is not None:
-            self.cache_manager: Optional[HazardCacheManager] = cache_manager
-        elif settings.enable_hazard_cache:
+            self.cache_manager: Optional[ReviewCacheManager] = cache_manager
+        elif settings.enable_cache:
             # Reuse the tracker already wired into the client so cache events
             # land in the same JSONL file as normal LLM-call records.
             # A brand-new TokenUsageTracker would clear the file on init.
             resolved_tracker = telemetry_tracker or getattr(client, "telemetry_tracker", None)
-            self.cache_manager = HazardCacheManager(
-                cache_dir=settings.hazard_cache_dir,
+            self.cache_manager = ReviewCacheManager(
+                cache_dir=settings.cache_dir,
                 redis_url=settings.redis_url,
                 telemetry_tracker=resolved_tracker,
             )
@@ -182,7 +182,7 @@ class HazardReviewerRunnable:
         requirement_reviewer = RequirementReviewerNode(
             self.rtm,
             cache_manager=cm,
-            rtm_prompt_version=HazardCacheManager.extract_prompt_version(
+            rtm_prompt_version=ReviewCacheManager.extract_prompt_version(
                 self.prompt_config.synthesizer
             ),
         )

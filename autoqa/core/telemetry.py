@@ -77,7 +77,7 @@ class TokenUsageTracker:
     async def record_cache_hit(
         self,
         node: str,
-        hazard_id: str,
+        entity_id: str,
         tier: int,
         tokens_saved_prompt: int,
         tokens_saved_completion: int,
@@ -96,7 +96,7 @@ class TokenUsageTracker:
             "ts": datetime.now(timezone.utc).isoformat(),
             "tier": tier,
             "node": node,
-            "hazard_id": hazard_id,
+            "entity_id": entity_id,
             "tokens_saved_prompt": tokens_saved_prompt,
             "tokens_saved_completion": tokens_saved_completion,
             "tokens_saved_total": tokens_saved_prompt + tokens_saved_completion,
@@ -109,14 +109,14 @@ class TokenUsageTracker:
         except Exception as e:
             logger.error("TokenUsageTracker: failed to write cache_hit record: %s", e)
 
-    async def record_cache_miss(self, node: str, hazard_id: str) -> None:
+    async def record_cache_miss(self, node: str, entity_id: str) -> None:
         """Append a cache_miss event and increment the miss counter."""
         self._cache_misses += 1
         entry = {
             "type": "cache_miss",
             "ts": datetime.now(timezone.utc).isoformat(),
             "node": node,
-            "hazard_id": hazard_id,
+            "entity_id": entity_id,
         }
         try:
             with open(self.file_path, "a", encoding="utf-8") as f:

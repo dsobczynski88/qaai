@@ -13,6 +13,7 @@ from autoqa.api.routes import router
 from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 
 
@@ -57,11 +58,27 @@ async def lifespan(app: FastAPI):
 
     pyjama_config = build_pyjama_config()
 
+    # One shared cache, used by all three reviewers. Per-run behaviour is driven
+    # by the UI's "use cache" toggle (→ cache_mode in graph state). The global
+    # ENABLE_CACHE switch turns it off entirely.
+    cache_manager = None
+    if settings.enable_cache:
+        cache_manager = ReviewCacheManager(
+            cache_dir=settings.cache_dir,
+            redis_url=settings.redis_url,
+            telemetry_tracker=getattr(client, "telemetry_tracker", None),
+        )
+        logger.info("Review cache enabled (dir: %s)", settings.cache_dir)
+
+    # RTM runnable used by the standalone test-suite endpoint — cache-enabled.
+    # The hazard reviewer deliberately builds its OWN uncached embedded RTM
+    # (its subgraph result is cached as one blob per requirement instead).
     rtm_runnable = RTMReviewerRunnable(
         client=client,
         model=settings.model,
         model_kwargs=model_kwargs,
         checkpointer=MemorySaver(),
+        cache_manager=cache_manager,
     )
 
     app.state.rtm_service = RTMReviewService(
@@ -73,14 +90,15 @@ async def lifespan(app: FastAPI):
     app.state.hazard_service = HazardReviewService(
         client,
         settings.model,
-        rtm_runnable=rtm_runnable,
         pyjama_config=pyjama_config,
+        cache_manager=cache_manager,
     )
     app.state.test_case_service = TestCaseReviewService(
         client=client,
         model=settings.model,
         model_kwargs=model_kwargs,
         pyjama_config=pyjama_config,
+        cache_manager=cache_manager,
     )
 
     # Backwards-compat: existing callers reference app.state.service for the RTM service.

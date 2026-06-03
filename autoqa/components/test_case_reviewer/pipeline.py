@@ -23,6 +23,7 @@ from autoqa.components.shared.data_integration import (
     make_transform_node_test_case_review,
     PyJamaNodeConfig,
 )
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 from autoqa.utils import save_graph_png
 
@@ -79,12 +80,15 @@ class TCReviewerRunnable:
         model_kwargs: dict = {},
         checkpointer: Union[MemorySaver, None] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
+        cache_manager: Optional[ReviewCacheManager] = None,
     ):
         self.client = client
         self.model = model
         self.model_kwargs = model_kwargs
         self.checkpointer = checkpointer
         self.pyjama_config = pyjama_config
+        # Optional shared cache; per-run behaviour driven by state["cache_mode"].
+        self.cache_manager = cache_manager
         self.graph = self.build()
 
     def build(self) -> Runnable:
@@ -94,20 +98,21 @@ class TCReviewerRunnable:
         data_integration = DataIntegrationNode(self.pyjama_config)
         transform = make_transform_node_test_case_review()
 
+        cm = self.cache_manager
         decomposer = make_tc_decomposer_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         coverage_eval = make_coverage_single_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         logical_eval = make_logical_single_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         prereqs_eval = make_prereqs_single_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         aggregator = make_aggregator_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
 
         # Add all nodes

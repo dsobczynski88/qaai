@@ -24,6 +24,7 @@ from autoqa.components.shared.nodes import (
     DecomposerNode,
     make_decomposer_node,
 )
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 from autoqa.prj_logger import ProjectLogger
 from autoqa.utils import render_prompt
@@ -93,9 +94,10 @@ class TCDecomposerNode:
             logger.debug("TCDecomposerNode: skipping — no requirements in state")
             return {"decomposed_requirements": None}
 
+        cache_mode = state.get("cache_mode", "partial")
         results: List[DecomposedRequirement] = []
         for req in state["requirements"]:
-            inner_update = await self._inner({"requirement": req})
+            inner_update = await self._inner({"requirement": req, "cache_mode": cache_mode})
             decomposed = inner_update.get("decomposed_requirement")
             if decomposed is not None:
                 results.append(decomposed)
@@ -113,21 +115,23 @@ def make_tc_decomposer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: Optional[str] = None,
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> TCDecomposerNode:
     """Build a TCDecomposerNode that wraps the shared DecomposerNode.
-    
+
     Args:
         prompt_template: Optional override. If None, uses settings.prompt_config.decomposer
     """
     if prompt_template is None:
         prompt_template = settings.prompt_config.decomposer
-    
+
     inner = make_decomposer_node(
         client=client,
         model=model,
         model_kwargs=model_kwargs,
         prompt_template=prompt_template,
+        cache_manager=cache_manager,
         **template_vars,
     )
     return TCDecomposerNode(inner=inner)
@@ -155,12 +159,35 @@ class _SingleSpecAxisNode(BaseLLMNode):
             state.get("decomposed_spec") is not None,
         ])
 
+    def _get_cache_entity_id(self, state: Any) -> Optional[str]:
+        test_case = state.get("test_case")
+        return getattr(test_case, "test_id", None) if test_case else None
+
+    def _cache_node_name(self, state: Any) -> str:
+        # One file per spec under the test case's folder — disambiguate by
+        # spec_id so parallel per-spec evaluations don't clobber one key.
+        spec = state.get("decomposed_spec")
+        spec_id = getattr(spec, "spec_id", "") if spec else ""
+        return f"{self.__class__.__name__.lower()}_{spec_id}"
+
     async def __call__(self, state: Any) -> dict:
         if not self.OUTPUT_KEY:
             raise RuntimeError(f"{self.__class__.__name__}: OUTPUT_KEY must be set")
         if not self._validate_state(state):
             logger.debug("%s: skipping — validation failed", self.__class__.__name__)
             return {self.OUTPUT_KEY: []}
+
+        entity_id = self._get_cache_entity_id(state)
+        node_name = self._cache_node_name(state)
+
+        # --- Tier 2/3: cache check ---
+        if self._cache_read_allowed(state) and entity_id:
+            cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+            if cached is not None:
+                try:
+                    return {self.OUTPUT_KEY: [SpecAnalysis.model_validate(cached["result"])]}
+                except Exception as e:
+                    logger.warning("%s: cache restore failed, re-running — %s", self.__class__.__name__, e)
 
         payload = {
             "test_case": state["test_case"].model_dump(),
@@ -178,7 +205,26 @@ class _SingleSpecAxisNode(BaseLLMNode):
             **self.model_kwargs,
         )
         parsed = self._parse_llm_response(result, SpecAnalysis, self.__class__.__name__)
-        return {self.OUTPUT_KEY: [parsed]} if parsed else {self.OUTPUT_KEY: []}
+        if not parsed:
+            return {self.OUTPUT_KEY: []}
+
+        # --- Tier 2/3: write-through cache ---
+        if self._cache_write_allowed(state) and entity_id:
+            usage = getattr(result, "usage", None)
+            try:
+                await self.cache_manager.set(
+                    entity_id=entity_id,
+                    node_name=node_name,
+                    prompt_version=self.prompt_version,
+                    result_dict=parsed.model_dump(),
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                    model=self.model,
+                )
+            except Exception as e:
+                logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
+
+        return {self.OUTPUT_KEY: [parsed]}
 
 
 class SingleSpecCoverageNode(_SingleSpecAxisNode):
@@ -192,6 +238,7 @@ def _make_axis_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> _SingleSpecAxisNode:
     system_prompt = render_prompt(prompt_template, **template_vars)
@@ -200,6 +247,8 @@ def _make_axis_node(
         model=model,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -218,6 +267,10 @@ class OverallLogicalNode(StandardLLMNode):
             state.get("test_case") is not None,
             state.get("requirements") is not None,
         ])
+
+    def _get_cache_entity_id(self, state: TCReviewState) -> Optional[str]:
+        test_case = state.get("test_case")
+        return getattr(test_case, "test_id", None) if test_case else None
 
     def _build_payload(self, state: TCReviewState) -> dict:
         return {
@@ -241,6 +294,10 @@ class OverallPrereqsNode(StandardLLMNode):
             state.get("requirements") is not None,
         ])
 
+    def _get_cache_entity_id(self, state: TCReviewState) -> Optional[str]:
+        test_case = state.get("test_case")
+        return getattr(test_case, "test_id", None) if test_case else None
+
     def _build_payload(self, state: TCReviewState) -> dict:
         return {
             "test_case": state["test_case"].model_dump(),
@@ -259,18 +316,20 @@ def make_coverage_single_node(
     model: str,
     model_kwargs: dict,
     prompt_template: Optional[str] = None,
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SingleSpecCoverageNode:
     """Build the coverage evaluator node.
-    
+
     Args:
         prompt_template: Optional override. If None, uses settings.prompt_config.single_test_coverage_eval
     """
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_coverage_eval
-    
+
     return _make_axis_node(
-        SingleSpecCoverageNode, client, model, model_kwargs, prompt_template, **template_vars
+        SingleSpecCoverageNode, client, model, model_kwargs, prompt_template,
+        cache_manager=cache_manager, **template_vars,
     )
 
 
@@ -279,16 +338,17 @@ def make_logical_single_node(
     model: str,
     model_kwargs: dict,
     prompt_template: Optional[str] = None,
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> OverallLogicalNode:
     """Build the test-case-level logical-structure node (single LLM call, no Send).
-    
+
     Args:
         prompt_template: Optional override. If None, uses settings.prompt_config.single_test_logical_steps
     """
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_logical_steps
-    
+
     system_prompt = render_prompt(prompt_template, **template_vars)
     return OverallLogicalNode(
         client=client,
@@ -296,6 +356,8 @@ def make_logical_single_node(
         response_model=OverallAnalysis,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -304,16 +366,17 @@ def make_prereqs_single_node(
     model: str,
     model_kwargs: dict,
     prompt_template: Optional[str] = None,
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> OverallPrereqsNode:
     """Build the test-case-level prereqs node (single LLM call, no Send).
-    
+
     Args:
         prompt_template: Optional override. If None, uses settings.prompt_config.single_test_prereqs
     """
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_prereqs
-    
+
     system_prompt = render_prompt(prompt_template, **template_vars)
     return OverallPrereqsNode(
         client=client,
@@ -321,6 +384,8 @@ def make_prereqs_single_node(
         response_model=OverallAnalysis,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -339,11 +404,13 @@ def dispatch_coverage(state: TCReviewState) -> List[Send]:
         logger.warning("dispatch_coverage: incomplete state, skipping fan-out")
         return []
 
+    cache_mode = state.get("cache_mode", "partial")
     return [
         Send("coverage_evaluator", {
             "test_case": test_case,
             "requirement": dr.requirement,
             "decomposed_spec": spec,
+            "cache_mode": cache_mode,
         })
         for dr in decomposed_reqs
         for spec in dr.decomposed_specifications
@@ -365,6 +432,10 @@ class AggregatorNode(StandardLLMNode):
             state.get("decomposed_requirements") is not None,
             state.get("review_objectives") is not None,
         ])
+
+    def _get_cache_entity_id(self, state: TCReviewState) -> Optional[str]:
+        test_case = state.get("test_case")
+        return getattr(test_case, "test_id", None) if test_case else None
 
     def _build_payload(self, state: TCReviewState) -> dict:
         logical = state.get("logical_structure_analysis")
@@ -391,16 +462,20 @@ def make_aggregator_node(
     model: str,
     model_kwargs: dict,
     prompt_template: Optional[str] = None,
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> AggregatorNode:
     """Build the aggregator node.
-    
+
+    This is the graph's FINAL output node: under "partial" caching it always
+    re-runs so the user gets a fresh assessment from cached interim results.
+
     Args:
         prompt_template: Optional override. If None, uses settings.prompt_config.single_test_aggregator
     """
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_aggregator
-    
+
     system_prompt = render_prompt(prompt_template, **template_vars)
     return AggregatorNode(
         client=client,
@@ -408,4 +483,7 @@ def make_aggregator_node(
         response_model=TestCaseAssessment,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        is_final_output=True,
     )

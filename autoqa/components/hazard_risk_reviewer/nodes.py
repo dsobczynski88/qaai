@@ -23,7 +23,7 @@ from langgraph.types import Send
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.nodes import BaseLLMNode, BatchedLLMNode, StandardLLMNode
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from autoqa.core.cache import HazardCacheManager
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 from autoqa.prj_logger import ProjectLogger
 from autoqa.utils import render_prompt
@@ -166,11 +166,12 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
         hazard.hazard_id, has_traceability, num_requirements
     )
     
+    cache_mode = state.get("cache_mode", "partial")
     return [
-        Send("h1_evaluator", {"hazard": hazard}),
-        Send("h2_evaluator", {"hazard": hazard}),
-        Send("h3_evaluator", {"hazard": hazard}),
-        Send("h7_evaluator", {"hazard": hazard}),
+        Send("h1_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
+        Send("h2_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
+        Send("h3_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
+        Send("h7_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
     ]
 
 
@@ -191,19 +192,23 @@ def dispatch_hazard_evaluators_late(state: HazardReviewState) -> List[Send]:
     
     logger.debug("dispatch_hazard_evaluators_late: dispatching H4, H5 with %d requirement_reviews", len(requirement_reviews))
     
+    cache_mode = state.get("cache_mode", "partial")
+
     # Build state dict with optional summarized data
     h4_state = {
         "hazard": hazard,
         "requirement_reviews": requirement_reviews,
         "summarized_designs": summarized_designs,
+        "cache_mode": cache_mode,
     }
-    
+
     h5_state = {
         "hazard": hazard,
         "requirement_reviews": requirement_reviews,
         "summarized_user_needs": summarized_user_needs,
+        "cache_mode": cache_mode,
     }
-    
+
     return [
         Send("h4_evaluator", h4_state),
         Send("h5_evaluator", h5_state),
@@ -229,8 +234,9 @@ def dispatch_requirement_reviews(state: HazardReviewState) -> List[Send]:
         logger.warning("dispatch_requirement_reviews: no requirements in traceability, skipping fan-out")
         return []
     
+    cache_mode = state.get("cache_mode", "partial")
     return [
-        Send("requirement_reviewer", {"hazard": hazard, "requirement": req})
+        Send("requirement_reviewer", {"hazard": hazard, "requirement": req, "cache_mode": cache_mode})
         for req in requirements
     ]
 
@@ -251,7 +257,7 @@ class RequirementReviewerNode:
     def __init__(
         self,
         rtm_runnable: RTMReviewerRunnable,
-        cache_manager: Optional[HazardCacheManager] = None,
+        cache_manager: Optional[ReviewCacheManager] = None,
         rtm_prompt_version: str = "",
     ):
         self.rtm = rtm_runnable
@@ -268,9 +274,13 @@ class RequirementReviewerNode:
             return {"requirement_reviews": []}
 
         req_id = requirement.req_id
+        cache_mode = state.get("cache_mode", "partial")
+        cache_on = cache_mode != "off"
 
         # --- Tier 2/3: cache check (keyed on req_id, not hazard_id) ---
-        if self.cache_manager is not None and self.rtm_prompt_version:
+        # The blob captures the WHOLE RTM subgraph result (incl. synthesizer),
+        # so a hit means the test-suite review is "fully cached" for this req.
+        if self.cache_manager is not None and self.rtm_prompt_version and cache_on:
             cached = await self.cache_manager.get(req_id, self._NODE_NAME, self.rtm_prompt_version)
             if cached is not None:
                 try:
@@ -294,6 +304,9 @@ class RequirementReviewerNode:
         rtm_input = {
             "requirement": requirement,
             "test_cases": test_cases,
+            # Embedded RTM has no cache manager of its own (Option A), so this
+            # is a no-op for its internal nodes; passed for consistency.
+            "cache_mode": cache_mode,
         }
 
         # Pass design_docs to RTM sub-pipeline if available (from traceability)
@@ -329,14 +342,14 @@ class RequirementReviewerNode:
         )
 
         # --- Tier 2/3: write-through cache ---
-        if self.cache_manager is not None and self.rtm_prompt_version:
+        if self.cache_manager is not None and self.rtm_prompt_version and cache_on:
             prompt_tokens = getattr(tracker, "_total_prompt_tokens", 0) - tokens_before_prompt
             completion_tokens = (
                 getattr(tracker, "_total_completion_tokens", 0) - tokens_before_completion
             )
             try:
                 await self.cache_manager.set(
-                    hazard_id=req_id,
+                    entity_id=req_id,
                     node_name=self._NODE_NAME,
                     prompt_version=self.rtm_prompt_version,
                     result_dict=review.model_dump(),
@@ -499,7 +512,7 @@ class HazardEvaluatorNode(StandardLLMNode):
         model_kwargs: dict,
         dimension_code: str,
         required_fields: tuple,
-        cache_manager: Optional[HazardCacheManager] = None,
+        cache_manager: Optional[ReviewCacheManager] = None,
         prompt_version: str = "",
     ):
         super().__init__(client, model, HazardFinding, system_prompt, model_kwargs, cache_manager, prompt_version)
@@ -693,7 +706,10 @@ class _FinalAssessorNode(StandardLLMNode):
         entity_id = self._get_cache_entity_id(state)
 
         # --- Tier 2/3: cache check ---
-        if self.cache_manager is not None and self.prompt_version and entity_id:
+        # This is the graph's final output node: under "partial" caching
+        # _cache_read_allowed returns False so it always re-runs (fresh prose),
+        # while still writing through so a later "full" run can reuse it.
+        if self._cache_read_allowed(state) and entity_id:
             cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
             if cached is not None:
                 try:
@@ -722,11 +738,11 @@ class _FinalAssessorNode(StandardLLMNode):
             parsed = None
 
         # --- Tier 2/3: write-through cache (only when LLM succeeded) ---
-        if parsed is not None and self.cache_manager is not None and self.prompt_version and entity_id:
+        if parsed is not None and self._cache_write_allowed(state) and entity_id:
             usage = getattr(result, "usage", None)
             try:
                 await self.cache_manager.set(
-                    hazard_id=entity_id,
+                    entity_id=entity_id,
                     node_name=node_name,
                     prompt_version=self.prompt_version,
                     result_dict=parsed.model_dump(),
@@ -750,7 +766,7 @@ def _make_hazard_evaluator(
     prompt_template: str,
     dimension_code: str,
     required_fields: tuple,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> HazardEvaluatorNode:
     """Factory for generic HazardEvaluatorNode (H1-H5, H7)."""
@@ -763,7 +779,7 @@ def _make_hazard_evaluator(
         dimension_code=dimension_code,
         required_fields=required_fields,
         cache_manager=cache_manager,
-        prompt_version=HazardCacheManager.extract_prompt_version(prompt_template),
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -772,7 +788,7 @@ def _make_h6_evaluator(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> H6EvaluatorNode:
     """Factory for specialized H6EvaluatorNode."""
@@ -784,7 +800,7 @@ def _make_h6_evaluator(
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
-        prompt_version=HazardCacheManager.extract_prompt_version(prompt_template),
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -794,7 +810,7 @@ def make_hazard_evaluator_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> HazardEvaluatorNode:
     """Create a HazardEvaluatorNode for the given dimension (H1-H5, H7)."""
@@ -810,7 +826,7 @@ def make_h6_evaluator_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> H6EvaluatorNode:
     return _make_h6_evaluator(
@@ -825,7 +841,7 @@ def make_final_assessor_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> _FinalAssessorNode:
     system_prompt = render_prompt(prompt_template, **template_vars)
@@ -836,7 +852,8 @@ def make_final_assessor_node(
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
-        prompt_version=HazardCacheManager.extract_prompt_version(prompt_template),
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        is_final_output=True,
     )
 
 
@@ -845,7 +862,7 @@ def make_hazard_design_summarizer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> HazardDesignSummarizerNode:
     """Create a HazardDesignSummarizerNode with prompt loaded from Jinja2 template."""
@@ -857,7 +874,7 @@ def make_hazard_design_summarizer_node(
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
-        prompt_version=HazardCacheManager.extract_prompt_version(prompt_template),
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -866,7 +883,7 @@ def make_hazard_needs_summarizer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str,
-    cache_manager: Optional[HazardCacheManager] = None,
+    cache_manager: Optional[ReviewCacheManager] = None,
     **template_vars,
 ) -> HazardNeedsSummarizerNode:
     """Create a HazardNeedsSummarizerNode with prompt loaded from Jinja2 template."""
@@ -878,7 +895,7 @@ def make_hazard_needs_summarizer_node(
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
-        prompt_version=HazardCacheManager.extract_prompt_version(prompt_template),
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 

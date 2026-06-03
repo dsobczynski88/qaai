@@ -74,8 +74,9 @@ async def test_suite_review(
     Requires JAMA credentials configured in the server's .env.
     The thread_id for each requirement is derived from the FastAPI request ID.
     """
+    cache_mode = "partial" if body.use_cache else "off"
     return await _run_file_service(
-        service.run_from_baseline(body.baseline_id, request.state.request_id),
+        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode),
         "autoqa_rtm_review.html",
         request.state.request_id,
         "test-suite-review",
@@ -94,8 +95,9 @@ async def test_case_review(
     Requires JAMA credentials configured in the server's .env.
     The thread_id for each test case is derived from the FastAPI request ID.
     """
+    cache_mode = "partial" if body.use_cache else "off"
     return await _run_file_service(
-        service.run_from_baseline(body.baseline_id, request.state.request_id),
+        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode),
         "autoqa_tc_review.html",
         request.state.request_id,
         "test-case-review",
@@ -108,6 +110,7 @@ async def hazard_risk_review(
     project_name: str = Form(..., description="Project or product name"),
     file: UploadFile = File(..., description="SHA Excel file (.xlsx) containing the hazard table"),
     sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
+    use_cache: bool = Form(default=True, description="Reuse cached intermediate results (partial caching); disable to recompute from scratch"),
     service: HazardReviewService = Depends(get_hazard_service),
 ) -> FileResponse:
     """Upload an SHA Excel file and run the hazard risk review for every row.
@@ -127,6 +130,7 @@ async def hazard_risk_review(
             project_name=project_name,
             thread_id_prefix=request.state.request_id,
             sheet_name=sheet_name,
+            cache_mode="partial" if use_cache else "off",
         )
         return FileResponse(viewer_path, filename="autoqa_hazard_review.html", media_type="text/html")
     except ValueError as e:

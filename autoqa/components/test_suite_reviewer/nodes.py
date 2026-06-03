@@ -14,6 +14,7 @@ from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.utils import render_prompt
 from autoqa.prj_logger import ProjectLogger
 from autoqa.core.config import settings
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.components.shared.nodes import (
     BaseLLMNode,
     BatchedLLMNode,
@@ -46,6 +47,13 @@ class SummaryNode(BatchedLLMNode):
 
     def _validate_state(self, state: RTMReviewState) -> bool:
         return state.get("requirement") is not None and state.get("test_cases") is not None
+
+    def _get_cache_entity_id(self, state: RTMReviewState) -> Optional[str]:
+        requirement = state.get("requirement")
+        return getattr(requirement, "req_id", None) if requirement else None
+
+    def _restore_from_cache(self, cached: dict) -> list:
+        return [SummarizedTestCase.model_validate(d) for d in cached["result"]]
 
     def _get_items(self, state: RTMReviewState) -> list:
         return state.get("test_cases") or []
@@ -89,6 +97,13 @@ class DesignSummarizerNode(BatchedLLMNode):
     def _validate_state(self, state: RTMReviewState) -> bool:
         return state.get("requirement") is not None and bool(state.get("design_docs"))
 
+    def _get_cache_entity_id(self, state: RTMReviewState) -> Optional[str]:
+        requirement = state.get("requirement")
+        return getattr(requirement, "req_id", None) if requirement else None
+
+    def _restore_from_cache(self, cached: dict) -> list:
+        return [SummarizedDesignSpec.model_validate(d) for d in cached["result"]]
+
     def _get_items(self, state: RTMReviewState) -> list:
         return state.get("design_docs") or []
 
@@ -125,11 +140,13 @@ def dispatch_coverage(state: RTMReviewState) -> List[Send]:
     if not requirement or not decomposed or not test_suite:
         logger.warning("dispatch_coverage: incomplete state, skipping fan-out")
         return []
+    cache_mode = state.get("cache_mode", "partial")
     return [
         Send("spec_evaluator", {
             "requirement": requirement,
             "decomposed_spec": spec,
             "test_suite": test_suite,
+            "cache_mode": cache_mode,
         })
         for spec in decomposed.decomposed_specifications
     ]
@@ -150,6 +167,17 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
             state.get("test_suite") is not None,
         ))
 
+    def _get_cache_entity_id(self, state: Any) -> Optional[str]:
+        requirement = state.get("requirement")
+        return getattr(requirement, "req_id", None) if requirement else None
+
+    def _cache_node_name(self, state: Any) -> str:
+        # One file per spec under the requirement's folder — disambiguate by
+        # spec_id so parallel per-spec evaluations don't clobber one key.
+        spec = state.get("decomposed_spec")
+        spec_id = getattr(spec, "spec_id", "") if spec else ""
+        return f"singlespecevaluatornode_{spec_id}"
+
     async def __call__(self, state: Any) -> RTMReviewState:
         if not self._validate_state(state):
             logger.debug("%s: skipping — validation failed", self.__class__.__name__)
@@ -158,6 +186,18 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
         requirement = state["requirement"]
         spec = state["decomposed_spec"]
         test_suite = state["test_suite"]
+
+        entity_id = self._get_cache_entity_id(state)
+        node_name = self._cache_node_name(state)
+
+        # --- Tier 2/3: cache check ---
+        if self._cache_read_allowed(state) and entity_id:
+            cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+            if cached is not None:
+                try:
+                    return {"coverage_analysis": [EvaluatedSpec.model_validate(cached["result"])]}
+                except Exception as e:
+                    logger.warning("%s: cache restore failed, re-running — %s", self.__class__.__name__, e)
 
         payload = {
             "original_requirement": requirement.model_dump(),
@@ -176,7 +216,26 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
             **self.model_kwargs,
         )
         parsed = self._parse_llm_response(result, EvaluatedSpec, self.__class__.__name__)
-        return {"coverage_analysis": [parsed]} if parsed else {"coverage_analysis": []}
+        if not parsed:
+            return {"coverage_analysis": []}
+
+        # --- Tier 2/3: write-through cache ---
+        if self._cache_write_allowed(state) and entity_id:
+            usage = getattr(result, "usage", None)
+            try:
+                await self.cache_manager.set(
+                    entity_id=entity_id,
+                    node_name=node_name,
+                    prompt_version=self.prompt_version,
+                    result_dict=parsed.model_dump(),
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+                    model=self.model,
+                )
+            except Exception as e:
+                logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
+
+        return {"coverage_analysis": [parsed]}
 
 
 class SynthesizerNode(StandardLLMNode):
@@ -190,6 +249,10 @@ class SynthesizerNode(StandardLLMNode):
             state.get("test_suite") is not None,
             bool(coverage_analysis),
         ))
+
+    def _get_cache_entity_id(self, state: RTMReviewState) -> Optional[str]:
+        requirement = state.get("requirement")
+        return getattr(requirement, "req_id", None) if requirement else None
 
     def _build_payload(self, state: RTMReviewState) -> dict:
         requirement = state.get("requirement")
@@ -237,6 +300,7 @@ def make_summarizer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str = "summarizer/v4.0.0/template.jinja2",
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SummaryNode:
     """
@@ -253,6 +317,8 @@ def make_summarizer_node(
         response_model=response_model,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -261,6 +327,7 @@ def make_coverage_evaluator(
     model: str,
     model_kwargs: dict,
     prompt_template: str = "coverage_evaluator/v7.0.0/template.jinja2",
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SingleSpecEvaluatorNode:
     """
@@ -283,7 +350,9 @@ def make_coverage_evaluator(
         client=client,
         model=model,
         system_prompt=system_prompt,
-        model_kwargs=model_kwargs
+        model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
@@ -292,11 +361,15 @@ def make_synthesizer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str = "synthesizer/v8.0.0/template.jinja2",
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SynthesizerNode:
     """
     Create a SynthesizerNode (MoA-inspired) that synthesizes coverage evaluations
     into a single holistic assessment of requirement coverage.
+
+    This is the graph's FINAL output node: under "partial" caching it always
+    re-runs so the user gets a fresh assessment from cached interim results.
 
     Args:
         client: RateLimitOpenAIClient instance
@@ -313,7 +386,10 @@ def make_synthesizer_node(
         model=model,
         response_model=SynthesizedAssessment,
         system_prompt=system_prompt,
-        model_kwargs=model_kwargs
+        model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        is_final_output=True,
     )
 
 
@@ -322,6 +398,7 @@ def make_design_summarizer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str = "design_summarizer/v1.0.0/template.jinja2",
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> DesignSummarizerNode:
     """Create a DesignSummarizerNode with prompt loaded from Jinja2 template.
@@ -338,11 +415,13 @@ def make_design_summarizer_node(
     """
     system_prompt = render_prompt(prompt_template, **template_vars)
     response_model = SummarizedDesignSpecList
-    
+
     return DesignSummarizerNode(
         client=client,
         model=model,
         response_model=response_model,
         system_prompt=system_prompt,
-        model_kwargs=model_kwargs
+        model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
