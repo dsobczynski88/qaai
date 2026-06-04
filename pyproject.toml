@@ -52,6 +52,9 @@ python_classes = []
 [tool.uv.sources]
 pyjama = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git" }
 
+[project.scripts]
+autoqa-api = "autoqa.api.run:main"
+
 # Declaring a build system allows uv to install your project editably during sync.
 # This does not publish anything by itself; it just makes local imports work cleanly.
 [build-system]
