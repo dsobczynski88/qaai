@@ -78,8 +78,18 @@ class ProjectLogger:
         self._log_file = new_log_file
 
     def config(self):
-        # create handlers
-        file_handler = logging.FileHandler(self._log_file)
+        # create handlers. UTF-8 so non-ASCII log content (e.g. "→", em-dashes,
+        # LLM/medical text) doesn't crash on Windows' default cp1252 codec.
+        file_handler = logging.FileHandler(self._log_file, encoding="utf-8")
+
+        # Make the console stream UTF-8-safe before wrapping it. reconfigure is
+        # available on TextIOWrapper (py3.7+); guard for replaced/captured streams
+        # that lack it. errors="replace" guarantees the handler can never raise a
+        # UnicodeEncodeError even on a terminal that can't render a glyph.
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
         console_handler = logging.StreamHandler(sys.stdout)
 
         # set logging levels
