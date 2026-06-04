@@ -53,9 +53,14 @@ class RTMReviewService:
         )
 
     async def run_from_baseline(
-        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial"
+        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
+        test_mode: Optional[bool] = None,
     ) -> str:
-        """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path."""
+        """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path.
+
+        test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
+        with no live API calls when True.
+        """
         from autoqa.components.shared.data_integration import (
             DataIntegrationNode,
             PyJamaRequest,
@@ -68,9 +73,14 @@ class RTMReviewService:
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
 
-        self._logger.info("Starting batch RTM review for baseline %s", baseline_id)
+        self._logger.info(
+            "Starting batch RTM review for baseline %s (test_mode=%s)", baseline_id, test_mode
+        )
 
-        node = DataIntegrationNode(pyjama_config=self.pyjama_config)
+        cfg = self.pyjama_config
+        if cfg is not None and test_mode is not None:
+            cfg = cfg.model_copy(update={"test_mode": test_mode})
+        node = DataIntegrationNode(pyjama_config=cfg)
         result = await node({
             "pyjama_request": PyJamaRequest(
                 baseline_id=baseline_id,
@@ -220,15 +230,25 @@ class HazardReviewService:
         thread_id_prefix: str,
         sheet_name: str = "SHA Table",
         cache_mode: str = "partial",
+        test_mode: Optional[bool] = None,
     ) -> str:
         """Parse an uploaded SHA Excel file and run the hazard graph for every row.
 
-        Runs with Excel-derived data only (no JAMA traceability).
+        Per row, the GIDs extracted into ``row_specific_controls_references`` plus
+        the project name drive a JAMA ``bidirectional_trace`` fetch, which the
+        graph's data_integration + transform nodes merge onto the hazard's
+        ``requirements_traceability``. Rows with no GIDs fall back to the
+        Excel-only (empty traceability) path. ``test_mode`` (None ⇒ config
+        default) runs that fetch cache-only with no live JAMA API calls.
         """
         from autoqa.viewer.generator import write_viewer_hz
         from autoqa.core.config import settings
+        from autoqa.components.shared.data_integration import PYJAMA_AVAILABLE
 
-        self._logger.info("Starting upload hazard review: %s (project=%s)", filename, project_name)
+        self._logger.info(
+            "Starting upload hazard review: %s (project=%s, test_mode=%s)",
+            filename, project_name, test_mode,
+        )
         hazard_rows = self._parse_uploaded_excel(file_bytes, filename, sheet_name)
 
         run_dir = Path(settings.log_file_path).parent
@@ -243,9 +263,25 @@ class HazardReviewService:
                 else f"{thread_id_prefix}-{i:03d}"
             )
             config = {"configurable": {"thread_id": thread_id}}
-            final_state = await self.graph.graph.ainvoke(
-                {"hazard": hazard_row, "cache_mode": cache_mode}, config
-            )
+
+            graph_input = {"hazard": hazard_row, "cache_mode": cache_mode}
+            if test_mode is not None:
+                graph_input["pyjama_test_mode"] = test_mode
+
+            # Build a JAMA bidirectional_trace request from this row's GIDs so the
+            # graph fetches and merges traceability. Skip when PyJama is missing or
+            # the row has no control references (Excel-only fallback for that row).
+            identifiers = hazard_row.row_specific_controls_references or []
+            if PYJAMA_AVAILABLE and project_name and identifiers:
+                graph_input["pyjama_request"] = self._build_bidirectional_request(
+                    project_name, identifiers
+                )
+                self._logger.info(
+                    "Hazard %s: bidirectional_trace fetch for %d identifiers",
+                    hazard_row.hazard_id, len(identifiers),
+                )
+
+            final_state = await self.graph.graph.ainvoke(graph_input, config)
             self._logger.info(
                 "[%d/%d] Hazard review complete for %s", i + 1, len(hazard_rows), hazard_row.hazard_id
             )
@@ -287,9 +323,14 @@ class TestCaseReviewService:
         )
 
     async def run_from_baseline(
-        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial"
+        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
+        test_mode: Optional[bool] = None,
     ) -> str:
-        """Fetch a JAMA baseline, run the TC graph for every test case, return viewer_tc.html path."""
+        """Fetch a JAMA baseline, run the TC graph for every test case, return viewer_tc.html path.
+
+        test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
+        with no live API calls when True.
+        """
         from autoqa.components.shared.data_integration import (
             DataIntegrationNode,
             PyJamaRequest,
@@ -302,9 +343,14 @@ class TestCaseReviewService:
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
 
-        self._logger.info("Starting batch TC review for baseline %s", baseline_id)
+        self._logger.info(
+            "Starting batch TC review for baseline %s (test_mode=%s)", baseline_id, test_mode
+        )
 
-        node = DataIntegrationNode(pyjama_config=self.pyjama_config)
+        cfg = self.pyjama_config
+        if cfg is not None and test_mode is not None:
+            cfg = cfg.model_copy(update={"test_mode": test_mode})
+        node = DataIntegrationNode(pyjama_config=cfg)
         result = await node({
             "pyjama_request": PyJamaRequest(
                 baseline_id=baseline_id,

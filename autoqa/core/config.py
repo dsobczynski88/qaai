@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     jama_client_id: Optional[str] = Field(default=None, alias='JAMA_CLIENT_ID')
     jama_client_secret: Optional[str] = Field(default=None, alias='JAMA_CLIENT_SECRET')
 
+    # When True, the PyJama data source runs strictly from the disk cache: no
+    # live JAMA API calls are made and invalid/mock credentials are tolerated.
+    # Acts as the server-wide default; the API "test mode" toggle overrides it
+    # per request. See PyJamaNodeConfig.test_mode in the pyjama package.
+    pyjama_test_mode: bool = Field(default=False, alias='PYJAMA_TEST_MODE')
+
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
     

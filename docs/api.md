@@ -73,12 +73,17 @@ The hazard reviewer works with just an Excel file—no JAMA credentials required
 ### Via curl
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/hazard-review/from-excel-upload \
-  -F "thread_id_prefix=test-upload" \
+curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
   -F "project_name=Test Project" \
   -F "file=@tests/fixtures/external/software_hazard_analysis.xlsx" \
+  -F "sheet_name=SHA Table" \
+  -F "use_cache=true" \
   --output autoqa_hazard_review.html
 ```
+
+The multipart form fields are `project_name` (required), `file` (required, `.xlsx`/`.xls`),
+`sheet_name` (default `SHA Table`), and `use_cache` (default `true` — partial caching; set
+`false` to recompute from scratch). The per-row thread ID is derived from the request ID server-side.
 
 Then open the downloaded `autoqa_hazard_review.html` in a browser to see the viewer.
 
@@ -86,8 +91,8 @@ Then open the downloaded `autoqa_hazard_review.html` in a browser to see the vie
 
 1. Click the **"Software Hazard Analysis"** card
 2. Enter a project name (e.g., "Test Project")
-3. Enter a thread ID prefix (e.g., "test-upload")
-4. Drag and drop `tests/fixtures/external/software_hazard_analysis.xlsx` onto the upload zone
+3. Drag and drop `tests/fixtures/external/software_hazard_analysis.xlsx` onto the upload zone
+4. Leave **"Use cached results"** checked (or uncheck to recompute from scratch)
 5. Click **"Run Review"** → wait for the spinner
 6. Once complete, click the download link to save the HTML viewer
 
@@ -114,11 +119,11 @@ If JAMA is not configured, the endpoints return:
 ### RTM Review from Baseline
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/review/from-baseline \
+curl -X POST http://localhost:8000/api/v1/test-suite-review \
   -H "Content-Type: application/json" \
   -d '{
-    "thread_id_prefix": "test-baseline",
-    "baseline_id": "BASE-12345"
+    "baseline_id": "BASE-12345",
+    "use_cache": true
   }' \
   --output autoqa_rtm_review.html
 ```
@@ -126,16 +131,18 @@ curl -X POST http://localhost:8000/api/v1/review/from-baseline \
 ### Test Case Review from Baseline
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/test-case-review/from-baseline \
+curl -X POST http://localhost:8000/api/v1/test-case-review \
   -H "Content-Type: application/json" \
   -d '{
-    "thread_id_prefix": "test-tc-baseline",
-    "baseline_id": "BASE-67890"
+    "baseline_id": "BASE-67890",
+    "use_cache": true
   }' \
   --output autoqa_tc_review.html
 ```
 
-Replace `BASE-12345` and `BASE-67890` with actual JAMA baseline IDs.
+Replace `BASE-12345` and `BASE-67890` with actual JAMA baseline IDs. Both endpoints accept a
+`BaselineRequest` body of `{baseline_id, use_cache}` — `use_cache` (default `true`) selects partial
+caching vs a full recompute. The per-record thread ID is derived from the request ID server-side.
 
 ---
 
@@ -183,9 +190,9 @@ Real-time logs appear in the console and are also written to `logs/run-<timestam
 
 Log entries include request IDs for tracing concurrent requests:
 ```
-Request started: POST /api/v1/hazard-review/from-excel-upload
+Request started: POST /api/v1/hazard-risk-review
 ...
-Request completed: POST /api/v1/hazard-review/from-excel-upload - 200
+Request completed: POST /api/v1/hazard-risk-review - 200
 ```
 
 ### Inspect Network Activity

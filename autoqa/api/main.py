@@ -21,8 +21,15 @@ logger = logging.getLogger("autoqa.api.main")
 
 
 def build_pyjama_config():
-    """Build optional PyJama config from settings."""
-    if not settings.jama_host_address:
+    """Build optional PyJama config from settings.
+
+    test_mode (cache-only, no live JAMA) defaults to settings.pyjama_test_mode
+    (PYJAMA_TEST_MODE) and is the server-wide default; the API "test mode" toggle
+    overrides it per request. In test_mode credentials are optional, so a config
+    is still built even when JAMA_HOST_ADDRESS is unset.
+    """
+    test_mode = settings.pyjama_test_mode
+    if not settings.jama_host_address and not test_mode:
         return None
 
     try:
@@ -32,8 +39,12 @@ def build_pyjama_config():
             host_address=settings.jama_host_address,
             client_id=settings.jama_client_id,
             client_secret=settings.jama_client_secret,
+            test_mode=test_mode,
         )
-        logger.info("PyJama config initialized (host: %s)", settings.jama_host_address)
+        logger.info(
+            "PyJama config initialized (host: %s, test_mode: %s)",
+            settings.jama_host_address, test_mode,
+        )
         return pyjama_config
     except Exception as exc:
         logger.warning("Could not initialize PyJama config: %s", exc)

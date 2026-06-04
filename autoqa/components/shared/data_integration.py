@@ -45,6 +45,7 @@ try:
         PyJamaNodeConfig,
         PyJamaRequest,
     )
+    from pyjama.utils.cache_manager import CacheMode
     from pyjama.langgraph.transforms import (
         transform_test_suite_review_to_state as _pyjama_transform_test_suite,
         transform_test_case_review_to_state as _pyjama_transform_test_case,
@@ -124,50 +125,72 @@ class DataIntegrationNode:
                           JAMA_CLIENT_SECRET).
         """
         self.pyjama_config = pyjama_config
-        self._pyjama_node = None
-        
+        # PyJamaDataSourceNodes cached per effective test_mode override
+        # (None / True / False), since a per-call override must use a config
+        # whose test_mode matches.
+        self._pyjama_nodes: Dict[Any, "PyJamaDataSourceNode"] = {}
+
         if not PYJAMA_AVAILABLE:
             logger.warning(
                 "PyJama not available. JAMA baseline fetching will be disabled. "
                 "Install pyjama to enable: pip install pyjama"
             )
-    
-    def _initialize_pyjama_node(self):
-        """Lazy initialization of PyJama node from config or environment."""
+
+    def _build_config(self, test_mode_override: Optional[bool]) -> "PyJamaNodeConfig":
+        """Resolve the effective PyJamaNodeConfig, applying a per-call test_mode override.
+
+        When a base config was provided, a non-None override is applied via
+        model_copy. Otherwise the config is built from environment variables
+        (JAMA_* + PYJAMA_TEST_MODE); in test_mode credentials are optional.
+        """
+        config = self.pyjama_config
+
+        if config is None:
+            host = os.getenv("JAMA_HOST_ADDRESS")
+            client_id = os.getenv("JAMA_CLIENT_ID")
+            client_secret = os.getenv("JAMA_CLIENT_SECRET")
+            env_test_mode = os.getenv("PYJAMA_TEST_MODE", "false").lower() == "true"
+            test_mode = test_mode_override if test_mode_override is not None else env_test_mode
+
+            # Live (non-test) fetching needs full credentials; test_mode is cache-only.
+            if not test_mode and not all([host, client_id, client_secret]):
+                raise ValueError(
+                    "PyJama config not provided and environment variables not set. "
+                    "Either pass pyjama_config to DataIntegrationNode or set: "
+                    "JAMA_HOST_ADDRESS, JAMA_CLIENT_ID, JAMA_CLIENT_SECRET (or enable test_mode)."
+                )
+
+            return PyJamaNodeConfig(
+                host_address=host,
+                client_id=client_id,
+                client_secret=client_secret,
+                max_concurrent=100,
+                cache_mode=CacheMode.USE,  # OFF / USE / REFRESH
+                test_mode=test_mode,
+            )
+
+        if test_mode_override is not None and test_mode_override != config.test_mode:
+            config = config.model_copy(update={"test_mode": test_mode_override})
+        return config
+
+    def _get_pyjama_node(self, test_mode_override: Optional[bool] = None) -> "PyJamaDataSourceNode":
+        """Lazily build (and cache) the PyJama node for the effective test_mode."""
         if not PYJAMA_AVAILABLE:
             raise RuntimeError(
                 "PyJama is not installed. Cannot fetch from JAMA baseline. "
                 "Install pyjama: pip install pyjama"
             )
-        
-        if self._pyjama_node is not None:
-            return  # Already initialized
-        
-        config = self.pyjama_config
-        
-        # Fallback to environment variables if no config provided
-        if config is None:
-            host = os.getenv("JAMA_HOST_ADDRESS")
-            client_id = os.getenv("JAMA_CLIENT_ID")
-            client_secret = os.getenv("JAMA_CLIENT_SECRET")
-            
-            if not all([host, client_id, client_secret]):
-                raise ValueError(
-                    "PyJama config not provided and environment variables not set. "
-                    "Either pass pyjama_config to DataIntegrationNode or set: "
-                    "JAMA_HOST_ADDRESS, JAMA_CLIENT_ID, JAMA_CLIENT_SECRET"
-                )
-            
-            config = PyJamaNodeConfig(
-                host_address=host,
-                client_id=client_id,
-                client_secret=client_secret,
+
+        node = self._pyjama_nodes.get(test_mode_override)
+        if node is None:
+            config = self._build_config(test_mode_override)
+            node = PyJamaDataSourceNode(config)
+            self._pyjama_nodes[test_mode_override] = node
+            logger.info(
+                "PyJama node initialized (test_mode=%s)", config.test_mode
             )
-            logger.info("Initialized PyJama config from environment variables")
-        
-        self._pyjama_node = PyJamaDataSourceNode(config)
-        logger.info("PyJama node initialized successfully")
-    
+        return node
+
     async def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute the node: conditionally fetch from JAMA or pass through.
@@ -184,24 +207,25 @@ class DataIntegrationNode:
             Exception: If JAMA API call fails
         """
         pyjama_request = state.get("pyjama_request")
-        
+
         if pyjama_request is None:
             # Local mode: data already in state, no-op
             logger.debug("Local mode: pyjama_request not present, skipping JAMA fetch")
             return {}
-        
-        # JAMA mode: fetch from baseline
+
+        # JAMA mode: fetch from baseline. A per-call test_mode override threaded
+        # through graph state (pyjama_test_mode) selects cache-only behaviour.
+        test_mode_override = state.get("pyjama_test_mode")
         logger.info(
-            "JAMA mode: fetching data for request_type=%s",
-            pyjama_request.request_type if hasattr(pyjama_request, 'request_type') else 'unknown'
+            "JAMA mode: fetching data for request_type=%s (test_mode=%s)",
+            pyjama_request.request_type if hasattr(pyjama_request, 'request_type') else 'unknown',
+            test_mode_override,
         )
-        
-        # Lazy init PyJama node
-        self._initialize_pyjama_node()
-        
-        # Delegate to PyJama node
+
+        # Lazy init PyJama node for the effective test_mode, then delegate.
+        pyjama_node = self._get_pyjama_node(test_mode_override)
         try:
-            result = await self._pyjama_node(state)
+            result = await pyjama_node(state)
             logger.info(
                 "JAMA fetch successful: %d items retrieved",
                 len(result.get("jama_data", []))

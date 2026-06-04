@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from autoqa.api.schemas import BaselineRequest
 from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
+from autoqa.core.config import settings
 
 logger = logging.getLogger("autoqa.api.routes")
 
@@ -52,10 +53,10 @@ async def health_check(request: Request) -> dict[str, Any]:
         }
         all_available = all(s == "available" for s in services_status.values())
         if all_available:
-            return {"status": "healthy", "version": "0.2.0", "services": services_status}
+            return {"status": "healthy", "version": "0.1.0", "services": services_status}
         return JSONResponse(
             status_code=503,
-            content={"status": "degraded", "version": "0.2.0", "services": services_status},
+            content={"status": "degraded", "version": "0.1.0", "services": services_status},
         )
     except Exception as e:
         logger.error("Health check failed: %s", e, exc_info=True)
@@ -75,8 +76,9 @@ async def test_suite_review(
     The thread_id for each requirement is derived from the FastAPI request ID.
     """
     cache_mode = "partial" if body.use_cache else "off"
+    test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
     return await _run_file_service(
-        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode),
+        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode, test_mode),
         "autoqa_rtm_review.html",
         request.state.request_id,
         "test-suite-review",
@@ -96,8 +98,9 @@ async def test_case_review(
     The thread_id for each test case is derived from the FastAPI request ID.
     """
     cache_mode = "partial" if body.use_cache else "off"
+    test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
     return await _run_file_service(
-        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode),
+        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode, test_mode),
         "autoqa_tc_review.html",
         request.state.request_id,
         "test-case-review",
@@ -111,17 +114,20 @@ async def hazard_risk_review(
     file: UploadFile = File(..., description="SHA Excel file (.xlsx) containing the hazard table"),
     sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
     use_cache: bool = Form(default=True, description="Reuse cached intermediate results (partial caching); disable to recompute from scratch"),
+    test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
     service: HazardReviewService = Depends(get_hazard_service),
 ) -> FileResponse:
     """Upload an SHA Excel file and run the hazard risk review for every row.
 
     Returns a self-contained viewer_hz.html with H1-H7 rubric results.
-    Runs with Excel-derived data only (no JAMA traceability).
+    Requirement IDs (GIDs) extracted from the Excel rows plus the project name
+    drive a JAMA bidirectional_trace fetch to assemble traceability.
     The thread_id for each hazard row is derived from the FastAPI request ID.
     """
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Uploaded file must be an Excel file (.xlsx or .xls)")
 
+    effective_test_mode = test_mode if test_mode is not None else settings.pyjama_test_mode
     try:
         file_bytes = await file.read()
         viewer_path = await service.run_from_excel_upload(
@@ -131,6 +137,7 @@ async def hazard_risk_review(
             thread_id_prefix=request.state.request_id,
             sheet_name=sheet_name,
             cache_mode="partial" if use_cache else "off",
+            test_mode=effective_test_mode,
         )
         return FileResponse(viewer_path, filename="autoqa_hazard_review.html", media_type="text/html")
     except ValueError as e:
