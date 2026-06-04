@@ -14,8 +14,20 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from autoqa.core.telemetry import TokenUsageTracker
 
-# Apply nest_asyncio to allow nested event loops
-nest_asyncio.apply()
+# Apply nest_asyncio to allow nested event loops, but only if not using uvloop.
+# uvloop (used by uvicorn) doesn't support nest_asyncio patching, which is fine
+# because uvicorn manages the event loop for us in that context.
+try:
+    nest_asyncio.apply()
+    logger = logging.getLogger(__name__)
+    logger.debug("nest_asyncio applied successfully")
+except ValueError as e:
+    # uvloop is being used, which doesn't support nest_asyncio patching
+    if "Can't patch loop of type" in str(e):
+        logger = logging.getLogger(__name__)
+        logger.debug("uvloop detected; skipping nest_asyncio (not needed in uvicorn context)")
+    else:
+        raise
 
 # Set event loop
 loop =  asyncio.SelectorEventLoop() # asyncio.ProactorEventLoop()

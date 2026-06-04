@@ -1,5 +1,21 @@
 #!/bin/bash
 
+# Load environment variables from .env file if it exists
+if [ -f ".env" ]; then
+    echo "📦 Loading environment variables from .env"
+    set -a  # Mark all newly defined variables as exported
+    source .env
+    set +a  # Turn off automatic export
+    
+    # Debug: verify key variables are set
+    echo "✓ Loaded env variables:"
+    echo "  - API_KEY: ${API_KEY:0:20}..." 
+    echo "  - API_MODEL: $API_MODEL"
+else
+    echo "⚠️  Warning: .env file not found"
+    exit 1
+fi
+
 # Detect if running on JupyterHub
 if [ -n "$JUPYTERHUB_USER" ]; then
     echo "🚀 Detected JupyterHub environment"

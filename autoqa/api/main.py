@@ -1,6 +1,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,8 @@ from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
+from autoqa.core.telemetry import TokenUsageTracker
+from autoqa.core.logging_config import create_timestamped_run_directory, setup_logging
 
 
 logger = logging.getLogger("autoqa.api.main")
@@ -53,10 +56,21 @@ def build_pyjama_config():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize telemetry tracker before client
+    telemetry_tracker = TokenUsageTracker(
+        file_path=settings.telemetry_file_path,
+        input_cost_per_million=settings.token_cost_input_per_m,
+        output_cost_per_million=settings.token_cost_output_per_m,
+    )
+    logger.info("Telemetry tracker initialized (file: %s)", settings.telemetry_file_path)
+
+    # Initialize OpenAI client with all required parameters
     client = RateLimitOpenAIClient(
         api_key=settings.openai_api_key,
+        base_url=settings.url,
         max_requests_per_minute=settings.max_requests_per_minute,
         max_tokens_per_minute=settings.max_tokens_per_minute,
+        telemetry_tracker=telemetry_tracker,
     )
 
     # max_tokens handles large outputs (100+ test cases) without truncation.
@@ -64,6 +78,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Initializing AutoQA services...")
     logger.info("Model: %s", settings.model)
+    logger.info("API Base URL: %s", settings.url or "default (OpenAI)")
     logger.info("Max requests per minute: %s", settings.max_requests_per_minute)
     logger.info("Max tokens per minute: %s", settings.max_tokens_per_minute)
 
@@ -77,7 +92,7 @@ async def lifespan(app: FastAPI):
         cache_manager = ReviewCacheManager(
             cache_dir=settings.cache_dir,
             redis_url=settings.redis_url,
-            telemetry_tracker=getattr(client, "telemetry_tracker", None),
+            telemetry_tracker=telemetry_tracker,
         )
         logger.info("Review cache enabled (dir: %s)", settings.cache_dir)
 
@@ -119,10 +134,19 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down AutoQA services...")
+    telemetry_tracker.log_summary()
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    # Initialize logging FIRST, before anything else
+    run_dir = create_timestamped_run_directory(base_logs_dir="./logs")
+    setup_logging(run_dir)
+    
+    # Now get logger after logging is configured
+    startup_logger = logging.getLogger("autoqa.api.main")
+    startup_logger.info("Application startup initiated")
+    
     environment = os.getenv("ENVIRONMENT", "development")
     is_production = environment == "production"
 
@@ -133,6 +157,9 @@ def create_app() -> FastAPI:
         docs_url="/docs" if not is_production else None,
         redoc_url="/redoc" if not is_production else None,
     )
+    
+    # Store run directory in app state for reference
+    app.state.run_dir = run_dir
 
     app.middleware("http")(log_requests)
     app.middleware("http")(limit_request_size)

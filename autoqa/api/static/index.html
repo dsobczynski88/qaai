@@ -656,6 +656,33 @@
 </div>
 
 <script>
+  /**
+   * Detect the root path based on the current URL.
+   * 
+   * Examples:
+   * - JupyterHub: https://aihub-ohio.aws.baxter.com/user/john/proxy/8000/ → /user/john/proxy/8000
+   * - Local: http://localhost:8000/ → ''
+   * - VSCode: https://aihub-ohio.aws.baxter.com/user/john/vscode/proxy/8000/ → /user/john/vscode/proxy/8000
+   */
+  function detectRootPath() {
+    const pathname = window.location.pathname;
+    
+    // Match JupyterHub patterns: /user/{user}/proxy/{port} or /user/{user}/vscode/proxy/{port}
+    const jupyterHubMatch = pathname.match(/^(\/user\/[^/]+\/(vscode\/)?proxy\/\d+)(\/|$)/);
+    if (jupyterHubMatch) {
+      return jupyterHubMatch[1];
+    }
+    
+    // Default to empty string for local/direct access
+    return '';
+  }
+
+  // Global constant used by all fetch() calls
+  const ROOT_PATH = detectRootPath();
+  
+  // Log the detected path for debugging
+  console.log('AutoQA detected root path:', ROOT_PATH || '(local mode)');
+
   let activeCard = null;
 
   function selectCard(id) {
@@ -726,7 +753,7 @@
     setButtons(true);
 
     try {
-      const resp = await fetch(endpoint, {
+      const resp = await fetch(ROOT_PATH + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ baseline_id: baseline, use_cache: useCache, test_mode: testMode }),
@@ -771,7 +798,7 @@
       form.append('use_cache', useCache);
       form.append('test_mode', testMode);
 
-      const resp = await fetch('/api/v1/hazard-risk-review', {
+      const resp = await fetch(ROOT_PATH + '/api/v1/hazard-risk-review', {
         method: 'POST',
         body: form,
       });

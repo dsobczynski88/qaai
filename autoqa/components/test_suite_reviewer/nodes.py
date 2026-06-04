@@ -90,12 +90,20 @@ class SummaryNode(BatchedLLMNode):
 
 
 class DesignSummarizerNode(BatchedLLMNode):
-    """Summarizes design documents into structured format with batching support."""
+    """Summarizes design documents into structured format with batching support.
+    
+    Note: This node is optional — it only runs if design_docs are present in the state.
+    If no design documents are available for a requirement, the node gracefully skips
+    and returns an empty summarized_designs result.
+    """
 
     BATCH_SIZE = 5
 
     def _validate_state(self, state: RTMReviewState) -> bool:
-        return state.get("requirement") is not None and bool(state.get("design_docs"))
+        # Only require a requirement; design_docs are optional.
+        # If design_docs are missing or empty, _get_items() will return [],
+        # triggering the standard BatchedLLMNode empty-items handling.
+        return state.get("requirement") is not None
 
     def _get_cache_entity_id(self, state: RTMReviewState) -> Optional[str]:
         requirement = state.get("requirement")
@@ -105,7 +113,14 @@ class DesignSummarizerNode(BatchedLLMNode):
         return [SummarizedDesignSpec.model_validate(d) for d in cached["result"]]
 
     def _get_items(self, state: RTMReviewState) -> list:
-        return state.get("design_docs") or []
+        items = state.get("design_docs") or []
+        if not items:
+            logger.info(
+                "%s: no design documents for requirement %s (optional)",
+                self.__class__.__name__,
+                getattr(state.get("requirement"), "req_id", "unknown")
+            )
+        return items
 
     def _build_batch_payload(self, state: RTMReviewState, batch: List) -> dict:
         requirement = state["requirement"]
@@ -125,7 +140,10 @@ class DesignSummarizerNode(BatchedLLMNode):
         return {"summarized_designs": None}
 
     def _build_result(self, state: RTMReviewState, all_summaries: list) -> dict:
-        return {"summarized_designs": all_summaries}
+        # Only include summarized_designs if we actually have summaries.
+        # If design_docs were empty or missing, all_summaries will be empty
+        # and we return None (consistent with _get_skip_response).
+        return {"summarized_designs": all_summaries if all_summaries else None}
 
 
 def dispatch_coverage(state: RTMReviewState) -> List[Send]:
