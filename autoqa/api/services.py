@@ -146,7 +146,40 @@ class HazardReviewService:
             checkpointer=MemorySaver(),
             rtm_runnable=rtm_runnable,
             cache_manager=cache_manager,
+            pyjama_config=pyjama_config,
         )
+
+    @staticmethod
+    def _build_bidirectional_request(project_name: str, identifiers: List[str]):
+        """Build a forward-looking bidirectional_trace PyJamaRequest.
+
+        Aligns the hazard reviewer with the pyjama bidirectional_trace example:
+        the hazard row's control references become the JAMA identifiers, and the
+        graph's data_integration + transform nodes fetch and merge the
+        per-requirement traceability onto the hazard.
+
+        The installed pyjama 1.0.0 does NOT expose request_type
+        "bidirectional_trace" (its PyJamaRequest Literal only allows
+        test_suite_review / test_case_review / hierarchical_trace), so this is
+        capability-gated: it raises a clear error until pyjama is upgraded. It is
+        never reached from the default Excel flow (run_from_excel_upload).
+        """
+        from autoqa.components.shared.data_integration import PyJamaRequest, PYJAMA_AVAILABLE
+
+        if not PYJAMA_AVAILABLE or PyJamaRequest is None:
+            raise ValueError("PyJama is not installed — bidirectional_trace fetch unavailable.")
+        try:
+            return PyJamaRequest(
+                request_type="bidirectional_trace",
+                project_name=project_name,
+                identifiers=identifiers,
+            )
+        except Exception as e:  # ValidationError on installed pyjama 1.0.0
+            raise ValueError(
+                "request_type='bidirectional_trace' is not supported by the installed "
+                "pyjama version. Upgrade pyjama-fastapi to a release that exposes "
+                f"bidirectional_trace to enable JAMA-sourced hazard traceability. ({e})"
+            ) from e
 
     def _parse_uploaded_excel(
         self, file_bytes: bytes, filename: str, sheet_name: str

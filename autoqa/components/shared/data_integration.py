@@ -28,6 +28,7 @@ try:
         HazardPackageFromExcel,
         HazardRowFromExcel,
         HazardRowWithTraceMatrix,
+        HazardTraceMatrix,
     )
     HAZARD_MODELS_AVAILABLE = True
 except ImportError:
@@ -35,6 +36,7 @@ except ImportError:
     HazardPackageFromExcel = None
     HazardRowFromExcel = None
     HazardRowWithTraceMatrix = None
+    HazardTraceMatrix = None
 
 # Re-export PyJama classes for convenience
 try:
@@ -68,8 +70,10 @@ __all__ = [
     "transform_test_suite_review_to_state",
     "transform_test_case_review_to_state",
     "transform_hazard_record_to_state",
+    "transform_bidirectional_trace_to_state",
     "make_transform_node_test_suite_review",
     "make_transform_node_test_case_review",
+    "make_transform_node_bidirectional_trace",
     "PYJAMA_AVAILABLE",
 ]
 
@@ -468,6 +472,170 @@ def make_transform_node_test_suite_review():
 
         logger.debug("Local mode: skipping JAMA transform")
         return {}
+
+    return transform
+
+
+def transform_bidirectional_trace_to_state(
+    jama_data: List[Dict[str, Any]]
+) -> "HazardTraceMatrix":
+    """
+    Aggregate JAMA bidirectional_trace data into a single HazardTraceMatrix.
+
+    The bidirectional_trace request (see the pyjama-fastapi
+    bidirectional_trace example) returns one entry per requirement, each with
+    four keys: ``requirement``, ``system_requirements``, ``test_cases``, and
+    ``design_docs``. The hazard reviewer evaluates ONE hazard with MANY traced
+    requirements, so unlike the per-requirement / per-test-case transforms this
+    one collapses every entry into a single HazardTraceMatrix bundling all
+    traced artifacts (deduplicated).
+
+    This mirrors the accumulation logic of
+    hazard_risk_reviewer.loader.merge_hazard_with_pyjama_traceability, but
+    iterates over the already-filtered bidirectional response (the JAMA fetch
+    only returns the requested identifiers) rather than a row-id lookup.
+
+    Note: ``request_type="bidirectional_trace"`` is not exposed by the installed
+    pyjama 1.0.0 (its PyJamaRequest Literal only allows test_suite_review /
+    test_case_review / hierarchical_trace). This transform deliberately keys off
+    the SHAPE of ``jama_data``, never off request_type, so it is forward
+    compatible: it works as soon as a pyjama version emitting this shape is
+    installed, and never raises on the current version.
+
+    Args:
+        jama_data: Raw bidirectional_trace response (list of per-requirement dicts).
+
+    Returns:
+        A single HazardTraceMatrix with deduplicated requirements, test_cases,
+        design_docs, system_requirements, and flattened user_needs. Returns an
+        empty HazardTraceMatrix on empty/invalid input (never raises).
+    """
+    if not HAZARD_MODELS_AVAILABLE or HazardTraceMatrix is None:
+        raise RuntimeError(
+            "Hazard models unavailable — cannot build HazardTraceMatrix from JAMA data."
+        )
+
+    from autoqa.components.shared.core import Requirement, TestCase, DesignDocument
+
+    requirements: List[Any] = []
+    test_cases: List[Any] = []
+    design_docs: List[Any] = []
+    system_requirements: List[Any] = []
+    user_needs: List[Any] = []
+
+    for entry in jama_data or []:
+        if not isinstance(entry, dict):
+            continue
+
+        # Requirement (one per entry)
+        req_data = entry.get("requirement")
+        if isinstance(req_data, dict):
+            try:
+                req_obj = Requirement(**req_data)
+                if req_obj not in requirements:
+                    requirements.append(req_obj)
+            except Exception:
+                pass
+
+        # Test cases (union, dedup)
+        for tc_data in entry.get("test_cases") or []:
+            if not isinstance(tc_data, dict):
+                continue
+            try:
+                tc_data = dict(tc_data)
+                # Raw pyjama test cases carry `in_review_baseline`; the shared
+                # TestCase model uses `in_baseline`. Map it explicitly so the
+                # flag survives (Pydantic v2 silently drops the unknown key).
+                if "in_review_baseline" in tc_data:
+                    tc_data["in_baseline"] = tc_data.pop("in_review_baseline")
+                tc_obj = TestCase(**tc_data)
+                if tc_obj not in test_cases:
+                    test_cases.append(tc_obj)
+            except Exception:
+                pass
+
+        # Design docs (union, dedup)
+        for dd_data in entry.get("design_docs") or []:
+            if not isinstance(dd_data, dict):
+                continue
+            try:
+                dd_obj = DesignDocument(**dd_data)
+                if dd_obj not in design_docs:
+                    design_docs.append(dd_obj)
+            except Exception:
+                pass
+
+        # System requirements (union, dedup) + nested user needs (flatten, dedup)
+        for sys_req_data in entry.get("system_requirements") or []:
+            if not isinstance(sys_req_data, dict):
+                continue
+            try:
+                sys_req_obj = Requirement(**{
+                    k: v for k, v in sys_req_data.items() if k != "user_needs"
+                })
+                if sys_req_obj not in system_requirements:
+                    system_requirements.append(sys_req_obj)
+            except Exception:
+                pass
+
+            for un_data in sys_req_data.get("user_needs") or []:
+                if not isinstance(un_data, dict):
+                    continue
+                try:
+                    un_obj = Requirement(**un_data)
+                    if un_obj not in user_needs:
+                        user_needs.append(un_obj)
+                except Exception:
+                    pass
+
+    matrix = HazardTraceMatrix(
+        requirements=requirements,
+        test_cases=test_cases,
+        design_docs=design_docs,
+        system_requirements=system_requirements,
+        user_needs=user_needs,
+    )
+    logger.info(
+        "Aggregated bidirectional_trace: %d requirements, %d test_cases, "
+        "%d design_docs, %d system_requirements, %d user_needs",
+        len(requirements), len(test_cases), len(design_docs),
+        len(system_requirements), len(user_needs),
+    )
+    return matrix
+
+
+def make_transform_node_bidirectional_trace():
+    """
+    Create a LangGraph-compatible transform node for the hazard_risk_reviewer.
+
+    Converts JAMA bidirectional_trace data (jama_data) into a single
+    HazardTraceMatrix and merges it onto the hazard already in state, populating
+    `requirements_traceability`. Returns {} (no-op) when jama_data is absent —
+    i.e. the Excel/local path where the hazard already carries its traceability.
+    """
+    def transform(state) -> dict:
+        jama_data = state.get("jama_data")
+        if not jama_data:
+            logger.debug("Local mode: skipping bidirectional_trace transform")
+            return {}
+
+        hazard = state.get("hazard")
+        if hazard is None:
+            logger.warning(
+                "bidirectional_trace transform: jama_data present but no hazard in "
+                "state — skipping merge"
+            )
+            return {}
+
+        matrix = transform_bidirectional_trace_to_state(jama_data)
+        merged = hazard.model_copy(update={"requirements_traceability": matrix})
+        logger.info(
+            "Transform successful: merged JAMA traceability onto hazard %s "
+            "(%d requirements)",
+            getattr(hazard, "hazard_id", "unknown"),
+            len(matrix.requirements),
+        )
+        return {"hazard": merged}
 
     return transform
 

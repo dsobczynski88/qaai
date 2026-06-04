@@ -40,7 +40,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.data_integration import DataIntegrationNode, PyJamaNodeConfig
+from autoqa.components.shared.data_integration import (
+    DataIntegrationNode,
+    PyJamaNodeConfig,
+    make_transform_node_bidirectional_trace,
+)
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import PromptConfig, settings
@@ -93,12 +97,14 @@ class HazardReviewerRunnable:
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
         cache_manager: Optional[ReviewCacheManager] = None,
         telemetry_tracker: Optional[Any] = None,
+        pyjama_config: Optional[PyJamaNodeConfig] = None,
     ):
         self.client = client
         self.model = model
         self.model_kwargs = model_kwargs
         self.checkpointer = checkpointer
         self.prompt_config = prompt_config if prompt_config is not None else settings.prompt_config
+        self.pyjama_config = pyjama_config
         # The RTM subgraph is built once and reused across all Send fan-outs.
         # Callers can inject a pre-built RTMReviewerRunnable to share a
         # single compiled graph between this service and an RTMReviewService.
@@ -134,7 +140,11 @@ class HazardReviewerRunnable:
         sg = StateGraph(HazardReviewState)
 
         # Create data integration node (entry point for conditional JAMA fetch)
-        data_integration = DataIntegrationNode(pyjama_config=None)
+        # followed by the transform node that merges a bidirectional_trace JAMA
+        # response onto the hazard's requirements_traceability. In Excel/local
+        # mode both are no-ops and the in-state hazard flows through unchanged.
+        data_integration = DataIntegrationNode(self.pyjama_config)
+        transform = make_transform_node_bidirectional_trace()
 
         cm = self.cache_manager
 
@@ -201,6 +211,7 @@ class HazardReviewerRunnable:
 
         # Add all nodes to the graph
         sg.add_node("data_integration", data_integration)
+        sg.add_node("transform", transform)
         sg.add_node("h1_evaluator", h1)
         sg.add_node("h2_evaluator", h2)
         sg.add_node("h3_evaluator", h3)
@@ -213,22 +224,24 @@ class HazardReviewerRunnable:
         sg.add_node("needs_summarizer", needs_summarizer)
         sg.add_node("final_assessment", final_assessor)
 
-        # Data integration runs first (conditionally fetches from JAMA or passes through)
+        # Data integration runs first (conditionally fetches from JAMA or passes
+        # through), then transform merges any JAMA traceability onto the hazard.
         sg.add_edge(START, "data_integration")
+        sg.add_edge("data_integration", "transform")
 
-        # Early evaluators (H1, H2, H3, H7) run after data integration
+        # Early evaluators (H1, H2, H3, H7) run after the transform
         sg.add_conditional_edges(
-            "data_integration",
+            "transform",
             dispatch_hazard_evaluators_early,
             ["h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"],
         )
 
-        # Requirement reviews also flow from data_integration
-        sg.add_conditional_edges("data_integration", dispatch_requirement_reviews, ["requirement_reviewer"])
-        
-        # Summarizers also flow from data_integration
-        sg.add_edge("data_integration", "design_summarizer")
-        sg.add_edge("data_integration", "needs_summarizer")
+        # Requirement reviews also flow from transform
+        sg.add_conditional_edges("transform", dispatch_requirement_reviews, ["requirement_reviewer"])
+
+        # Summarizers also flow from transform
+        sg.add_edge("transform", "design_summarizer")
+        sg.add_edge("transform", "needs_summarizer")
 
         # Late evaluators (H4, H5) wait for requirement_reviews AND summarizers
         # We need a join node to synchronize requirement_reviewer + design_summarizer + needs_summarizer
