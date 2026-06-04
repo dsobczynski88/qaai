@@ -236,6 +236,54 @@ class DataIntegrationNode:
             raise
 
 
+def _coerce_state_models_to_autoqa(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-validate a transform state-entry's model fields into autoqa models.
+
+    pyjama's transforms emit pyjama's own Requirement / TestCase / DesignDoc
+    classes (and its TestCase uses ``in_review_baseline``), but autoqa's pipeline
+    models (e.g. TestSuite, RTMReviewState) require the
+    autoqa.components.shared.core classes (TestCase uses ``in_baseline``). Passing
+    the pyjama instances straight through makes Pydantic v2 raise a ``model_type``
+    error downstream (e.g. in SummaryNode._build_result). This rebuilds each
+    field as the autoqa class, mapping ``in_review_baseline -> in_baseline``.
+
+    Defensive: accepts pyjama model instances, autoqa instances, or plain dicts.
+    Idempotent for already-autoqa entries.
+    """
+    from autoqa.components.shared.core import Requirement, TestCase, DesignDocument
+
+    def _dump(o: Any) -> Dict[str, Any]:
+        return o.model_dump() if hasattr(o, "model_dump") else dict(o)
+
+    def to_req(o: Any) -> "Requirement":
+        d = _dump(o)
+        return Requirement(**{k: d.get(k) for k in ("req_id", "text")})
+
+    def to_tc(o: Any) -> "TestCase":
+        d = _dump(o)
+        if "in_review_baseline" in d:  # pyjama -> autoqa field rename
+            d["in_baseline"] = d.pop("in_review_baseline")
+        keep = {"test_id", "description", "setup", "steps", "expectedResults", "in_baseline"}
+        return TestCase(**{k: v for k, v in d.items() if k in keep})
+
+    def to_dd(o: Any) -> "DesignDocument":
+        d = _dump(o)
+        return DesignDocument(**{k: d.get(k) for k in ("doc_id", "name", "description")})
+
+    out = dict(entry)
+    if out.get("requirement") is not None:
+        out["requirement"] = to_req(out["requirement"])
+    if out.get("test_case") is not None:
+        out["test_case"] = to_tc(out["test_case"])
+    if "test_cases" in out:
+        out["test_cases"] = [to_tc(x) for x in (out["test_cases"] or [])]
+    if "requirements" in out:
+        out["requirements"] = [to_req(x) for x in (out["requirements"] or [])]
+    if "design_docs" in out:
+        out["design_docs"] = [to_dd(x) for x in (out["design_docs"] or [])]
+    return out
+
+
 def transform_test_suite_review_to_state(
     jama_data: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
@@ -282,6 +330,9 @@ def transform_test_suite_review_to_state(
     
     try:
         transformed = _pyjama_transform_test_suite(jama_data)
+        # pyjama returns its own Requirement/TestCase/DesignDoc classes; coerce to
+        # autoqa shared.core models so downstream nodes (TestSuite, etc.) validate.
+        transformed = [_coerce_state_models_to_autoqa(e) for e in transformed]
         logger.info("Successfully transformed %d entries", len(transformed))
         return transformed
     except Exception as e:
@@ -335,6 +386,9 @@ def transform_test_case_review_to_state(
     
     try:
         transformed = _pyjama_transform_test_case(jama_data)
+        # pyjama returns its own Requirement/TestCase/DesignDoc classes; coerce to
+        # autoqa shared.core models so downstream nodes validate.
+        transformed = [_coerce_state_models_to_autoqa(e) for e in transformed]
         logger.info("Successfully transformed %d entries", len(transformed))
         return transformed
     except Exception as e:
