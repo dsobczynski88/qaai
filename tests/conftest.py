@@ -110,6 +110,35 @@ async def client():
 
 
 @pytest.fixture
+def submit_and_wait(client):
+    """Drive the async-job review flow: POST -> 202 {job_id} -> poll -> result.
+
+    Reviews now run as background jobs (so the upstream proxy can't 504 on a long
+    request). This helper submits, polls GET /jobs/{id} on the shared event loop
+    until the job is terminal, then returns the GET /jobs/{id}/result response.
+    If submission itself is rejected (validation 4xx, not 202), that response is
+    returned unchanged so error-path tests work too.
+    """
+    import asyncio
+    import time
+
+    async def _submit_and_wait(url, *, json=None, files=None, data=None, max_wait=5.0):
+        submit = await client.post(url, json=json, files=files, data=data)
+        if submit.status_code != 202:
+            return submit
+        job_id = submit.json()["job_id"]
+        deadline = time.monotonic() + max_wait
+        while time.monotonic() < deadline:
+            status_resp = await client.get(f"/api/v1/jobs/{job_id}")
+            if status_resp.json()["status"] in ("completed", "failed"):
+                return await client.get(f"/api/v1/jobs/{job_id}/result")
+            await asyncio.sleep(0.01)
+        raise AssertionError(f"job {job_id} did not finish within {max_wait}s")
+
+    return _submit_and_wait
+
+
+@pytest.fixture
 def hazard_analysis_requirement_id_format():
     return "REQ-PUMP-\\d+"
 

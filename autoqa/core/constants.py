@@ -81,23 +81,6 @@ reasonable spacing: 60s, 120s, 240s, 480s, 960s.
 """
 
 # ============================================================================
-# Timeout Configuration
-# ============================================================================
-
-DEFAULT_API_TIMEOUT = 120
-"""Default timeout in seconds for single API requests.
-
-Applies to individual LLM calls. Increase for complex prompts or slower models.
-"""
-
-DEFAULT_GRAPH_TIMEOUT = 300
-"""Default timeout in seconds for full graph execution.
-
-Applies to complete pipeline runs (RTM, hazard, or test case review). Increase
-for large batches or complex requirements.
-"""
-
-# ============================================================================
 # Validation Limits
 # ============================================================================
 

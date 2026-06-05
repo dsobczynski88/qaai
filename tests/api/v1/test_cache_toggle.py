@@ -18,7 +18,7 @@ def dummy_html(tmp_path):
     return str(f)
 
 
-async def test_test_suite_use_cache_false_maps_to_off(client, dummy_html):
+async def test_test_suite_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
@@ -28,14 +28,14 @@ async def test_test_suite_use_cache_false_maps_to_off(client, dummy_html):
 
     app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
 
-    resp = await client.post(
+    resp = await submit_and_wait(
         "/api/v1/test-suite-review", json={"baseline_id": "B", "use_cache": False}
     )
     assert resp.status_code == status.HTTP_200_OK
     assert rec["cache_mode"] == "off"
 
 
-async def test_test_suite_use_cache_default_is_partial(client, dummy_html):
+async def test_test_suite_use_cache_default_is_partial(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
@@ -46,12 +46,12 @@ async def test_test_suite_use_cache_default_is_partial(client, dummy_html):
     app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
 
     # use_cache omitted → schema default True → cache_mode "partial"
-    resp = await client.post("/api/v1/test-suite-review", json={"baseline_id": "B"})
+    resp = await submit_and_wait("/api/v1/test-suite-review", json={"baseline_id": "B"})
     assert resp.status_code == status.HTTP_200_OK
     assert rec["cache_mode"] == "partial"
 
 
-async def test_test_case_use_cache_false_maps_to_off(client, dummy_html):
+async def test_test_case_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
@@ -61,14 +61,14 @@ async def test_test_case_use_cache_false_maps_to_off(client, dummy_html):
 
     app.state.test_case_service.run_from_baseline = AsyncMock(side_effect=fake_run)
 
-    resp = await client.post(
+    resp = await submit_and_wait(
         "/api/v1/test-case-review", json={"baseline_id": "B", "use_cache": False}
     )
     assert resp.status_code == status.HTTP_200_OK
     assert rec["cache_mode"] == "off"
 
 
-async def test_hazard_use_cache_false_maps_to_off(client, dummy_html):
+async def test_hazard_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
@@ -79,7 +79,7 @@ async def test_hazard_use_cache_false_maps_to_off(client, dummy_html):
 
     app.state.hazard_service.run_from_excel_upload = AsyncMock(side_effect=fake_run)
 
-    resp = await client.post(
+    resp = await submit_and_wait(
         "/api/v1/hazard-risk-review",
         files={"file": ("h.xlsx", b"binary", "application/vnd.ms-excel")},
         data={"project_name": "P", "use_cache": "false"},
@@ -88,7 +88,7 @@ async def test_hazard_use_cache_false_maps_to_off(client, dummy_html):
     assert rec["cache_mode"] == "off"
 
 
-async def test_hazard_use_cache_default_is_partial(client, dummy_html):
+async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
@@ -99,7 +99,7 @@ async def test_hazard_use_cache_default_is_partial(client, dummy_html):
 
     app.state.hazard_service.run_from_excel_upload = AsyncMock(side_effect=fake_run)
 
-    resp = await client.post(
+    resp = await submit_and_wait(
         "/api/v1/hazard-risk-review",
         files={"file": ("h.xlsx", b"binary", "application/vnd.ms-excel")},
         data={"project_name": "P"},  # use_cache omitted → Form default True
@@ -109,7 +109,7 @@ async def test_hazard_use_cache_default_is_partial(client, dummy_html):
 
 
 @pytest.mark.parametrize("sent,expected", [(True, True), (False, False)])
-async def test_test_suite_test_mode_propagates(client, dummy_html, sent, expected):
+async def test_test_suite_test_mode_propagates(submit_and_wait, dummy_html, sent, expected):
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
@@ -118,7 +118,7 @@ async def test_test_suite_test_mode_propagates(client, dummy_html, sent, expecte
 
     app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
 
-    resp = await client.post(
+    resp = await submit_and_wait(
         "/api/v1/test-suite-review",
         json={"baseline_id": "B", "test_mode": sent},
     )
@@ -127,7 +127,7 @@ async def test_test_suite_test_mode_propagates(client, dummy_html, sent, expecte
 
 
 @pytest.mark.parametrize("sent,expected", [("true", True), ("false", False)])
-async def test_hazard_test_mode_propagates(client, dummy_html, sent, expected):
+async def test_hazard_test_mode_propagates(submit_and_wait, dummy_html, sent, expected):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
@@ -137,7 +137,7 @@ async def test_hazard_test_mode_propagates(client, dummy_html, sent, expected):
 
     app.state.hazard_service.run_from_excel_upload = AsyncMock(side_effect=fake_run)
 
-    resp = await client.post(
+    resp = await submit_and_wait(
         "/api/v1/hazard-risk-review",
         files={"file": ("h.xlsx", b"binary", "application/vnd.ms-excel")},
         data={"project_name": "P", "test_mode": sent},
