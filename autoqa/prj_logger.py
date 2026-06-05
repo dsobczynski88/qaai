@@ -53,40 +53,6 @@ def timing(loggername):
         return wrapper
     return decorator
 
-def get_logs(loggername):        
-    """DEPRECATED: Use @timing or @exception_logger decorators instead.
-    
-    This decorator is kept for backward compatibility with external scripts
-    that may still reference it. It will be removed in v1.0.0.
-    
-    Prefer:
-        - @timing(loggername) for performance monitoring
-        - @exception_logger(loggername) for error handling
-    
-    Args:
-        loggername: Logger name for messages
-        
-    Returns:
-        Decorated function (deprecated behavior)
-    """        
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            logger = logging.getLogger(loggername)
-            start_time = time.perf_counter()
-            logger.debug(f"Entering: {func.__name__}")
-            try:
-                output = func(*args, **kwargs)
-            except Exception as e:
-                ce = CustomException(e)
-                logger.error(ce.error_message, exc_info=True)
-                output = None
-            finally:
-                end_time = time.perf_counter()
-                elapsed_time = end_time - start_time
-                logger.debug(f"{func.__name__} completed in {elapsed_time:.6f} seconds")
-                return output
-        return wrapper
-    return decorator
 
 class ProjectLogger:
     def __init__(self, name, log_file):
@@ -112,8 +78,18 @@ class ProjectLogger:
         self._log_file = new_log_file
 
     def config(self):
-        # create handlers
-        file_handler = logging.FileHandler(self._log_file)
+        # create handlers. UTF-8 so non-ASCII log content (e.g. "→", em-dashes,
+        # LLM/medical text) doesn't crash on Windows' default cp1252 codec.
+        file_handler = logging.FileHandler(self._log_file, encoding="utf-8")
+
+        # Make the console stream UTF-8-safe before wrapping it. reconfigure is
+        # available on TextIOWrapper (py3.7+); guard for replaced/captured streams
+        # that lack it. errors="replace" guarantees the handler can never raise a
+        # UnicodeEncodeError even on a terminal that can't render a glyph.
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
         console_handler = logging.StreamHandler(sys.stdout)
 
         # set logging levels

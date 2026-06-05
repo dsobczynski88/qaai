@@ -5,22 +5,21 @@ from langchain_core.runnables import Runnable
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 from autoqa.core.config import settings, PromptConfig
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
-from autoqa.components.processors import df_to_prompt_items
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.nodes import (
-    make_data_integration_node,
+from autoqa.components.shared.data_integration import (
+    DataIntegrationNode,
     make_transform_node_test_suite_review,
+    PyJamaNodeConfig,
 )
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
 from .core import RTMReviewState
 from .nodes import (
     make_coverage_evaluator,
     make_decomposer_node,
     make_summarizer_node,
     make_design_summarizer_node,
-    make_generator_node,
     make_synthesizer_node,
     dispatch_coverage,
 )
@@ -54,6 +53,7 @@ class RTMReviewerRunnable:
         checkpointer: Union[MemorySaver, None] = None,
         prompt_config: Optional[PromptConfig] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
+        cache_manager: Optional["ReviewCacheManager"] = None,
     ):
 
         self.client = client
@@ -62,6 +62,10 @@ class RTMReviewerRunnable:
         self.checkpointer = checkpointer # currently the graph collects intermediate responses via operator.add (no specific checkpointer implemented)
         self.prompt_config = prompt_config if prompt_config is not None else settings.prompt_config
         self.pyjama_config = pyjama_config
+        # Optional shared cache. Per-run behaviour is driven by state["cache_mode"];
+        # when None (e.g. the embedded RTM subgraph inside the hazard reviewer) no
+        # node caches. See autoqa.core.cache.ReviewCacheManager.
+        self.cache_manager = cache_manager
         self.graph = self.build()
 
 
@@ -101,28 +105,34 @@ class RTMReviewerRunnable:
         sg = StateGraph(RTMReviewState)
 
         # Data integration layer
-        data_integration = make_data_integration_node(self.pyjama_config)
+        data_integration = DataIntegrationNode(self.pyjama_config)
         transform = make_transform_node_test_suite_review()
 
+        cm = self.cache_manager
         decomposer = make_decomposer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.decomposer,
+            cache_manager=cm,
         )
         summarizer = make_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.summarizer,
+            cache_manager=cm,
         )
         design_summarizer = make_design_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.design_summarizer,
+            cache_manager=cm,
         )
         spec_evaluator = make_coverage_evaluator(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.coverage,
+            cache_manager=cm,
         )
         synthesizer = make_synthesizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.synthesizer,
+            cache_manager=cm,
         )
 
         # Add all nodes

@@ -1,170 +1,155 @@
 import logging
-import time
-import uuid
+import os
 from contextlib import asynccontextmanager
-from typing import Callable
+from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.memory import MemorySaver
 
-from autoqa.core.config import settings
-from autoqa.core.constants import MAX_REQUEST_BODY_SIZE
+from autoqa.api.middleware import limit_request_size, log_requests
+from autoqa.api.routes import router
+from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
-from autoqa.api.routes import router
+from autoqa.core.cache import ReviewCacheManager
+from autoqa.core.config import settings
+from autoqa.core.telemetry import TokenUsageTracker
+from autoqa.core.logging_config import create_timestamped_run_directory, setup_logging
 
 
 logger = logging.getLogger("autoqa.api.main")
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Log all API requests with timing and correlation IDs.
-    
-    Adds a unique request_id to each request for tracing and logs request/response
-    details including timing, status codes, and errors.
+def build_pyjama_config():
+    """Build optional PyJama config from settings.
+
+    test_mode (cache-only, no live JAMA) defaults to settings.pyjama_test_mode
+    (PYJAMA_TEST_MODE) and is the server-wide default; the API "test mode" toggle
+    overrides it per request. In test_mode credentials are optional, so a config
+    is still built even when JAMA_HOST_ADDRESS is unset.
     """
-    
-    async def dispatch(self, request: Request, call_next: Callable):
-        """Process request with logging.
-        
-        Args:
-            request: Incoming HTTP request.
-            call_next: Next middleware or route handler.
-            
-        Returns:
-            Response with X-Request-ID header added.
-        """
-        request_id = str(uuid.uuid4())
-        request.state.request_id = request_id
-        
-        request_logger = logging.getLogger("autoqa.api.requests")
-        start_time = time.perf_counter()
-        
-        request_logger.info(
-            f"Request started: {request.method} {request.url.path}",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "client": request.client.host if request.client else None,
-            }
+    test_mode = settings.pyjama_test_mode
+    if not settings.jama_host_address and not test_mode:
+        return None
+
+    try:
+        from autoqa.components.shared.data_integration import PyJamaNodeConfig
+
+        pyjama_config = PyJamaNodeConfig(
+            host_address=settings.jama_host_address,
+            client_id=settings.jama_client_id,
+            client_secret=settings.jama_client_secret,
+            test_mode=test_mode,
         )
-        
-        try:
-            response = await call_next(request)
-            elapsed = time.perf_counter() - start_time
-            
-            request_logger.info(
-                f"Request completed: {request.method} {request.url.path} - {response.status_code}",
-                extra={
-                    "request_id": request_id,
-                    "status_code": response.status_code,
-                    "elapsed_seconds": elapsed,
-                }
-            )
-            
-            response.headers["X-Request-ID"] = request_id
-            return response
-            
-        except Exception as e:
-            elapsed = time.perf_counter() - start_time
-            request_logger.error(
-                f"Request failed: {request.method} {request.url.path}",
-                extra={
-                    "request_id": request_id,
-                    "error": str(e),
-                    "elapsed_seconds": elapsed,
-                },
-                exc_info=True
-            )
-            raise
+        logger.info(
+            "PyJama config initialized (host: %s, test_mode: %s)",
+            settings.jama_host_address, test_mode,
+        )
+        return pyjama_config
+    except Exception as exc:
+        logger.warning("Could not initialize PyJama config: %s", exc)
+        return None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize telemetry tracker before client
+    telemetry_tracker = TokenUsageTracker(
+        file_path=settings.telemetry_file_path,
+        input_cost_per_million=settings.token_cost_input_per_m,
+        output_cost_per_million=settings.token_cost_output_per_m,
+    )
+    logger.info("Telemetry tracker initialized (file: %s)", settings.telemetry_file_path)
+
+    # Initialize OpenAI client with all required parameters
     client = RateLimitOpenAIClient(
         api_key=settings.openai_api_key,
+        base_url=settings.url,
         max_requests_per_minute=settings.max_requests_per_minute,
         max_tokens_per_minute=settings.max_tokens_per_minute,
+        telemetry_tracker=telemetry_tracker,
     )
-    # Configure model_kwargs with max_tokens to handle large outputs (100+ test cases)
-    # Haiku supports up to 16K output tokens; this ensures the summarizer can process
-    # all test cases without truncation
+
+    # max_tokens handles large outputs (100+ test cases) without truncation.
     model_kwargs = {"max_tokens": settings.max_output_tokens}
-    
+
     logger.info("Initializing AutoQA services...")
-    logger.info(f"Model: {settings.model}")
-    logger.info(f"Max requests per minute: {settings.max_requests_per_minute}")
-    logger.info(f"Max tokens per minute: {settings.max_tokens_per_minute}")
+    logger.info("Model: %s", settings.model)
+    logger.info("API Base URL: %s", settings.url or "default (OpenAI)")
+    logger.info("Max requests per minute: %s", settings.max_requests_per_minute)
+    logger.info("Max tokens per minute: %s", settings.max_tokens_per_minute)
 
-    # Build optional PyJama config from settings (requires JAMA_* env vars)
-    pyjama_config = None
-    if settings.jama_host_address:
-        try:
-            from autoqa.components.shared.data_integration import PyJamaNodeConfig
-            pyjama_config = PyJamaNodeConfig(
-                host_address=settings.jama_host_address,
-                client_id=settings.jama_client_id,
-                client_secret=settings.jama_client_secret,
-            )
-            logger.info("PyJama config initialized (host: %s)", settings.jama_host_address)
-        except Exception as exc:
-            logger.warning("Could not initialize PyJama config: %s", exc)
+    pyjama_config = build_pyjama_config()
 
-    # Build the RTM subgraph once and share it between both services so the
-    # compiled graph + Mermaid PNG render only happen on a single import.
+    # One shared cache, used by all three reviewers. Per-run behaviour is driven
+    # by the UI's "use cache" toggle (→ cache_mode in graph state). The global
+    # ENABLE_CACHE switch turns it off entirely.
+    cache_manager = None
+    if settings.enable_cache:
+        cache_manager = ReviewCacheManager(
+            cache_dir=settings.cache_dir,
+            redis_url=settings.redis_url,
+            telemetry_tracker=telemetry_tracker,
+        )
+        logger.info("Review cache enabled (dir: %s)", settings.cache_dir)
+
+    # RTM runnable used by the standalone test-suite endpoint — cache-enabled.
+    # The hazard reviewer deliberately builds its OWN uncached embedded RTM
+    # (its subgraph result is cached as one blob per requirement instead).
     rtm_runnable = RTMReviewerRunnable(
         client=client,
         model=settings.model,
         model_kwargs=model_kwargs,
         checkpointer=MemorySaver(),
-    )
-    app.state.rtm_service = RTMReviewService(
-        client, settings.model, rtm_runnable=rtm_runnable, pyjama_config=pyjama_config
-    )
-    app.state.hazard_service = HazardReviewService(
-        client, settings.model, rtm_runnable=rtm_runnable, pyjama_config=pyjama_config
+        cache_manager=cache_manager,
     )
 
-    # Initialize test case service (independent graph, no sharing)
+    app.state.rtm_service = RTMReviewService(
+        client,
+        settings.model,
+        rtm_runnable=rtm_runnable,
+        pyjama_config=pyjama_config,
+    )
+    app.state.hazard_service = HazardReviewService(
+        client,
+        settings.model,
+        pyjama_config=pyjama_config,
+        cache_manager=cache_manager,
+    )
     app.state.test_case_service = TestCaseReviewService(
         client=client,
         model=settings.model,
         model_kwargs=model_kwargs,
         pyjama_config=pyjama_config,
+        cache_manager=cache_manager,
     )
-    
+
     # Backwards-compat: existing callers reference app.state.service for the RTM service.
     app.state.service = app.state.rtm_service
-    
+
     logger.info("AutoQA services initialized successfully")
     yield
-    
+
     logger.info("Shutting down AutoQA services...")
+    telemetry_tracker.log_summary()
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application.
+    """Create and configure the FastAPI application."""
+    # Initialize logging FIRST, before anything else
+    run_dir = create_timestamped_run_directory(base_logs_dir="./logs")
+    setup_logging(run_dir)
     
-    Sets up middleware for:
-    - Request logging with correlation IDs
-    - Request size limits
-    - CORS (if configured)
-    - Response compression
+    # Now get logger after logging is configured
+    startup_logger = logging.getLogger("autoqa.api.main")
+    startup_logger.info("Application startup initiated")
     
-    Returns:
-        FastAPI: Configured application instance.
-    """
-    # Determine if we're in production based on environment
-    import os
     environment = os.getenv("ENVIRONMENT", "development")
     is_production = environment == "production"
-    
+
     app = FastAPI(
         title="AutoQA Reviewer API",
         version="0.2.0",
@@ -173,23 +158,12 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if not is_production else None,
     )
     
-    # Request logging middleware
-    app.add_middleware(RequestLoggingMiddleware)
-    
-    # Request size limit middleware
-    @app.middleware("http")
-    async def limit_request_size(request: Request, call_next: Callable):
-        """Reject requests with bodies larger than MAX_REQUEST_BODY_SIZE."""
-        if request.method == "POST":
-            content_length = request.headers.get("content-length")
-            if content_length and int(content_length) > MAX_REQUEST_BODY_SIZE:
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "Request body too large (max 10MB)"}
-                )
-        return await call_next(request)
-    
-    # CORS middleware (configure allowed_origins based on your deployment)
+    # Store run directory in app state for reference
+    app.state.run_dir = run_dir
+
+    app.middleware("http")(log_requests)
+    app.middleware("http")(limit_request_size)
+
     allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
     if allowed_origins != ["*"]:
         app.add_middleware(
@@ -199,20 +173,17 @@ def create_app() -> FastAPI:
             allow_methods=["POST", "GET"],
             allow_headers=["*"],
         )
-    
-    # Response compression
+
     app.add_middleware(GZipMiddleware, minimum_size=1000)
-    
+
     app.include_router(router)
 
-    # Serve the HTML frontend from autoqa/api/static/ at the root path.
     # Must be mounted AFTER the API router so API routes take precedence.
-    from fastapi.staticfiles import StaticFiles
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     os.makedirs(static_dir, exist_ok=True)
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
-    logger.info(f"AutoQA API created (environment: {environment})")
+    logger.info("AutoQA API created (environment: %s)", environment)
     return app
 
 

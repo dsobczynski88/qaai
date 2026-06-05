@@ -40,10 +40,13 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
-from autoqa.components.shared.nodes import make_data_integration_node
+from autoqa.components.shared.data_integration import (
+    DataIntegrationNode,
+    PyJamaNodeConfig,
+    make_transform_node_bidirectional_trace,
+)
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from autoqa.core.cache import HazardCacheManager
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import PromptConfig, settings
 from autoqa.utils import save_graph_png
 from autoqa.prj_logger import ProjectLogger
@@ -54,16 +57,11 @@ from .nodes import (
     dispatch_hazard_evaluators_late,
     dispatch_requirement_reviews,
     make_final_assessor_node,
-    make_h1_evaluator_node,
-    make_h2_evaluator_node,
-    make_h3_evaluator_node,
-    make_h4_evaluator_node,
-    make_h5_evaluator_node,
+    make_hazard_evaluator_node,
     make_h6_evaluator_node,
-    make_h7_evaluator_node,
     make_hazard_design_summarizer_node,
     make_hazard_needs_summarizer_node,
-    make_requirement_reviewer_node,
+    RequirementReviewerNode,
 )
 
 project_logger = ProjectLogger(name="logger.hazard_pipeline", log_file=settings.log_file_path)
@@ -97,14 +95,16 @@ class HazardReviewerRunnable:
         checkpointer: Union[MemorySaver, None] = None,
         prompt_config: Optional[PromptConfig] = None,
         rtm_runnable: Optional[RTMReviewerRunnable] = None,
-        cache_manager: Optional[HazardCacheManager] = None,
+        cache_manager: Optional[ReviewCacheManager] = None,
         telemetry_tracker: Optional[Any] = None,
+        pyjama_config: Optional[PyJamaNodeConfig] = None,
     ):
         self.client = client
         self.model = model
         self.model_kwargs = model_kwargs
         self.checkpointer = checkpointer
         self.prompt_config = prompt_config if prompt_config is not None else settings.prompt_config
+        self.pyjama_config = pyjama_config
         # The RTM subgraph is built once and reused across all Send fan-outs.
         # Callers can inject a pre-built RTMReviewerRunnable to share a
         # single compiled graph between this service and an RTMReviewService.
@@ -116,18 +116,18 @@ class HazardReviewerRunnable:
         )
 
         # Build cache manager if not injected and caching is enabled.
-        # Callers can pass a pre-wired HazardCacheManager (e.g. to share
+        # Callers can pass a pre-wired ReviewCacheManager (e.g. to share
         # between this reviewer and the RTMReviewService), or let the
         # pipeline auto-build one from settings.
         if cache_manager is not None:
-            self.cache_manager: Optional[HazardCacheManager] = cache_manager
-        elif settings.enable_hazard_cache:
+            self.cache_manager: Optional[ReviewCacheManager] = cache_manager
+        elif settings.enable_cache:
             # Reuse the tracker already wired into the client so cache events
             # land in the same JSONL file as normal LLM-call records.
             # A brand-new TokenUsageTracker would clear the file on init.
             resolved_tracker = telemetry_tracker or getattr(client, "telemetry_tracker", None)
-            self.cache_manager = HazardCacheManager(
-                cache_dir=settings.hazard_cache_dir,
+            self.cache_manager = ReviewCacheManager(
+                cache_dir=settings.cache_dir,
                 redis_url=settings.redis_url,
                 telemetry_tracker=resolved_tracker,
             )
@@ -140,33 +140,37 @@ class HazardReviewerRunnable:
         sg = StateGraph(HazardReviewState)
 
         # Create data integration node (entry point for conditional JAMA fetch)
-        data_integration = make_data_integration_node(pyjama_config=None)
+        # followed by the transform node that merges a bidirectional_trace JAMA
+        # response onto the hazard's requirements_traceability. In Excel/local
+        # mode both are no-ops and the in-state hazard flows through unchanged.
+        data_integration = DataIntegrationNode(self.pyjama_config)
+        transform = make_transform_node_bidirectional_trace()
 
         cm = self.cache_manager
 
         # Create all 7 evaluator nodes
-        h1 = make_h1_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h1 = make_hazard_evaluator_node(
+            "H1", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h1,
             cache_manager=cm,
         )
-        h2 = make_h2_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h2 = make_hazard_evaluator_node(
+            "H2", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h2,
             cache_manager=cm,
         )
-        h3 = make_h3_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h3 = make_hazard_evaluator_node(
+            "H3", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h3,
             cache_manager=cm,
         )
-        h4 = make_h4_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h4 = make_hazard_evaluator_node(
+            "H4", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h4,
             cache_manager=cm,
         )
-        h5 = make_h5_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h5 = make_hazard_evaluator_node(
+            "H5", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h5,
             cache_manager=cm,
         )
@@ -175,8 +179,8 @@ class HazardReviewerRunnable:
             prompt_template=self.prompt_config.hazard_h6,
             cache_manager=cm,
         )
-        h7 = make_h7_evaluator_node(
-            self.client, self.model, self.model_kwargs,
+        h7 = make_hazard_evaluator_node(
+            "H7", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h7,
             cache_manager=cm,
         )
@@ -185,10 +189,10 @@ class HazardReviewerRunnable:
             prompt_template=self.prompt_config.hazard_final,
             cache_manager=cm,
         )
-        requirement_reviewer = make_requirement_reviewer_node(
+        requirement_reviewer = RequirementReviewerNode(
             self.rtm,
             cache_manager=cm,
-            rtm_prompt_version=HazardCacheManager.extract_prompt_version(
+            rtm_prompt_version=ReviewCacheManager.extract_prompt_version(
                 self.prompt_config.synthesizer
             ),
         )
@@ -207,6 +211,7 @@ class HazardReviewerRunnable:
 
         # Add all nodes to the graph
         sg.add_node("data_integration", data_integration)
+        sg.add_node("transform", transform)
         sg.add_node("h1_evaluator", h1)
         sg.add_node("h2_evaluator", h2)
         sg.add_node("h3_evaluator", h3)
@@ -219,22 +224,24 @@ class HazardReviewerRunnable:
         sg.add_node("needs_summarizer", needs_summarizer)
         sg.add_node("final_assessment", final_assessor)
 
-        # Data integration runs first (conditionally fetches from JAMA or passes through)
+        # Data integration runs first (conditionally fetches from JAMA or passes
+        # through), then transform merges any JAMA traceability onto the hazard.
         sg.add_edge(START, "data_integration")
+        sg.add_edge("data_integration", "transform")
 
-        # Early evaluators (H1, H2, H3, H7) run after data integration
+        # Early evaluators (H1, H2, H3, H7) run after the transform
         sg.add_conditional_edges(
-            "data_integration",
+            "transform",
             dispatch_hazard_evaluators_early,
             ["h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"],
         )
 
-        # Requirement reviews also flow from data_integration
-        sg.add_conditional_edges("data_integration", dispatch_requirement_reviews, ["requirement_reviewer"])
-        
-        # Summarizers also flow from data_integration
-        sg.add_edge("data_integration", "design_summarizer")
-        sg.add_edge("data_integration", "needs_summarizer")
+        # Requirement reviews also flow from transform
+        sg.add_conditional_edges("transform", dispatch_requirement_reviews, ["requirement_reviewer"])
+
+        # Summarizers also flow from transform
+        sg.add_edge("transform", "design_summarizer")
+        sg.add_edge("transform", "needs_summarizer")
 
         # Late evaluators (H4, H5) wait for requirement_reviews AND summarizers
         # We need a join node to synchronize requirement_reviewer + design_summarizer + needs_summarizer

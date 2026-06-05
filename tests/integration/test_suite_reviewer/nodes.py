@@ -1,51 +1,44 @@
-#TODO: ADD MODEL KWARGS
-
-import asyncio
-import json
-import logging
-import os
 import pytest
-from pathlib import Path
 
-from autoqa.core.config import settings, PromptConfig
-from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.components.test_suite_reviewer.core import (
-    RTMReviewState, Requirement, TestCase, DesignDocument, DecomposedRequirement, 
-    TestSuite, EvaluatedSpec, SynthesizedAssessment,
+    DecomposedRequirement,
+    TestSuite,
+    EvaluatedSpec,
 )
-
-from autoqa.prj_logger import format_elapsed_time
-from tests.helpers import load_jsonl, serialize_state
 from autoqa.components.test_suite_reviewer.nodes import (
-    make_decomposer_node, make_summarizer_node, make_coverage_evaluator
+    make_decomposer_node,
+    make_summarizer_node,
+    make_coverage_evaluator,
 )
 
 @pytest.mark.integration
 async def test_decomposer_node(real_client, real_model, sample_requirement):
     """Test the decomposer node in isolation."""
-   
-    node = make_decomposer_node(real_client, real_model)
+    node = make_decomposer_node(real_client, real_model, model_kwargs={})
     result = await node({"requirement": sample_requirement})
 
     assert result["decomposed_requirement"] is not None
     assert isinstance(result["decomposed_requirement"], DecomposedRequirement)
     assert len(result["decomposed_requirement"].decomposed_specifications) > 0
-    
+
     print(f"\n[decomposer] {len(result['decomposed_requirement'].decomposed_specifications)} specs generated")
     for s in result["decomposed_requirement"].decomposed_specifications:
         print(f"  {s.spec_id}: {s.description[:60]}")
 
 
 @pytest.mark.integration
-async def test_summarizer_node(real_client, real_model, sample_test_cases):
+async def test_summarizer_node(real_client, real_model, sample_requirement, sample_test_cases):
     """Test the summarizer node in isolation."""
-    node = make_summarizer_node(real_client, real_model)
-    result = await node({"test_cases": sample_test_cases})
+    node = make_summarizer_node(real_client, real_model, model_kwargs={})
+    result = await node({
+        "requirement": sample_requirement,
+        "test_cases": sample_test_cases,
+    })
 
     assert result["test_suite"] is not None
     assert isinstance(result["test_suite"], TestSuite)
     assert len(result["test_suite"].summary) > 0
-    
+
     print(f"\n[summarizer] {len(result['test_suite'].summary)} summaries produced")
 
 
@@ -55,7 +48,7 @@ async def test_coverage_evaluator_node(
     sample_requirement, sample_decomposed_requirement, sample_test_suite
 ):
     """Test the coverage evaluator node in isolation."""
-    node = make_coverage_evaluator(real_client, real_model)
+    node = make_coverage_evaluator(real_client, real_model, model_kwargs={})
     result = await node({
         "requirement": sample_requirement,
         "decomposed_requirement": sample_decomposed_requirement,
@@ -66,7 +59,7 @@ async def test_coverage_evaluator_node(
         sample_decomposed_requirement.decomposed_specifications
     )
     assert all(isinstance(e, EvaluatedSpec) for e in result["coverage_analysis"])
-    
+
     print(f"\n[coverage] {len(result['coverage_analysis'])} specs evaluated")
     for e in result["coverage_analysis"]:
         if e.covered_exists:

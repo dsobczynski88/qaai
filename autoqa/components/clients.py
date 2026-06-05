@@ -14,8 +14,20 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from autoqa.core.telemetry import TokenUsageTracker
 
-# Apply nest_asyncio to allow nested event loops
-nest_asyncio.apply()
+# Apply nest_asyncio to allow nested event loops, but only if not using uvloop.
+# uvloop (used by uvicorn) doesn't support nest_asyncio patching, which is fine
+# because uvicorn manages the event loop for us in that context.
+try:
+    nest_asyncio.apply()
+    logger = logging.getLogger(__name__)
+    logger.debug("nest_asyncio applied successfully")
+except ValueError as e:
+    # uvloop is being used, which doesn't support nest_asyncio patching
+    if "Can't patch loop of type" in str(e):
+        logger = logging.getLogger(__name__)
+        logger.debug("uvloop detected; skipping nest_asyncio (not needed in uvicorn context)")
+    else:
+        raise
 
 # Set event loop
 loop =  asyncio.SelectorEventLoop() # asyncio.ProactorEventLoop()
@@ -354,93 +366,6 @@ class RateLimitOpenAIClient:
         )
 
         # Record actual token usage (if available)
-        usage = getattr(completion, "usage", None)
-        if usage is not None:
-            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-            total_tokens = getattr(usage, "total_tokens", None) or (prompt_tokens + completion_tokens)
-            try:
-                if self.token_limiter and total_tokens:
-                    await self.token_limiter.record(int(total_tokens))
-            except Exception:
-                pass
-            if self.telemetry_tracker:
-                try:
-                    await self.telemetry_tracker.record(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        model=model,
-                    )
-                except Exception:
-                    pass
-
-        return completion
-
-    async def chat_completion_parse_beta(self, model: str, messages: list, **kwargs) -> ChatCompletion:
-        """Make a chat completion request using the Structured Outputs (beta) endpoint."""
-        
-        # 1. Ensure kwargs is a dict and strip None values to prevent unpacking errors
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
-
-        await self.rate_limiter.wait_if_needed()
-
-        est_tokens = 0
-        if self.token_limiter:
-            est_tokens = self._estimate_total_tokens(model, messages, kwargs)
-            await self.token_limiter.wait_if_needed(est_tokens)
-
-        # 2. FIX: Point to the .beta endpoint for parsing
-        # Note: self.client.beta.chat.completions.parse is the correct path
-        completion: ChatCompletion = await async_retry_with_backoff(
-            self.client.beta.chat.completions.parse,
-            model=model,
-            messages=messages,
-            token_limiter=self.token_limiter,
-            est_tokens=est_tokens,
-            **kwargs,
-        )
-
-        # 3. Record actual token usage
-        usage = getattr(completion, "usage", None)
-        if usage is not None:
-            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-            total_tokens = getattr(usage, "total_tokens", None) or (prompt_tokens + completion_tokens)
-            try:
-                if self.token_limiter and total_tokens:
-                    await self.token_limiter.record(int(total_tokens))
-            except Exception:
-                pass
-            if self.telemetry_tracker:
-                try:
-                    await self.telemetry_tracker.record(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        model=model,
-                    )
-                except Exception:
-                    pass
-
-        return completion
-
-    async def chat_completion_parse(self, model: str, messages: list, **kwargs) -> ChatCompletion:
-        """Make a chat completion request with RPM/TPM limiting and token-aware retries (parse endpoint)."""
-        await self.rate_limiter.wait_if_needed()
-
-        est_tokens = 0
-        if self.token_limiter:
-            est_tokens = self._estimate_total_tokens(model, messages, kwargs)
-            await self.token_limiter.wait_if_needed(est_tokens)
-
-        completion: ChatCompletion = await async_retry_with_backoff(
-            self.client.chat.completions.parse,
-            model=model,
-            messages=messages,
-            token_limiter=self.token_limiter,
-            est_tokens=est_tokens,
-            **kwargs,
-        )
-
         usage = getattr(completion, "usage", None)
         if usage is not None:
             prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0

@@ -1,14 +1,13 @@
 """Integration tests for the test_case_reviewer pipeline.
 
-Consolidated test suite that supports both min and all fields fixtures.
+Each row in the fixture JSONL becomes its own pytest item, identified by
+test_id, so failures are attributed to a specific test case and individual
+rows can be re-run with -k <test_id>.
 """
-import asyncio
-import os
 import pytest
 
 from autoqa.components.test_case_reviewer.pipeline import TCReviewerRunnable
 from autoqa.components.test_case_reviewer.core import (
-    TCReviewState,
     Requirement,
     TestCase,
     DesignDocument,
@@ -17,12 +16,14 @@ from autoqa.components.test_case_reviewer.core import (
 from autoqa.components.test_case_reviewer.nodes import load_default_review_objectives
 from tests.helpers import load_jsonl, serialize_state
 
-REVIEW_OBJECTIVE_IDS = {o.id for o in load_default_review_objectives()}
 
-# Cap on rows in flight at once. Tunable via AUTOQA_FANOUT_CONCURRENCY env var
-# for bisection. The RateLimitOpenAIClient already enforces RPM/TPM ceilings
-# internally, so this semaphore is a soft cap to bound memory and tail latency.
-MAX_CONCURRENT = int(os.getenv("AUTOQA_FANOUT_CONCURRENCY", "10"))
+# Load fixture rows and review objectives at collection time (pure file I/O).
+# Mirrors the pattern used by test_test_suite_reviewer and
+# test_hazard_risk_reviewer_batch_via_transformation.
+_TC_FIXTURE = "test_case_review_all_fields.jsonl"
+_TC_ROWS = load_jsonl(_TC_FIXTURE)
+_REVIEW_OBJECTIVES = load_default_review_objectives()
+REVIEW_OBJECTIVE_IDS = {o.id for o in _REVIEW_OBJECTIVES}
 
 
 def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None:
@@ -42,10 +43,9 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
             assert o.verdict == "Yes", (
                 f"{o.id}: partial=True requires verdict='Yes', got {o.verdict!r}"
             )
-        # Verify mandatory field is present
         assert hasattr(o, "mandatory"), f"{o.id}: missing mandatory field"
 
-    # overall_verdict should be computed from MANDATORY criteria only
+    # overall_verdict is computed from MANDATORY criteria only.
     mandatory_checklist = [o for o in checklist if o.mandatory is not False]
     expected_overall = "Yes" if all(o.verdict == "Yes" for o in mandatory_checklist) else "No"
     assert asmt.overall_verdict == expected_overall, (
@@ -85,98 +85,57 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "fixture_name",
-    [
-        "test_case_review_all_fields.jsonl",
-    ],
+    "row",
+    _TC_ROWS,
+    ids=[row["test_case"]["test_id"] for row in _TC_ROWS],
 )
-async def test_test_case_reviewer(
-    real_client, real_model, jsonl_recorders_tc, fixture_name
-):
-    """Main parametrized test for the test_case_reviewer pipeline.
-    
-    Tests both:
-    - Min fields: Test case and upstream requirements only
-    - All fields: Test case, upstream requirements, and design docs
-    
-    Builds the TCReviewerRunnable once, dispatches every row in the fixture via
-    asyncio.gather capped at MAX_CONCURRENT in-flight, re-orders results to
-    input order before recording, then accumulates per-row hard-rule failures
-    into a single pytest.fail summary.
+async def test_test_case_reviewer(real_client, real_model, jsonl_recorders_tc, row):
+    """Run the full test-case-reviewer pipeline for one fixture row against a real LLM.
 
-    Each input row carries the designed-intent prediction
-    (expected_overall_verdict, expected_partial_objectives, primary_failure);
-    those are attached to the recorded output for post-run match-rate analysis.
+    Parametrized over every row in test_case_review_all_fields.jsonl so each
+    test case is its own pytest item — failures are attributed to a specific
+    test_id and rows can be re-run individually with -k <test_id>.
+
+    Each output record is annotated with the row's designed-intent predictions
+    (expected_overall_verdict, expected_partial_objectives, primary_failure) for
+    post-run match-rate analysis.
     """
-    # Load the fixture
-    tc_inputs = load_jsonl(fixture_name)
-    
     record_input, record_output = jsonl_recorders_tc
-    review_objectives = load_default_review_objectives()
+
+    # Deserialize the fixture row into typed objects.
+    # Support both 'upstream_requirements' and 'requirements' keys for backwards compatibility.
+    test_case = TestCase(**row["test_case"])
+    req_key = "upstream_requirements" if "upstream_requirements" in row else "requirements"
+    requirements = [Requirement(**r) for r in row[req_key]]
+    design_docs = (
+        [DesignDocument(**dd) for dd in row["design_docs"]]
+        if row.get("design_docs") else None
+    )
+
     graph = TCReviewerRunnable(client=real_client, model=real_model)
-    sem = asyncio.Semaphore(MAX_CONCURRENT)
+    state = {
+        "test_case": test_case,
+        "requirements": requirements,
+        "review_objectives": _REVIEW_OBJECTIVES,
+    }
+    if design_docs:
+        state["design_docs"] = design_docs
 
-    async def run_one(idx: int, tc_input: dict):
-        async with sem:
-            test_case = TestCase(**tc_input["test_case"])
-            # Handle both 'requirements' and 'upstream_requirements' keys for backwards compatibility
-            req_key = "upstream_requirements" if "upstream_requirements" in tc_input else "requirements"
-            requirements = [Requirement(**r) for r in tc_input[req_key]]
-            
-            # Handle optional design_docs field
-            design_docs = None
-            if "design_docs" in tc_input and tc_input["design_docs"]:
-                design_docs = [DesignDocument(**dd) for dd in tc_input["design_docs"]]
-            
-            state = {
-                "test_case": test_case,
-                "requirements": requirements,
-                "review_objectives": review_objectives,
-            }
-            if design_docs:
-                state["design_docs"] = design_docs
-            
-            return idx, tc_input, await graph.graph.ainvoke(state)
+    record_input(row)
+    result = await graph.graph.ainvoke(state)
 
-    completed = await asyncio.gather(
-        *(run_one(i, tc_input) for i, tc_input in enumerate(tc_inputs)),
-        return_exceptions=True,
+    # Annotate output with designed-intent predictions before recording.
+    out = serialize_state(result)
+    out["expected_overall_verdict"] = row.get("expected_overall_verdict")
+    out["expected_partial_objectives"] = row.get("expected_partial_objectives", [])
+    out["primary_failure"] = row.get("primary_failure")
+    out["fixture_description"] = row.get("description")
+    record_output(out)
+
+    tc_id = row["test_case"]["test_id"]
+    asmt = result.get("aggregated_assessment")
+    assert isinstance(asmt, TestCaseAssessment), (
+        f"{tc_id}: aggregated_assessment is {type(asmt).__name__}, not TestCaseAssessment "
+        "(aggregator likely skipped due to upstream parse failures)"
     )
-
-    completed_sorted = sorted(
-        [c for c in completed if not isinstance(c, Exception)],
-        key=lambda c: c[0],
-    )
-    exception_failures = [c for c in completed if isinstance(c, Exception)]
-
-    # Write inputs and outputs in input order so line-N alignment is preserved.
-    for _idx, tc_input, result in completed_sorted:
-        record_input(tc_input)
-        out = serialize_state(result)
-        out["expected_overall_verdict"] = tc_input.get("expected_overall_verdict")
-        out["expected_partial_objectives"] = tc_input.get("expected_partial_objectives", [])
-        out["primary_failure"] = tc_input.get("primary_failure")
-        out["fixture_description"] = tc_input.get("description")
-        record_output(out)
-
-    fail_msgs = []
-    for _idx, tc_input, result in completed_sorted:
-        tc_id = tc_input["test_case"]["test_id"]
-        try:
-            asmt = result.get("aggregated_assessment")
-            assert isinstance(asmt, TestCaseAssessment), (
-                f"aggregated_assessment is {type(asmt).__name__}, not TestCaseAssessment "
-                "(aggregator likely skipped due to upstream parse failures)"
-            )
-            _assert_tc_verdict_invariants(asmt, result)
-        except AssertionError as e:
-            fail_msgs.append(f"  {tc_id}: {e}")
-
-    if exception_failures or fail_msgs:
-        n = len(exception_failures) + len(fail_msgs)
-        msg = f"{n}/{len(tc_inputs)} rows failed (fixture: {fixture_name})"
-        if fail_msgs:
-            msg += "\nassertion-failures:\n" + "\n".join(fail_msgs)
-        if exception_failures:
-            msg += "\nexceptions:\n" + "\n".join(f"  {e!r}" for e in exception_failures)
-        pytest.fail(msg)
+    _assert_tc_verdict_invariants(asmt, result)

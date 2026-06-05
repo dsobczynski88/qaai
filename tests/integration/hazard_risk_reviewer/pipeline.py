@@ -16,7 +16,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
 
 from autoqa.components.hazard_risk_reviewer.core import (
     HazardAssessment,
@@ -26,7 +25,8 @@ from autoqa.components.hazard_risk_reviewer.core import (
 from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from autoqa.components.shared.data_integration import transform_hazard_record_to_state
 from autoqa.components.test_suite_reviewer.core import SynthesizedAssessment
-from autoqa.core.config import settings
+from tests.conftest import _TEST_RUN_DIR
+from tests.helpers import serialize_state
 
 
 # --- Collection-time row enumeration -----------------------------------------
@@ -61,56 +61,71 @@ def _load_enhanced_rows():
 
 _ENHANCED_ROWS = _load_enhanced_rows()
 
+_EXPECTED_HAZARD_CODES = ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
+_EXPECTED_DIMENSIONS = [
+    "Hazard Record Completeness and Semantic Integrity",
+    "Software Contribution and Cause Coverage",
+    "Pre-Mitigation Risk and Exploitability Characterization",
+    "Risk Control Identification, Allocation, and Coverage",
+    "Verification Depth and Hazard-Path Effectiveness",
+    "Residual Risk Closure and Acceptability Decision",
+    "HSHA Update and Newly Identified Hazard / Hazardous Situation Capture",
+]
 
-def _serialize_hazard_state(state: dict) -> dict:
+
+def _validate_hazard_assessment(output_state: dict, row_index) -> dict:
+    """Validate a single hazard output state and extract summary info.
+
+    Returns a summary dict with hazard_id, overall_verdict, verdicts, and
+    num_requirements. Raises AssertionError if any invariant is violated.
     """
-    Recursive Pydantic-aware serializer for HazardReviewState. Mirrors
-    tests/helpers.py::serialize_state but handles nested BaseModel lists
-    inside RequirementReview.
-    """
-    out: dict = {}
-    for key, value in state.items():
-        if isinstance(value, BaseModel):
-            out[key] = value.model_dump()
-        elif isinstance(value, list):
-            out[key] = [
-                v.model_dump() if isinstance(v, BaseModel) else v
-                for v in value
-            ]
+    assessment = output_state.get("hazard_assessment")
+    assert isinstance(assessment, HazardAssessment), \
+        f"[Row {row_index}] Expected HazardAssessment, got {type(assessment)}"
+
+    assert assessment.overall_verdict in ("Yes", "No"), \
+        f"[Row {row_index}] overall_verdict must be Yes or No, got {assessment.overall_verdict}"
+
+    num_findings = len(assessment.mandatory_findings)
+    assert num_findings == 7, \
+        f"[Row {row_index}] Expected 7 findings (H1-H7), got {num_findings}"
+
+    for finding in assessment.mandatory_findings:
+        if finding.code == "H5":
+            assert finding.verdict in ("Yes", "No", "N-A"), \
+                f"[Row {row_index}] H5 verdict must be Yes, No, or N-A, got {finding.verdict}"
         else:
-            out[key] = value
-    return out
+            assert finding.verdict in ("Yes", "No"), \
+                f"[Row {row_index}] {finding.code} verdict must be Yes or No, got {finding.verdict}"
+
+    # overall_verdict invariant: Yes iff every finding is Yes or N-A.
+    expected_overall = "Yes" if all(
+        f.verdict in ("Yes", "N-A") for f in assessment.mandatory_findings
+    ) else "No"
+    assert assessment.overall_verdict == expected_overall, \
+        f"[Row {row_index}] overall_verdict={assessment.overall_verdict} contradicts findings"
+
+    return {
+        "hazard_id": assessment.hazard_id,
+        "overall_verdict": assessment.overall_verdict,
+        "verdicts": {f.code: f.verdict for f in assessment.mandatory_findings},
+        "num_requirements": len(output_state.get("requirement_reviews", [])),
+    }
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(
-    "hazard_fixture_name,expected_findings_per_req",
-    [
-        ("hazard_full_traceability", 6),  # all fields: M1-M5 + R6 (with design_docs)
-    ],
-)
-async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name, expected_findings_per_req, jsonl_recorders_hz, request):
+async def test_hazard_risk_reviewer(real_client, real_model, hazard_full_traceability, jsonl_recorders_hz):
     """Run the full hazard pipeline end-to-end against a real LLM.
-    
-    Parametrized to test both:
-    - Min fields (sample_hazard): No design_docs or user_needs, produces M1-M5 + R6 N-A
-    - All fields (hazard_full_traceability): Full traceability with design_docs,
-      user_needs, system_requirements, produces M1-M5 + R6
-    
-    Expected behavior:
-    - RTM sub-pipeline receives design_docs (if present) and produces R6 verdicts
-    - User needs are summarized by HazardNeedsSummarizerNode (if present)
-    - Design docs are summarized by HazardDesignSummarizerNode (if present)
-    - H4 evaluator receives summarized_designs in its payload (if present)
-    - H5 evaluator receives summarized_user_needs in its payload (if present)
-    - Each requirement review has expected number of mandatory findings
-    - Overall hazard assessment has 7 findings (H1-H7)
-    
+
+    Tests the all-fields path: requirements, test_cases, design_docs, user_needs,
+    and system_requirements all populated — produces M1-M5 + R6 verdicts per
+    requirement and H1-H7 at the hazard level.
+
     Records input/output to inputs.jsonl and outputs.jsonl for hazard viewer generation.
     """
-    # Get the fixture dynamically
-    hazard = request.getfixturevalue(hazard_fixture_name)
-    
+    hazard = hazard_full_traceability
+    expected_findings_per_req = 6
+
     record_input, record_output = jsonl_recorders_hz
     
     graph = HazardReviewerRunnable(client=real_client, model=real_model)
@@ -122,7 +137,7 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name
     result: HazardReviewState = await graph.graph.ainvoke(initial_state)
     
     # Record output
-    record_output(_serialize_hazard_state(result))
+    record_output(serialize_state(result))
 
     # Per-requirement RTM evidence — one review per traced requirement.
     reviews = result.get("requirement_reviews", [])
@@ -155,131 +170,34 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_fixture_name
     if hazard.requirements_traceability.design_docs:
         assert summarized_designs is not None, "Expected summarized_designs when design_docs are present"
         assert len(summarized_designs) > 0, "Expected at least one summarized design"
-        print(f"\n[{hazard_fixture_name}] Produced {len(summarized_designs)} summarized designs from {len(hazard.requirements_traceability.design_docs)} design docs")
-    
+        print(f"\nProduced {len(summarized_designs)} summarized designs from {len(hazard.requirements_traceability.design_docs)} design docs")
+
     # Verify summarized_user_needs were produced (if user_needs present)
     summarized_user_needs = result.get("summarized_user_needs")
     if hazard.requirements_traceability.user_needs:
         assert summarized_user_needs is not None, "Expected summarized_user_needs when user_needs are present"
         assert len(summarized_user_needs) > 0, "Expected at least one summarized user need"
-        print(f"[{hazard_fixture_name}] Produced {len(summarized_user_needs)} summarized user needs from {len(hazard.requirements_traceability.user_needs)} user needs")
+        print(f"Produced {len(summarized_user_needs)} summarized user needs from {len(hazard.requirements_traceability.user_needs)} user needs")
 
     # Hazard-level H1-H7 verdict (binary Yes/No; H5 may also be N-A).
+    _validate_hazard_assessment(result, hazard.hazard_id)
     assessment = result.get("hazard_assessment")
-    assert isinstance(assessment, HazardAssessment), f"Expected HazardAssessment, got {type(assessment)}"
     assert assessment.hazard_id == hazard.hazard_id
-    assert assessment.overall_verdict in ("Yes", "No"), \
-        f"Expected overall_verdict to be Yes or No, got {assessment.overall_verdict}"
-    
-    num_hazard_findings = len(assessment.mandatory_findings)
-    assert num_hazard_findings == 7, \
-        f"Expected 7 hazard-level findings (H1-H7), got {num_hazard_findings}"
-    
-    actual_codes = [f.code for f in assessment.mandatory_findings]
-    expected_codes = ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
-    assert actual_codes == expected_codes, \
-        f"Expected codes {expected_codes}, got {actual_codes}"
-    
-    expected_dimensions = [
-        "Hazard Record Completeness and Semantic Integrity",
-        "Software Contribution and Cause Coverage",
-        "Pre-Mitigation Risk and Exploitability Characterization",
-        "Risk Control Identification, Allocation, and Coverage",
-        "Verification Depth and Hazard-Path Effectiveness",
-        "Residual Risk Closure and Acceptability Decision",
-        "HSHA Update and Newly Identified Hazard / Hazardous Situation Capture",
-    ]
-    actual_dimensions = [f.dimension for f in assessment.mandatory_findings]
-    assert actual_dimensions == expected_dimensions, \
-        f"Dimension mismatch. Expected {expected_dimensions}, got {actual_dimensions}"
-    
-    for f in assessment.mandatory_findings:
-        if f.code == "H5":
-            assert f.verdict in ("Yes", "No", "N-A"), \
-                f"H5 verdict should be Yes, No, or N-A, got {f.verdict}"
-        else:
-            assert f.verdict in ("Yes", "No"), \
-                f"{f.code} verdict should be Yes or No, got {f.verdict}"
-    
-    # overall_verdict invariant: Yes iff every dimension is Yes or N-A.
-    expected_overall = "Yes" if all(
-        f.verdict in ("Yes", "N-A") for f in assessment.mandatory_findings
-    ) else "No"
-    assert assessment.overall_verdict == expected_overall, \
-        f"Overall verdict mismatch. Expected {expected_overall}, got {assessment.overall_verdict}"
+    assert [f.code for f in assessment.mandatory_findings] == _EXPECTED_HAZARD_CODES, \
+        f"Expected codes {_EXPECTED_HAZARD_CODES}, got {[f.code for f in assessment.mandatory_findings]}"
+    assert [f.dimension for f in assessment.mandatory_findings] == _EXPECTED_DIMENSIONS, \
+        f"Dimension mismatch. Got {[f.dimension for f in assessment.mandatory_findings]}"
 
-    # Save detailed state for manual inspection
-    output_path = Path(settings.log_file_path).parent / "hazard_pipeline_state.json"
-    output_path.write_text(json.dumps(_serialize_hazard_state(result), indent=2))
-    
-    # Print summary
-    print(f"\n[{hazard_fixture_name}] saved → {output_path}")
-    print(f"[{hazard_fixture_name}] hazard_id = {assessment.hazard_id}")
-    print(f"[{hazard_fixture_name}] overall_verdict = {assessment.overall_verdict}")
-    print(f"[{hazard_fixture_name}] Hazard-level findings (H1-H7):")
-    for f in assessment.mandatory_findings:
-        print(f"  {f.code} {f.dimension}: {f.verdict} — {f.rationale}")
-    print(f"[{hazard_fixture_name}] Requirement-level findings ({expected_findings_per_req} per req):")
-    for r in reviews:
-        print(f"  {r.requirement.req_id}: {len(r.synthesized_assessment.mandatory_findings)} findings")
-        for f in r.synthesized_assessment.mandatory_findings:
-            print(f"    {f.code}: {f.verdict}")
-    
-    # Note: inputs.jsonl and outputs.jsonl are recorded for hazard viewer generation
-    # The hazard viewer (viewer_hz.html) will be auto-generated at session teardown
-    # by the jsonl_recorders_hz fixture
+    # Save detailed state for manual inspection alongside other test artifacts.
+    output_path = _TEST_RUN_DIR / "hazard_pipeline_state.json"
+    output_path.write_text(json.dumps(serialize_state(result), indent=2))
 
-
-def _validate_hazard_assessment(output_state: dict, row_index: int) -> dict:
-    """
-    Validate a single hazard output state and extract summary info.
-    
-    Args:
-        output_state: Result state from graph.ainvoke()
-        row_index: Row number for logging
-    
-    Returns:
-        Summary dict with validation results
-    
-    Raises:
-        AssertionError: If validation fails
-    """
-    assessment = output_state.get("hazard_assessment")
-    assert isinstance(assessment, HazardAssessment), \
-        f"[Row {row_index}] Expected HazardAssessment, got {type(assessment)}"
-    
-    assert assessment.overall_verdict in ("Yes", "No"), \
-        f"[Row {row_index}] overall_verdict must be Yes or No, got {assessment.overall_verdict}"
-    
-    num_findings = len(assessment.mandatory_findings)
-    assert num_findings == 7, \
-        f"[Row {row_index}] Expected 7 findings (H1-H7), got {num_findings}"
-    
-    # Validate each finding
-    for finding in assessment.mandatory_findings:
-        if finding.code == "H5":
-            assert finding.verdict in ("Yes", "No", "N-A"), \
-                f"[Row {row_index}] H5 verdict must be Yes, No, or N-A, got {finding.verdict}"
-        else:
-            assert finding.verdict in ("Yes", "No"), \
-                f"[Row {row_index}] {finding.code} verdict must be Yes or No, got {finding.verdict}"
-    
-    # Validate overall_verdict invariant
-    expected_overall = "Yes" if all(
-        f.verdict in ("Yes", "N-A") for f in assessment.mandatory_findings
-    ) else "No"
-    assert assessment.overall_verdict == expected_overall, \
-        f"[Row {row_index}] overall_verdict={assessment.overall_verdict} contradicts findings"
-    
-    # Extract summary
-    verdicts = {f.code: f.verdict for f in assessment.mandatory_findings}
-    
-    return {
-        "hazard_id": assessment.hazard_id,
-        "overall_verdict": assessment.overall_verdict,
-        "verdicts": verdicts,
-        "num_requirements": len(output_state.get("requirement_reviews", [])),
-    }
+    print(
+        f"\nhazard_id={assessment.hazard_id} overall={assessment.overall_verdict} "
+        f"({len(reviews)} reqs) | "
+        f"{{{', '.join(f'{f.code}:{f.verdict}' for f in assessment.mandatory_findings)}}}"
+        f"\n  → {output_path}"
+    )
 
 
 @pytest.mark.integration
@@ -304,7 +222,7 @@ async def test_hazard_risk_reviewer_batch_via_transformation(
 
     graph = HazardReviewerRunnable(client=real_client, model=real_model)
     output_state = await graph.graph.ainvoke({"hazard": enhanced_row})
-    record_output(_serialize_hazard_state(output_state))
+    record_output(serialize_state(output_state))
 
     hazard_id = enhanced_row.hazard_id or "<no-id>"
     summary = _validate_hazard_assessment(output_state, hazard_id)

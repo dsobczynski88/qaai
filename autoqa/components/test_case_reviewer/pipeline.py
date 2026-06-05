@@ -18,11 +18,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
 from autoqa.components.clients import RateLimitOpenAIClient
-from autoqa.components.shared.nodes import (
-    make_data_integration_node,
+from autoqa.components.shared.data_integration import (
+    DataIntegrationNode,
     make_transform_node_test_case_review,
+    PyJamaNodeConfig,
 )
-from autoqa.components.shared.data_integration import PyJamaNodeConfig
+from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 from autoqa.utils import save_graph_png
 
@@ -79,35 +80,39 @@ class TCReviewerRunnable:
         model_kwargs: dict = {},
         checkpointer: Union[MemorySaver, None] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
+        cache_manager: Optional[ReviewCacheManager] = None,
     ):
         self.client = client
         self.model = model
         self.model_kwargs = model_kwargs
         self.checkpointer = checkpointer
         self.pyjama_config = pyjama_config
+        # Optional shared cache; per-run behaviour driven by state["cache_mode"].
+        self.cache_manager = cache_manager
         self.graph = self.build()
 
     def build(self) -> Runnable:
         sg = StateGraph(TCReviewState)
 
         # Data integration layer
-        data_integration = make_data_integration_node(self.pyjama_config)
+        data_integration = DataIntegrationNode(self.pyjama_config)
         transform = make_transform_node_test_case_review()
 
+        cm = self.cache_manager
         decomposer = make_tc_decomposer_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         coverage_eval = make_coverage_single_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         logical_eval = make_logical_single_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         prereqs_eval = make_prereqs_single_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
         aggregator = make_aggregator_node(
-            self.client, self.model, self.model_kwargs,
+            self.client, self.model, self.model_kwargs, cache_manager=cm,
         )
 
         # Add all nodes

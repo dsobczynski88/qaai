@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from typing import Optional, Union
 from pydantic import BaseModel, Field
@@ -9,6 +10,8 @@ from autoqa.core.constants import (
     DEFAULT_MAX_TOKENS_PER_MINUTE,
     DEFAULT_MAX_OUTPUT_TOKENS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PromptConfig(BaseModel):
@@ -99,15 +102,23 @@ class Settings(BaseSettings):
     token_cost_input_per_m: float = Field(default=1.00, alias="TOKEN_COST_INPUT_PER_M")
     token_cost_output_per_m: float = Field(default=5.00, alias="TOKEN_COST_OUTPUT_PER_M")
 
-    # Hazard reviewer cache (set ENABLE_HAZARD_CACHE=false to disable entirely)
+    # Reviewer cache, shared by all three reviewers (set ENABLE_CACHE=false to
+    # disable entirely; CACHE_DIR holds one folder per entity id — e.g.
+    # cache/HAZ-PUMP-001, cache/REQ-PUMP-101, cache/TEST-PUMP-201).
     redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
-    hazard_cache_dir: str = Field(default="./cache/hazard", alias="HAZARD_CACHE_DIR")
-    enable_hazard_cache: bool = Field(default=True, alias="ENABLE_HAZARD_CACHE")
+    cache_dir: str = Field(default="./cache", alias="CACHE_DIR")
+    enable_cache: bool = Field(default=True, alias="ENABLE_CACHE")
 
     # Optional JAMA / Pyjama integration settings
     jama_host_address: Optional[str] = Field(default=None, alias='JAMA_HOST_ADDRESS')
     jama_client_id: Optional[str] = Field(default=None, alias='JAMA_CLIENT_ID')
     jama_client_secret: Optional[str] = Field(default=None, alias='JAMA_CLIENT_SECRET')
+
+    # When True, the PyJama data source runs strictly from the disk cache: no
+    # live JAMA API calls are made and invalid/mock credentials are tolerated.
+    # Acts as the server-wide default; the API "test mode" toggle overrides it
+    # per request. See PyJamaNodeConfig.test_mode in the pyjama package.
+    pyjama_test_mode: bool = Field(default=False, alias='PYJAMA_TEST_MODE')
 
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
@@ -134,4 +145,17 @@ class Settings(BaseSettings):
         populate_by_name=True
     )
 
+# Initialize settings and log configuration
 settings = Settings()
+
+# Debug logging
+logger.info("=" * 60)
+logger.info("AutoQA Configuration Loaded")
+logger.info("=" * 60)
+logger.info("OpenAI API Key: %s", settings.openai_api_key[:20] + "..." if settings.openai_api_key else "NOT SET")
+logger.info("Model: %s", settings.model)
+logger.info("Cache Enabled: %s", settings.enable_cache)
+logger.info("Cache Dir: %s", settings.cache_dir)
+logger.info("JAMA Host: %s", settings.jama_host_address or "NOT SET")
+logger.info("PyJama Test Mode: %s", settings.pyjama_test_mode)
+logger.info("=" * 60)

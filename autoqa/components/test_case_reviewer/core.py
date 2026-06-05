@@ -193,6 +193,9 @@ class TestCaseAssessment(BaseModel):
 
 
 class TCReviewState(TypedDict, total=False):
+    # Caching control: "off" | "partial" (default) | "full". Threaded from the
+    # API/service into every node; see autoqa.core.cache.ReviewCacheManager.
+    cache_mode: str
     # Data source fields (Option 1: local OR Option 2: JAMA)
     test_case: TestCase
     requirements: List[Requirement]

@@ -225,6 +225,9 @@ class SynthesizedAssessment(BaseModel):
 
 
 class RTMReviewState(TypedDict, total=False):
+    # Caching control: "off" | "partial" (default) | "full". Threaded from the
+    # API/service into every node; see autoqa.core.cache.ReviewCacheManager.
+    cache_mode: str
     # Data source fields (Option 1: local OR Option 2: JAMA)
     requirement: Requirement
     test_cases: List[TestCase]

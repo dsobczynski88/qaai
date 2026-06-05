@@ -6,13 +6,13 @@ Class hierarchy:
 - StandardLLMNode(BaseLLMNode, ABC): single-call Template Method; subclasses
   implement _build_payload/_format_response; __call__ orchestrates
   validate -> build -> call -> parse -> format.
+- BatchedLLMNode(BaseLLMNode, ABC): multi-batch Template Method; subclasses
+  implement _get_items/_build_batch_payload/_unwrap_batch_result/_build_result;
+  __call__ fans out all batches in parallel via asyncio.gather.
 - DecomposerNode(StandardLLMNode): decomposes a single requirement into atomic
   specifications; reused by every reviewer component.
-
-Data Integration:
-- make_data_integration_node(): factory for conditional JAMA fetch node
-- make_transform_node_*(): factories for JAMA→state transform nodes
 """
+import asyncio
 import html
 import json
 import re
@@ -25,12 +25,6 @@ from autoqa.prj_logger import ProjectLogger
 from autoqa.core.config import settings
 
 from .core import DecomposedRequirement
-from .data_integration import (
-    DataIntegrationNode,
-    PyJamaNodeConfig,
-    transform_test_suite_review_to_state,
-    transform_test_case_review_to_state,
-)
 
 project_logger = ProjectLogger(name="logger.shared.nodes", log_file=settings.log_file_path)
 project_logger.config()
@@ -109,6 +103,7 @@ class BaseLLMNode(ABC):
         model_kwargs: dict | None = None,
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
+        is_final_output: bool = False,
     ):
         self.client = client
         self.model = model
@@ -116,6 +111,31 @@ class BaseLLMNode(ABC):
         self.model_kwargs = model_kwargs or {}
         self.cache_manager = cache_manager
         self.prompt_version = prompt_version
+        # When True this node produces the graph's final assessment. Under the
+        # "partial" cache mode such a node always re-runs (skips cache read) so
+        # the user gets a fresh output while still reusing cached interim nodes.
+        self.is_final_output = is_final_output
+
+    # ------------------------------------------------------------------
+    # Cache gating (driven by state["cache_mode"]: "off" | "partial" | "full")
+    # ------------------------------------------------------------------
+
+    def _cache_read_allowed(self, state: Any) -> bool:
+        """Whether this node may read from cache for the given state."""
+        if self.cache_manager is None or not self.prompt_version:
+            return False
+        mode = (state or {}).get("cache_mode", "partial")
+        if mode == "off":
+            return False
+        if mode == "partial" and self.is_final_output:
+            return False
+        return True
+
+    def _cache_write_allowed(self, state: Any) -> bool:
+        """Whether this node may write to cache for the given state."""
+        if self.cache_manager is None or not self.prompt_version:
+            return False
+        return (state or {}).get("cache_mode", "partial") != "off"
 
     @abstractmethod
     def _validate_state(self, state: Any) -> bool:
@@ -293,7 +313,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
     _format_response; __call__ orchestrates the full flow. Generic over the
     concrete TypedDict state — subclasses pin their own state type.
 
-    Cache support: assign a HazardCacheManager to self.cache_manager and set
+    Cache support: assign a ReviewCacheManager to self.cache_manager and set
     self.prompt_version, then override _get_cache_entity_id() to return the
     entity key (e.g. hazard_id). When both are non-None, __call__ checks the
     cache before the LLM call and writes through after a miss.
@@ -308,8 +328,12 @@ class StandardLLMNode(BaseLLMNode, ABC):
         model_kwargs: dict | None = None,
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
+        is_final_output: bool = False,
     ):
-        super().__init__(client, model, system_prompt, model_kwargs, cache_manager, prompt_version)
+        super().__init__(
+            client, model, system_prompt, model_kwargs,
+            cache_manager, prompt_version, is_final_output,
+        )
         self.response_model = response_model
 
     def _get_cache_entity_id(self, state: Any) -> Optional[str]:
@@ -351,7 +375,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
         node_name = self._get_cache_node_name()
 
         # --- Tier 2/3: cache check ---
-        if self.cache_manager is not None and self.prompt_version:
+        if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
                 cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
@@ -388,7 +412,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
             return self._get_skip_response()
 
         # --- Tier 2/3: write-through cache ---
-        if self.cache_manager is not None and self.prompt_version:
+        if self._cache_write_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
                 usage = getattr(result, "usage", None)
@@ -396,7 +420,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
                 completion_tokens = getattr(usage, "completion_tokens", 0) or 0
                 try:
                     await self.cache_manager.set(
-                        hazard_id=entity_id,
+                        entity_id=entity_id,
                         node_name=node_name,
                         prompt_version=self.prompt_version,
                         result_dict=parsed.model_dump(),
@@ -410,11 +434,204 @@ class StandardLLMNode(BaseLLMNode, ABC):
         return self._format_response(parsed)
 
 
+class BatchedLLMNode(BaseLLMNode, ABC):
+    """
+    Multi-batch Template Method node. Subclasses implement the hooks below;
+    __call__ fans all batches out in parallel via asyncio.gather and flattens results.
+
+    Required hooks:
+        _validate_state(state) -> bool
+        _get_items(state) -> list               — items to split into batches
+        _build_batch_payload(state, batch) -> dict
+        _unwrap_batch_result(parsed) -> list    — extract flat list from Pydantic model
+        _build_result(state, summaries) -> dict — assemble the final state update
+
+    Optional hooks (override to enable caching, mirrors StandardLLMNode pattern):
+        _get_cache_entity_id(state) -> Optional[str]  — return None to skip caching
+        _get_cache_node_name() -> str
+        _restore_from_cache(cached: dict) -> list
+        _serialize_for_cache(summaries: list)
+        _get_skip_response() -> dict
+    """
+
+    BATCH_SIZE: int = 10  # Override per subclass
+
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        response_model,
+        system_prompt: str,
+        model_kwargs: dict | None = None,
+        cache_manager: Optional[Any] = None,
+        prompt_version: str = "",
+        is_final_output: bool = False,
+    ):
+        super().__init__(
+            client, model, system_prompt, model_kwargs,
+            cache_manager, prompt_version, is_final_output,
+        )
+        self.response_model = response_model
+
+    @abstractmethod
+    def _get_items(self, state: Any) -> list:
+        """Return the flat list of items to split into batches."""
+        pass
+
+    @abstractmethod
+    def _build_batch_payload(self, state: Any, batch: list) -> dict:
+        """Build the LLM payload for one batch of items. Extract context from state."""
+        pass
+
+    @abstractmethod
+    def _unwrap_batch_result(self, parsed: Any) -> list:
+        """Extract the flat list of results from the parsed Pydantic model."""
+        pass
+
+    def _get_skip_response(self) -> dict:
+        return {}
+
+    @abstractmethod
+    def _build_result(self, state: Any, all_summaries: list) -> dict:
+        """Assemble the final state-update dict from the collected summaries."""
+        pass
+
+    # --- Optional cache hooks (default: no-op, mirrors StandardLLMNode) ---
+
+    def _get_cache_entity_id(self, state: Any) -> Optional[str]:
+        return None
+
+    def _get_cache_node_name(self) -> str:
+        return self.__class__.__name__.lower()
+
+    def _restore_from_cache(self, cached: dict) -> list:
+        raise NotImplementedError("Override _restore_from_cache when _get_cache_entity_id is set")
+
+    def _serialize_for_cache(self, summaries: list) -> Any:
+        return [s.model_dump() for s in summaries]
+
+    # --- Core batching loop ---
+
+    async def _process_single_batch(
+        self, state: Any, batch: list, batch_num: int, num_batches: int
+    ) -> tuple[list, int, int]:
+        """Returns (summaries, prompt_tokens, completion_tokens)."""
+        try:
+            payload = self._build_batch_payload(state, batch)
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": json.dumps(payload)},
+            ]
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "%s: batch %d/%d payload serialization failed: %s",
+                self.__class__.__name__, batch_num, num_batches, exc,
+            )
+            return [], 0, 0
+
+        result = await self.client.chat_completion(
+            model=self.model,
+            messages=messages,
+            **self.model_kwargs,
+        )
+        usage = getattr(result, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+        parsed = self._parse_llm_response(result, self.response_model, self.__class__.__name__)
+        if parsed is None:
+            logger.warning(
+                "%s: batch %d/%d failed to parse, skipping",
+                self.__class__.__name__, batch_num, num_batches,
+            )
+            return [], prompt_tokens, completion_tokens
+        return self._unwrap_batch_result(parsed), prompt_tokens, completion_tokens
+
+    async def __call__(self, state: Any) -> dict:
+        if not self._validate_state(state):
+            logger.debug("%s: skipping — validation failed", self.__class__.__name__)
+            return self._get_skip_response()
+
+        # --- Cache check ---
+        node_name = self._get_cache_node_name()
+        if self._cache_read_allowed(state):
+            entity_id = self._get_cache_entity_id(state)
+            if entity_id:
+                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+                if cached is not None:
+                    try:
+                        restored = self._restore_from_cache(cached)
+                        return self._build_result(state, restored)
+                    except Exception as exc:
+                        logger.warning(
+                            "%s: cache restore failed, re-running — %s",
+                            self.__class__.__name__, exc,
+                        )
+
+        items = self._get_items(state)
+        if not items:
+            logger.warning("%s: no items to process", self.__class__.__name__)
+            return self._get_skip_response()
+
+        num_batches = (len(items) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+        batches = [items[i:i + self.BATCH_SIZE] for i in range(0, len(items), self.BATCH_SIZE)]
+        logger.info(
+            "%s: processing %d items in %d batches (batch_size=%d)",
+            self.__class__.__name__, len(items), num_batches, self.BATCH_SIZE,
+        )
+
+        batch_results = await asyncio.gather(*[
+            self._process_single_batch(state, batch, i + 1, num_batches)
+            for i, batch in enumerate(batches)
+        ])
+        all_summaries = [s for summaries, _, _ in batch_results for s in summaries]
+        total_prompt_tokens = sum(pt for _, pt, _ in batch_results)
+        total_completion_tokens = sum(ct for _, _, ct in batch_results)
+
+        if not all_summaries:
+            logger.warning("%s: all batches failed or returned empty", self.__class__.__name__)
+            return self._get_skip_response()
+
+        if len(all_summaries) != len(items):
+            logger.warning(
+                "%s: summary count mismatch: expected %d, got %d",
+                self.__class__.__name__, len(items), len(all_summaries),
+            )
+
+        logger.info(
+            "%s: completed %d items → %d summaries",
+            self.__class__.__name__, len(items), len(all_summaries),
+        )
+
+        # --- Cache write-through ---
+        if self._cache_write_allowed(state):
+            entity_id = self._get_cache_entity_id(state)
+            if entity_id:
+                try:
+                    await self.cache_manager.set(
+                        entity_id=entity_id,
+                        node_name=node_name,
+                        prompt_version=self.prompt_version,
+                        result_dict=self._serialize_for_cache(all_summaries),
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                        model=self.model,
+                    )
+                except Exception as exc:
+                    logger.warning("%s: cache write failed — %s", self.__class__.__name__, exc)
+
+        return self._build_result(state, all_summaries)
+
+
 class DecomposerNode(StandardLLMNode):
     """Decomposes a single requirement into atomic specifications."""
 
     def _validate_state(self, state: Any) -> bool:
         return state.get("requirement") is not None
+
+    def _get_cache_entity_id(self, state: Any) -> Optional[str]:
+        requirement = state.get("requirement")
+        return getattr(requirement, "req_id", None) if requirement else None
 
     def _build_payload(self, state: Any) -> dict:
         requirement = state.get("requirement")
@@ -436,11 +653,13 @@ def make_decomposer_node(
     model: str,
     model_kwargs: dict,
     prompt_template: str = "decomposer/v5.0.0/template.jinja2",
+    cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> DecomposerNode:
     """
     Create a DecomposerNode with prompt loaded from a Jinja2 template.
     """
+    from autoqa.core.cache import ReviewCacheManager
     system_prompt = render_prompt(prompt_template, **template_vars)
     return DecomposerNode(
         client=client,
@@ -448,114 +667,8 @@ def make_decomposer_node(
         response_model=DecomposedRequirement,
         system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
     )
 
 
-# Data Integration Node Factories
-
-def make_data_integration_node(
-    pyjama_config: Optional[PyJamaNodeConfig] = None,
-) -> DataIntegrationNode:
-    """
-    Create a DataIntegrationNode for conditional JAMA fetching.
-    
-    This node serves as the entry point for all pipelines, supporting two modes:
-    - Local mode: pyjama_request absent → no-op passthrough
-    - JAMA mode: pyjama_request present → fetch from baseline
-    
-    Args:
-        pyjama_config: Optional PyJama configuration. If None, will attempt
-                      lazy initialization from environment variables.
-    
-    Returns:
-        DataIntegrationNode: Configured data integration node
-    
-    Example:
-        >>> # In pipeline.py
-        >>> data_integration = make_data_integration_node(pyjama_config)
-        >>> sg.add_node("data_integration", data_integration)
-        >>> sg.add_edge(START, "data_integration")
-    """
-    return DataIntegrationNode(pyjama_config)
-
-
-def make_transform_node_test_suite_review():
-    """
-    Create a transform node for test_suite_reviewer (RTM) pipeline.
-    
-    Converts JAMA test_suite_review data to RTMReviewState format:
-    - jama_data present: transforms to {requirement, test_cases}
-    - jama_data absent: no-op (data already in state)
-    
-    Returns:
-        Callable node function compatible with LangGraph
-    
-    Example:
-        >>> # In test_suite_reviewer/pipeline.py
-        >>> transform = make_transform_node_test_suite_review()
-        >>> sg.add_node("transform", transform)
-        >>> sg.add_edge("data_integration", "transform")
-    """
-    def transform(state) -> dict:
-        jama_data = state.get("jama_data")
-        
-        if jama_data:
-            # JAMA path: transform raw data to state format
-            logger.info("Transforming %d JAMA entries to RTMReviewState format", len(jama_data))
-            transformed = transform_test_suite_review_to_state(jama_data)
-            if transformed:
-                # Return first entry (single requirement per invocation)
-                # For batch processing, caller should loop over jama_data
-                logger.info("Transform successful: requirement=%s, test_cases=%d",
-                          transformed[0].get("requirement", {}).req_id if transformed[0].get("requirement") else "unknown",
-                          len(transformed[0].get("test_cases", [])))
-                return transformed[0]
-            logger.warning("Transform returned empty result")
-            return {}
-        
-        # Local path: data already in state (requirement, test_cases)
-        logger.debug("Local mode: skipping JAMA transform")
-        return {}
-    
-    return transform
-
-
-def make_transform_node_test_case_review():
-    """
-    Create a transform node for test_case_reviewer pipeline.
-    
-    Converts JAMA test_case_review data to TCReviewState format:
-    - jama_data present: transforms to {test_case, requirements}
-    - jama_data absent: no-op (data already in state)
-    
-    Returns:
-        Callable node function compatible with LangGraph
-    
-    Example:
-        >>> # In test_case_reviewer/pipeline.py
-        >>> transform = make_transform_node_test_case_review()
-        >>> sg.add_node("transform", transform)
-        >>> sg.add_edge("data_integration", "transform")
-    """
-    def transform(state) -> dict:
-        jama_data = state.get("jama_data")
-        
-        if jama_data:
-            # JAMA path: transform raw data to state format
-            logger.info("Transforming %d JAMA entries to TCReviewState format", len(jama_data))
-            transformed = transform_test_case_review_to_state(jama_data)
-            if transformed:
-                # Return first entry (single test case per invocation)
-                # For batch processing, caller should loop over jama_data
-                logger.info("Transform successful: test_case=%s, requirements=%d",
-                          transformed[0].get("test_case", {}).test_id if transformed[0].get("test_case") else "unknown",
-                          len(transformed[0].get("requirements", [])))
-                return transformed[0]
-            logger.warning("Transform returned empty result")
-            return {}
-        
-        # Local path: data already in state (test_case, requirements)
-        logger.debug("Local mode: skipping JAMA transform")
-        return {}
-    
-    return transform

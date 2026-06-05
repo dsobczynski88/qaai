@@ -33,15 +33,14 @@ def test_hazard_review_state_has_pyjama_request():
 
 
 def test_data_integration_node_factory():
-    """Verify make_data_integration_node factory works."""
-    from autoqa.components.shared.nodes import make_data_integration_node
+    """Verify DataIntegrationNode can be instantiated directly."""
     from autoqa.components.shared.data_integration import DataIntegrationNode
-    
-    node = make_data_integration_node(pyjama_config=None)
+
+    node = DataIntegrationNode(pyjama_config=None)
     assert isinstance(node, DataIntegrationNode), \
         f"Expected DataIntegrationNode, got {type(node)}"
-    
-    print("✓ make_data_integration_node factory creates DataIntegrationNode")
+
+    print("✓ DataIntegrationNode instantiates correctly")
 
 
 def test_hazard_reviewer_runnable_has_data_integration():

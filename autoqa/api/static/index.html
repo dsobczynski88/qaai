@@ -453,6 +453,37 @@
     0%   { background-size: 200%; background-position: 100% 0; }
     100% { background-size: 200%; background-position: 0% 0; }
   }
+
+  /* ── Cache toggle ── */
+  .cache-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 14px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .cache-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .cache-check input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+  .cache-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--muted);
+    color: var(--muted);
+    font-size: 10px;
+    font-style: normal;
+    cursor: help;
+  }
+  .cache-info:hover, .cache-info:focus { color: var(--accent); border-color: var(--accent); outline: none; }
 </style>
 </head>
 <body>
@@ -483,9 +514,21 @@
         <label>JAMA Baseline ID</label>
         <input type="text" id="rtm-baseline" placeholder="e.g. BASE-84429" autocomplete="off">
       </div>
-      <div class="field">
-        <label>Thread ID Prefix</label>
-        <input type="text" id="rtm-prefix" placeholder="e.g. rtm-review-001" autocomplete="off">
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="rtm-cache" checked>
+          <span>Use cached results</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When enabled, all intermediate analysis is reused from cache and only the final assessment is regenerated (partial caching). Inside a hazard analysis the embedded test-suite review is fully cached. Disable to recompute everything from scratch.">i</span>
+      </div>
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="rtm-test-mode" checked>
+          <span>Test mode (cached JAMA only)</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When test mode is on, AutoQA runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
       </div>
       <button class="btn-submit" id="btn-rtm" onclick="submitBaseline('rtm')">
         <span>▶</span> Run Requirement Coverage Review
@@ -506,9 +549,21 @@
         <label>JAMA Baseline ID</label>
         <input type="text" id="tc-baseline" placeholder="e.g. BASE-84429" autocomplete="off">
       </div>
-      <div class="field">
-        <label>Thread ID Prefix</label>
-        <input type="text" id="tc-prefix" placeholder="e.g. tc-review-001" autocomplete="off">
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="tc-cache" checked>
+          <span>Use cached results</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When enabled, all intermediate analysis is reused from cache and only the final assessment is regenerated (partial caching). Disable to recompute everything from scratch.">i</span>
+      </div>
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="tc-test-mode" checked>
+          <span>Test mode (cached JAMA only)</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When test mode is on, AutoQA runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
       </div>
       <button class="btn-submit" id="btn-tc" onclick="submitBaseline('tc')">
         <span>▶</span> Run Test Case Adequacy Review
@@ -521,17 +576,13 @@
     <div class="card-header">
       <div class="radio-dot"></div>
       <span class="card-title">Software Hazard Analysis</span>
-      <span class="card-badge">Hazard Risk Reviewer</span>
+      <span class="card-badge">Hazard Risk Review</span>
     </div>
     <div class="form-panel" id="panel-hz">
       <div class="panel-rule"></div>
       <div class="field">
         <label>Project Name</label>
         <input type="text" id="hz-project" placeholder="e.g. Infusion Pump SW v3.0" autocomplete="off">
-      </div>
-      <div class="field">
-        <label>Thread ID Prefix</label>
-        <input type="text" id="hz-prefix" placeholder="e.g. sha-review-001" autocomplete="off">
       </div>
       <div class="field">
         <label>SHA Excel Table</label>
@@ -550,6 +601,22 @@
       <div class="field">
         <label>Sheet Name <span style="color:var(--muted);font-size:10px">(optional)</span></label>
         <input type="text" id="hz-sheet" placeholder="SHA Table" autocomplete="off">
+      </div>
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="hz-cache" checked>
+          <span>Use cached results</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When enabled, all intermediate analysis (H1–H7, summarizers, and the embedded test-suite review per requirement) is reused from cache and only the final hazard assessment is regenerated (partial caching). The embedded test-suite review is fully cached. Disable to recompute everything from scratch.">i</span>
+      </div>
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="hz-test-mode" checked>
+          <span>Test mode (cached JAMA only)</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When test mode is on, the bidirectional-trace JAMA lookup runs strictly from previously cached results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
       </div>
       <button class="btn-submit" id="btn-hz" onclick="submitHazard()">
         <span>▶</span> Run Hazard Risk Review
@@ -589,6 +656,33 @@
 </div>
 
 <script>
+  /**
+   * Detect the root path based on the current URL.
+   * 
+   * Examples:
+   * - JupyterHub: https://aihub-ohio.aws.baxter.com/user/john/proxy/8000/ → /user/john/proxy/8000
+   * - Local: http://localhost:8000/ → ''
+   * - VSCode: https://aihub-ohio.aws.baxter.com/user/john/vscode/proxy/8000/ → /user/john/vscode/proxy/8000
+   */
+  function detectRootPath() {
+    const pathname = window.location.pathname;
+    
+    // Match JupyterHub patterns: /user/{user}/proxy/{port} or /user/{user}/vscode/proxy/{port}
+    const jupyterHubMatch = pathname.match(/^(\/user\/[^/]+\/(vscode\/)?proxy\/\d+)(\/|$)/);
+    if (jupyterHubMatch) {
+      return jupyterHubMatch[1];
+    }
+    
+    // Default to empty string for local/direct access
+    return '';
+  }
+
+  // Global constant used by all fetch() calls
+  const ROOT_PATH = detectRootPath();
+  
+  // Log the detected path for debugging
+  console.log('AutoQA detected root path:', ROOT_PATH || '(local mode)');
+
   let activeCard = null;
 
   function selectCard(id) {
@@ -641,14 +735,14 @@
   async function submitBaseline(type) {
     const isRtm = type === 'rtm';
     const baseline = document.getElementById(type + '-baseline').value.trim();
-    const prefix   = document.getElementById(type + '-prefix').value.trim();
+    const useCache = document.getElementById(type + '-cache').checked;
+    const testMode = document.getElementById(type + '-test-mode').checked;
 
     if (!baseline) { alert('Please enter a JAMA Baseline ID.'); return; }
-    if (!prefix)   { alert('Please enter a Thread ID Prefix.'); return; }
 
     const endpoint = isRtm
-      ? '/api/v1/review/from-baseline'
-      : '/api/v1/test-case-review/from-baseline';
+      ? '/api/v1/test-suite-review'
+      : '/api/v1/test-case-review';
     const filename = isRtm ? 'autoqa_rtm_review.html' : 'autoqa_tc_review.html';
     const label    = isRtm ? 'Requirement Coverage Review' : 'Test Case Adequacy Review';
 
@@ -659,10 +753,10 @@
     setButtons(true);
 
     try {
-      const resp = await fetch(endpoint, {
+      const resp = await fetch(ROOT_PATH + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ thread_id_prefix: prefix, baseline_id: baseline }),
+        body: JSON.stringify({ baseline_id: baseline, use_cache: useCache, test_mode: testMode }),
       });
 
       if (!resp.ok) {
@@ -682,13 +776,13 @@
   // ── Hazard submit ──
   async function submitHazard() {
     const project = document.getElementById('hz-project').value.trim();
-    const prefix  = document.getElementById('hz-prefix').value.trim();
     const sheet   = document.getElementById('hz-sheet').value.trim() || 'SHA Table';
+    const useCache = document.getElementById('hz-cache').checked;
+    const testMode = document.getElementById('hz-test-mode').checked;
     const fileInput = document.getElementById('hz-file');
 
-    if (!project)              { alert('Please enter a project name.'); return; }
-    if (!prefix)               { alert('Please enter a Thread ID Prefix.'); return; }
-    if (!fileInput.files[0])   { alert('Please upload a SHA Excel file.'); return; }
+    if (!project)            { alert('Please enter a project name.'); return; }
+    if (!fileInput.files[0]) { alert('Please upload a SHA Excel file.'); return; }
 
     showLoading(
       'Running Hazard Risk Review…',
@@ -698,12 +792,13 @@
 
     try {
       const form = new FormData();
-      form.append('thread_id_prefix', prefix);
       form.append('project_name', project);
       form.append('file', fileInput.files[0]);
       form.append('sheet_name', sheet);
+      form.append('use_cache', useCache);
+      form.append('test_mode', testMode);
 
-      const resp = await fetch('/api/v1/hazard-review/from-excel-upload', {
+      const resp = await fetch(ROOT_PATH + '/api/v1/hazard-risk-review', {
         method: 'POST',
         body: form,
       });
