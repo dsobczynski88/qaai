@@ -731,6 +731,61 @@
     });
   }
 
+  // ── Async job helpers ──
+  // Reviews run as background jobs: POST returns 202 + job_id, then we poll a
+  // fast status endpoint and download the report when done. Because every request
+  // is sub-second, the upstream proxy never idles out (no more 504s).
+  const POLL_INTERVAL_MS = 4000;
+
+  function fmtElapsed(startTs) {
+    const s = Math.round((Date.now() - startTs) / 1000);
+    if (s < 60) return `${s}s elapsed`;
+    const m = Math.floor(s / 60), r = s % 60;
+    return `${m}m ${r}s elapsed`;
+  }
+
+  async function parseErr(resp) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+    return `${resp.status}: ${err.detail || JSON.stringify(err)}`;
+  }
+
+  // Submit a job (POST -> 202 {job_id}) then poll to completion and download.
+  async function runJob(endpoint, fetchOpts, filename, label, baseSub) {
+    showLoading(`Running ${label}…`, baseSub);
+    setButtons(true);
+    const startTs = Date.now();
+    try {
+      const submit = await fetch(ROOT_PATH + endpoint, fetchOpts);
+      if (!submit.ok) throw new Error(await parseErr(submit));
+      const { job_id } = await submit.json();
+      if (!job_id) throw new Error('Server did not return a job_id.');
+
+      // Poll status until the job reaches a terminal state.
+      while (true) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        const statusResp = await fetch(ROOT_PATH + '/api/v1/jobs/' + job_id);
+        if (!statusResp.ok) throw new Error(await parseErr(statusResp));
+        const job = await statusResp.json();
+
+        if (job.status === 'completed') {
+          const resultResp = await fetch(ROOT_PATH + '/api/v1/jobs/' + job_id + '/result');
+          if (!resultResp.ok) throw new Error(await parseErr(resultResp));
+          showResult(await resultResp.blob(), filename);
+          return;
+        }
+        if (job.status === 'failed') {
+          throw new Error(job.error || 'Review failed.');
+        }
+        // pending / running — keep the user informed.
+        document.getElementById('status-sub').textContent = `${baseSub} · ${fmtElapsed(startTs)}`;
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      setButtons(false);
+    }
+  }
+
   // ── Baseline submit (RTM + TC) ──
   async function submitBaseline(type) {
     const isRtm = type === 'rtm';
@@ -746,31 +801,17 @@
     const filename = isRtm ? 'autoqa_rtm_review.html' : 'autoqa_tc_review.html';
     const label    = isRtm ? 'Requirement Coverage Review' : 'Test Case Adequacy Review';
 
-    showLoading(
-      `Running ${label}…`,
-      `Fetching baseline ${baseline} from JAMA and processing requirements. This may take several minutes.`
-    );
-    setButtons(true);
-
-    try {
-      const resp = await fetch(ROOT_PATH + endpoint, {
+    await runJob(
+      endpoint,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ baseline_id: baseline, use_cache: useCache, test_mode: testMode }),
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        throw new Error(`${resp.status}: ${err.detail || JSON.stringify(err)}`);
-      }
-
-      const blob = await resp.blob();
-      showResult(blob, filename);
-    } catch (e) {
-      showError(e.message);
-    } finally {
-      setButtons(false);
-    }
+      },
+      filename,
+      label,
+      `Fetching baseline ${baseline} from JAMA and processing requirements. This may take several minutes.`
+    );
   }
 
   // ── Hazard submit ──
@@ -784,37 +825,20 @@
     if (!project)            { alert('Please enter a project name.'); return; }
     if (!fileInput.files[0]) { alert('Please upload a SHA Excel file.'); return; }
 
-    showLoading(
-      'Running Hazard Risk Review…',
+    const form = new FormData();
+    form.append('project_name', project);
+    form.append('file', fileInput.files[0]);
+    form.append('sheet_name', sheet);
+    form.append('use_cache', useCache);
+    form.append('test_mode', testMode);
+
+    await runJob(
+      '/api/v1/hazard-risk-review',
+      { method: 'POST', body: form },
+      'autoqa_hazard_review.html',
+      'Hazard Risk Review',
       `Processing ${fileInput.files[0].name} · ${project}. This may take several minutes per hazard row.`
     );
-    setButtons(true);
-
-    try {
-      const form = new FormData();
-      form.append('project_name', project);
-      form.append('file', fileInput.files[0]);
-      form.append('sheet_name', sheet);
-      form.append('use_cache', useCache);
-      form.append('test_mode', testMode);
-
-      const resp = await fetch(ROOT_PATH + '/api/v1/hazard-risk-review', {
-        method: 'POST',
-        body: form,
-      });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-        throw new Error(`${resp.status}: ${err.detail || JSON.stringify(err)}`);
-      }
-
-      const blob = await resp.blob();
-      showResult(blob, 'autoqa_hazard_review.html');
-    } catch (e) {
-      showError(e.message);
-    } finally {
-      setButtons(false);
-    }
   }
 
   // ── File select handler ──

@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from autoqa.api.jobs import COMPLETED, FAILED, JobManager
 from autoqa.api.schemas import BaselineRequest
 from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
 from autoqa.core.config import settings
@@ -26,20 +27,7 @@ def _make_service_dep(attr: str, label: str):
 get_rtm_service = _make_service_dep("rtm_service", "RTM service")
 get_hazard_service = _make_service_dep("hazard_service", "hazard service")
 get_test_case_service = _make_service_dep("test_case_service", "test case service")
-
-
-async def _run_file_service(coro, filename: str, thread_id: str, route: str) -> FileResponse:
-    try:
-        path = await coro
-        return FileResponse(path, filename=filename, media_type="text/html")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Internal error in %s for %s: %s", route, thread_id, e, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"An internal error occurred (request_id: {thread_id})",
-        )
+get_job_manager = _make_service_dep("job_manager", "job manager")
 
 
 @router.get("/health", tags=["System"])
@@ -63,51 +51,54 @@ async def health_check(request: Request) -> dict[str, Any]:
         return JSONResponse(status_code=503, content={"status": "unhealthy", "error": str(e)})
 
 
-@router.post("/test-suite-review", tags=["Test Suite Review"])
+@router.post("/test-suite-review", tags=["Test Suite Review"], status_code=202)
 async def test_suite_review(
     body: BaselineRequest,
     request: Request,
     service: RTMReviewService = Depends(get_rtm_service),
-) -> FileResponse:
-    """Fetch a JAMA baseline and run the RTM coverage review for every requirement.
+    job_manager: JobManager = Depends(get_job_manager),
+) -> JSONResponse:
+    """Submit an RTM coverage review for every requirement in a JAMA baseline.
 
-    Returns a self-contained viewer.html with M1-M5 rubric results for all requirements.
-    Requires JAMA credentials configured in the server's .env.
-    The thread_id for each requirement is derived from the FastAPI request ID.
+    Runs asynchronously: returns 202 + job_id immediately, then poll
+    GET /jobs/{job_id} and download GET /jobs/{job_id}/result (a self-contained
+    viewer.html with M1-M5 rubric results) when status is "completed". Requires
+    JAMA credentials configured in the server's .env.
     """
     cache_mode = "partial" if body.use_cache else "off"
     test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
-    return await _run_file_service(
-        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode, test_mode),
+
+    return _submit_with_job_id(
+        job_manager,
+        lambda job_id: service.run_from_baseline(body.baseline_id, job_id, cache_mode, test_mode),
         "autoqa_rtm_review.html",
-        request.state.request_id,
-        "test-suite-review",
     )
 
 
-@router.post("/test-case-review", tags=["Test Case Review"])
+@router.post("/test-case-review", tags=["Test Case Review"], status_code=202)
 async def test_case_review(
     body: BaselineRequest,
     request: Request,
     service: TestCaseReviewService = Depends(get_test_case_service),
-) -> FileResponse:
-    """Fetch a JAMA baseline and run the test-case adequacy review for every test case.
+    job_manager: JobManager = Depends(get_job_manager),
+) -> JSONResponse:
+    """Submit a test-case adequacy review for every test case in a JAMA baseline.
 
-    Returns a self-contained viewer_tc.html with 5-objective checklist results.
-    Requires JAMA credentials configured in the server's .env.
-    The thread_id for each test case is derived from the FastAPI request ID.
+    Runs asynchronously: returns 202 + job_id; poll GET /jobs/{job_id} and
+    download GET /jobs/{job_id}/result (viewer_tc.html, 5-objective checklist)
+    when completed. Requires JAMA credentials configured in the server's .env.
     """
     cache_mode = "partial" if body.use_cache else "off"
     test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
-    return await _run_file_service(
-        service.run_from_baseline(body.baseline_id, request.state.request_id, cache_mode, test_mode),
+
+    return _submit_with_job_id(
+        job_manager,
+        lambda job_id: service.run_from_baseline(body.baseline_id, job_id, cache_mode, test_mode),
         "autoqa_tc_review.html",
-        request.state.request_id,
-        "test-case-review",
     )
 
 
-@router.post("/hazard-risk-review", tags=["Hazard Risk Review"])
+@router.post("/hazard-risk-review", tags=["Hazard Risk Review"], status_code=202)
 async def hazard_risk_review(
     request: Request,
     project_name: str = Form(..., description="Project or product name"),
@@ -116,38 +107,76 @@ async def hazard_risk_review(
     use_cache: bool = Form(default=True, description="Reuse cached intermediate results (partial caching); disable to recompute from scratch"),
     test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
     service: HazardReviewService = Depends(get_hazard_service),
-) -> FileResponse:
-    """Upload an SHA Excel file and run the hazard risk review for every row.
+    job_manager: JobManager = Depends(get_job_manager),
+) -> JSONResponse:
+    """Submit a hazard risk review for every row of an uploaded SHA Excel file.
 
-    Returns a self-contained viewer_hz.html with H1-H7 rubric results.
-    Requirement IDs (GIDs) extracted from the Excel rows plus the project name
-    drive a JAMA bidirectional_trace fetch to assemble traceability.
-    The thread_id for each hazard row is derived from the FastAPI request ID.
+    Runs asynchronously: returns 202 + job_id; poll GET /jobs/{job_id} and
+    download GET /jobs/{job_id}/result (viewer_hz.html, H1-H7 rubric) when
+    completed. The uploaded file is read fully before returning, so the job runs
+    independently of the request.
     """
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Uploaded file must be an Excel file (.xlsx or .xls)")
 
     effective_test_mode = test_mode if test_mode is not None else settings.pyjama_test_mode
-    try:
-        file_bytes = await file.read()
-        viewer_path = await service.run_from_excel_upload(
+    # Read the upload now — the request/UploadFile is gone by the time the job runs.
+    file_bytes = await file.read()
+    filename = file.filename
+
+    return _submit_with_job_id(
+        job_manager,
+        lambda job_id: service.run_from_excel_upload(
             file_bytes=file_bytes,
-            filename=file.filename,
+            filename=filename,
             project_name=project_name,
-            thread_id_prefix=request.state.request_id,
+            thread_id_prefix=job_id,
             sheet_name=sheet_name,
             cache_mode="partial" if use_cache else "off",
             test_mode=effective_test_mode,
-        )
-        return FileResponse(viewer_path, filename="autoqa_hazard_review.html", media_type="text/html")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(
-            "Internal error in hazard-risk-review for request %s: %s",
-            request.state.request_id, e, exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"An internal error occurred (request_id: {request.state.request_id})",
-        )
+        ),
+        "autoqa_hazard_review.html",
+    )
+
+
+def _submit_with_job_id(job_manager: JobManager, make_coro, filename: str) -> JSONResponse:
+    """Submit a review job and return 202 + job_id.
+
+    ``make_coro`` is ``job_id -> awaitable``: the service methods take the job_id
+    as their per-record thread_id prefix, and the manager passes it in when the
+    background task starts.
+    """
+    job = job_manager.submit(make_coro, filename)
+    return JSONResponse(status_code=202, content={"job_id": job.job_id, "status": job.status})
+
+
+@router.get("/jobs/{job_id}", tags=["Jobs"])
+async def get_job_status(
+    job_id: str,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> dict[str, Any]:
+    """Return the status of a submitted review job (pending/running/completed/failed)."""
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Unknown job_id: {job_id}")
+    return job.to_status_dict()
+
+
+@router.get("/jobs/{job_id}/result", tags=["Jobs"])
+async def get_job_result(
+    job_id: str,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> FileResponse:
+    """Download the HTML report for a completed job.
+
+    404 if unknown, 425 (Too Early) while still pending/running, and the job's
+    stored error status (400/500) if it failed.
+    """
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Unknown job_id: {job_id}")
+    if job.status == COMPLETED:
+        return FileResponse(job.result_path, filename=job.filename, media_type="text/html")
+    if job.status == FAILED:
+        raise HTTPException(status_code=job.error_status, detail=job.error)
+    raise HTTPException(status_code=425, detail="Job is still running")

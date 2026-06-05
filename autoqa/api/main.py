@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from langgraph.checkpoint.memory import MemorySaver
 
 from autoqa.api.middleware import limit_request_size, log_requests
+from autoqa.api.jobs import JobManager
 from autoqa.api.routes import router
 from autoqa.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
 from autoqa.components.clients import RateLimitOpenAIClient
@@ -129,6 +130,10 @@ async def lifespan(app: FastAPI):
 
     # Backwards-compat: existing callers reference app.state.service for the RTM service.
     app.state.service = app.state.rtm_service
+
+    # Background job registry: reviews run async (202 + poll) so the upstream proxy
+    # never sees a multi-minute idle request and can't return a 504.
+    app.state.job_manager = JobManager()
 
     logger.info("AutoQA services initialized successfully")
     yield

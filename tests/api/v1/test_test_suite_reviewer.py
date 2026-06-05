@@ -3,9 +3,11 @@ from fastapi import status
 
 
 @pytest.mark.integration
-async def test_test_suite_review_happy_path(client):
-    """POST /api/v1/test-suite-review with valid baseline_id returns 200 HTML viewer."""
-    response = await client.post("/api/v1/test-suite-review", json={"baseline_id": "BASE-84429"})
+async def test_test_suite_review_happy_path(submit_and_wait):
+    """Submit /api/v1/test-suite-review, poll the job, and download the HTML viewer."""
+    response = await submit_and_wait(
+        "/api/v1/test-suite-review", json={"baseline_id": "BASE-84429"}, max_wait=600
+    )
     assert response.status_code == status.HTTP_200_OK
     assert "text/html" in response.headers.get("content-type", "")
 
