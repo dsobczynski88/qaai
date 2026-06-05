@@ -51,14 +51,44 @@ def create_timestamped_run_directory(base_logs_dir: str = "./logs") -> Path:
     return run_dir
 
 
+# Loggers this module owns. setup_logging() detaches and re-attaches handlers
+# for exactly these names so it is safe to call repeatedly (once at startup and
+# again at the start of every review request) without duplicating handlers.
+# "projectlog.pyjama_api" is the pyjama package's real logger name — AutoQA owns
+# its single pyjama.log FileHandler (the data_integration boundary shim stops
+# pyjama from attaching its own / creating a second run folder).
+_MANAGED_LOGGERS = ("autoqa.api", "autoqa", "projectlog.pyjama_api", "uvicorn", "uvicorn.access")
+
+
+def _reset_managed_handlers() -> None:
+    """Detach and close existing handlers on the managed loggers.
+
+    Called at the top of setup_logging() so re-pointing the file handlers at a
+    new run directory does not duplicate handlers (which would double-write every
+    line) and properly closes the previous run's open file handles.
+    """
+    for name in _MANAGED_LOGGERS:
+        logger = logging.getLogger(name)
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+
 def setup_logging(run_dir: Path) -> None:
     """Configure logging for the FastAPI application.
-    
+
     Sets up three loggers with separate file handlers:
     - 'autoqa.api': Routes to api.log
     - 'autoqa': Routes to autoqa.log (and child loggers like autoqa.core, autoqa.components)
     - 'pyjama': Routes to pyjama.log
-    
+
+    Idempotent: existing handlers on the managed loggers are detached and closed
+    first, so calling this repeatedly re-points logging at ``run_dir`` instead of
+    stacking duplicate handlers.
+
     Args:
         run_dir: Path to the timestamped run directory
     """
@@ -67,7 +97,10 @@ def setup_logging(run_dir: Path) -> None:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
-    
+
+    # Drop any handlers from a previous setup_logging() call before re-attaching.
+    _reset_managed_handlers()
+
     # Create formatters
     file_format = CTFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     console_format = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
@@ -113,9 +146,11 @@ def setup_logging(run_dir: Path) -> None:
     autoqa_logger.addHandler(autoqa_console_handler)
     
     # =========================================================================
-    # PyJama Logger: pyjama.* (JAMA integration)
+    # PyJama Logger: projectlog.pyjama_api (the pyjama package's real logger)
+    # AutoQA owns this single FileHandler; the data_integration boundary shim
+    # neutralizes pyjama's own ProjectLogger so lines aren't duplicated.
     # =========================================================================
-    pyjama_logger = logging.getLogger("pyjama")
+    pyjama_logger = logging.getLogger("projectlog.pyjama_api")
     pyjama_logger.setLevel(logging.DEBUG)
     pyjama_logger.propagate = False  # Don't propagate to root
     
@@ -183,3 +218,28 @@ def setup_logging(run_dir: Path) -> None:
     startup_logger.info("  - AutoQA logs: %s/autoqa.log", run_dir)
     startup_logger.info("  - PyJama logs: %s/pyjama.log", run_dir)
     startup_logger.info("=" * 80)
+
+
+def start_new_run(base_logs_dir: str = "./logs") -> Path:
+    """Begin a fresh run: create a timestamped directory and re-point all logging.
+
+    Called once at startup (for startup/lifespan logs) and again at the start of
+    every review request, so each review gets its own ``logs/run-<ts>/`` holding
+    that run's ``api.log`` / ``autoqa.log`` / ``pyjama.log`` alongside its
+    ``outputs.jsonl`` and viewer. Updates ``settings.log_file_path`` so the
+    services (which derive their output dir from it) write into the same folder.
+
+    Args:
+        base_logs_dir: Base directory for all run folders (default: "./logs")
+
+    Returns:
+        Path to the new run directory.
+    """
+    run_dir = create_timestamped_run_directory(base_logs_dir)
+    setup_logging(run_dir)
+
+    # Update the shared pointer the services read to locate their run directory.
+    from autoqa.core.config import settings
+
+    settings.log_file_path = str(run_dir / "autoqa.log")
+    return run_dir

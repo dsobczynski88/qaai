@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Optional, Union
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from autoqa.utils import make_output_directory
 from autoqa.core.constants import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     DEFAULT_MAX_TOKENS_PER_MINUTE,
@@ -96,7 +95,11 @@ class Settings(BaseSettings):
     max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
-    log_file_path: str = str(Path(make_output_directory(fold_path="./logs")) / "autoqa.log")
+    # Default points at ./logs/autoqa.log but creates no directory at import time.
+    # The real per-run directory is set by logging_config.start_new_run() — once at
+    # startup (create_app) and again at the start of every review request — which
+    # updates this value to logs/run-<ts>/autoqa.log.
+    log_file_path: str = "./logs/autoqa.log"
 
     # Token cost rates in USD per million tokens — set in .env to match your model pricing.
     token_cost_input_per_m: float = Field(default=1.00, alias="TOKEN_COST_INPUT_PER_M")

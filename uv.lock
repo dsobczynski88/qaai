@@ -2749,7 +2749,7 @@ wheels = [
 [[package]]
 name = "pyjama"
 version = "1.0.0"
-source = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git#f9e6e516bcfa1f634c1059834ff18db72f093d8a" }
+source = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git#e89313c31f6e0dd5a45f25b1f678ba36617caab6" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },

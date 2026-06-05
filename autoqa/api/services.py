@@ -68,10 +68,13 @@ class RTMReviewService:
             transform_test_suite_review_to_state,
         )
         from autoqa.viewer.generator import write_viewer
-        from autoqa.core.config import settings
+        from autoqa.core.logging_config import start_new_run
 
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
+
+        # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
+        run_dir = start_new_run()
 
         self._logger.info(
             "Starting batch RTM review for baseline %s (test_mode=%s)", baseline_id, test_mode
@@ -94,7 +97,6 @@ class RTMReviewService:
         state_dicts = transform_test_suite_review_to_state(jama_data)
         self._logger.info("Baseline %s: %d requirements to review", baseline_id, len(state_dicts))
 
-        run_dir = Path(settings.log_file_path).parent
         outputs_path = run_dir / "outputs.jsonl"
         outputs_path.write_text("", encoding="utf-8")
 
@@ -242,8 +244,11 @@ class HazardReviewService:
         default) runs that fetch cache-only with no live JAMA API calls.
         """
         from autoqa.viewer.generator import write_viewer_hz
-        from autoqa.core.config import settings
+        from autoqa.core.logging_config import start_new_run
         from autoqa.components.shared.data_integration import PYJAMA_AVAILABLE
+
+        # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
+        run_dir = start_new_run()
 
         self._logger.info(
             "Starting upload hazard review: %s (project=%s, test_mode=%s)",
@@ -251,7 +256,6 @@ class HazardReviewService:
         )
         hazard_rows = self._parse_uploaded_excel(file_bytes, filename, sheet_name)
 
-        run_dir = Path(settings.log_file_path).parent
         outputs_path = run_dir / "outputs.jsonl"
         outputs_path.write_text("", encoding="utf-8")
 
@@ -338,10 +342,13 @@ class TestCaseReviewService:
             transform_test_case_review_to_state,
         )
         from autoqa.viewer.generator import write_viewer_tc
-        from autoqa.core.config import settings
+        from autoqa.core.logging_config import start_new_run
 
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
+
+        # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
+        run_dir = start_new_run()
 
         self._logger.info(
             "Starting batch TC review for baseline %s (test_mode=%s)", baseline_id, test_mode
@@ -365,7 +372,6 @@ class TestCaseReviewService:
         self._logger.info("Baseline %s: %d test cases to review", baseline_id, len(state_dicts))
 
         default_objectives = load_default_review_objectives()
-        run_dir = Path(settings.log_file_path).parent
         outputs_path = run_dir / "outputs.jsonl"
         outputs_path.write_text("", encoding="utf-8")
 
