@@ -63,6 +63,51 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# --- AutoQA <-> pyjama logging boundary shim ---------------------------------
+# pyjama's PyJamaDataSourceNode.__init__ unconditionally (a) creates its OWN
+# logs/run-<ts>/ folder via make_output_directory and (b) attaches a FileHandler
+# to the "projectlog.pyjama_api" logger via ProjectLogger. That produces a second
+# run folder next to AutoQA's and accumulates handlers across the per-request
+# rebuilt nodes. We patch both module-level symbols so pyjama instead logs into
+# AutoQA's single active run folder, of which AutoQA's setup_logging is the sole
+# FileHandler owner. nodes.py imports these as module-level names, so rebinding
+# them on the module takes effect for every node it builds.
+if PYJAMA_AVAILABLE:
+    import pyjama.langgraph.nodes as _pyjama_nodes
+
+    def _autoqa_run_log_dir(fold_path=None):
+        """Return AutoQA's ACTIVE run directory (logs/run-<ts>/) so pyjama writes
+        pyjama.log there instead of creating its own logs/run-<ts>/ folder."""
+        from autoqa.core.config import settings
+
+        run_dir = Path(settings.log_file_path).parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return str(run_dir)
+
+    class _NoOpProjectLogger:
+        """Drop-in for pyjama's ProjectLogger that attaches NO handlers.
+
+        AutoQA's setup_logging owns the single 'projectlog.pyjama_api' FileHandler
+        (-> run_dir/pyjama.log) and re-points it on every start_new_run(), so
+        pyjama must not add its own handler (which would duplicate lines and
+        accumulate across rebuilt nodes). get_logger() still returns the real
+        named logger so pyjama's @timing decorators and PyJamaTraceMatrix resolve
+        to the same logger AutoQA configured.
+        """
+
+        def __init__(self, name, log_file=None):
+            self._name = name
+
+        def config(self):
+            return self
+
+        def get_logger(self):
+            return logging.getLogger(self._name)
+
+    _pyjama_nodes.make_output_directory = _autoqa_run_log_dir
+    _pyjama_nodes.ProjectLogger = _NoOpProjectLogger
+
+
 __all__ = [
     "PyJamaRequest",
     "PyJamaNodeConfig",

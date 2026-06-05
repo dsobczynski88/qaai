@@ -17,7 +17,7 @@ from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 from autoqa.core.telemetry import TokenUsageTracker
-from autoqa.core.logging_config import create_timestamped_run_directory, setup_logging
+from autoqa.core.logging_config import start_new_run
 
 
 logger = logging.getLogger("autoqa.api.main")
@@ -139,10 +139,11 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    # Initialize logging FIRST, before anything else
-    run_dir = create_timestamped_run_directory(base_logs_dir="./logs")
-    setup_logging(run_dir)
-    
+    # Initialize logging FIRST, before anything else. This startup folder captures
+    # lifespan/startup logs; each review request later calls start_new_run() again
+    # to create its own logs/run-<ts>/ folder.
+    run_dir = start_new_run(base_logs_dir="./logs")
+
     # Now get logger after logging is configured
     startup_logger = logging.getLogger("autoqa.api.main")
     startup_logger.info("Application startup initiated")
