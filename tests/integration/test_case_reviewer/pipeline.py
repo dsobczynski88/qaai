@@ -14,14 +14,12 @@ from autoqa.components.test_case_reviewer.core import (
     TestCaseAssessment,
 )
 from autoqa.components.test_case_reviewer.nodes import load_default_review_objectives
-from tests.helpers import load_jsonl, serialize_state
+from tests.helpers import serialize_state
 
 
-# Load fixture rows and review objectives at collection time (pure file I/O).
-# Mirrors the pattern used by test_test_suite_reviewer and
-# test_hazard_risk_reviewer_batch_via_transformation.
-_TC_FIXTURE = "test_case_review_all_fields.jsonl"
-_TC_ROWS = load_jsonl(_TC_FIXTURE)
+# The `row` argument is parametrized at collection time by pytest_generate_tests
+# in tests/conftest.py, over the rows of the fixture selected via --input-file
+# (default: test_case_review_all_fields.jsonl).
 _REVIEW_OBJECTIVES = load_default_review_objectives()
 REVIEW_OBJECTIVE_IDS = {o.id for o in _REVIEW_OBJECTIVES}
 
@@ -84,17 +82,14 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(
-    "row",
-    _TC_ROWS,
-    ids=[row["test_case"]["test_id"] for row in _TC_ROWS],
-)
 async def test_test_case_reviewer(real_client, real_model, jsonl_recorders_tc, row):
     """Run the full test-case-reviewer pipeline for one fixture row against a real LLM.
 
-    Parametrized over every row in test_case_review_all_fields.jsonl so each
-    test case is its own pytest item — failures are attributed to a specific
-    test_id and rows can be re-run individually with -k <test_id>.
+    Parametrized (in conftest's pytest_generate_tests) over every row in the
+    selected fixture (default test_case_review_all_fields.jsonl, overridable with
+    --input-file) so each test case is its own pytest item — failures are
+    attributed to a specific test_id and rows can be re-run individually with
+    -k <test_id>.
 
     Each output record is annotated with the row's designed-intent predictions
     (expected_overall_verdict, expected_partial_objectives, primary_failure) for

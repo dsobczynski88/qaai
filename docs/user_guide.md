@@ -52,7 +52,7 @@ uv sync
 
 ## Fixture Files
 
-Location: `tests/fixtures/external/`
+Default location: `tests/fixtures/external/`
 
 | File                                 | Contents                                                                                                                                                             |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -65,13 +65,40 @@ JSONL files are newline-delimited; each line is a self-contained input object ma
 corresponding reviewer's graph-input schema. The hazard integration test assembles its
 `HazardRowWithTraceMatrix` input **programmatically** from the Excel + PyJama fixtures (there is no
 single `hazard_full_traceability.jsonl` file). Labelled gold datasets live under
-`tests/fixtures/gold/` and per-node mocks under `tests/fixtures/mock/`.
+`tests/fixtures/gold/`, project-specific files under `tests/fixtures/local/` (e.g.
+`locating_device.jsonl`), and per-node mocks under `tests/fixtures/mock/`.
+
+Fixture filenames are resolved by `resolve_fixture_path` / `load_jsonl` (`tests/helpers.py`) in the
+search order `mock/ → gold/ → local/ → external/ → root`, so the integration tests' `--input-file`
+option (below) takes a **bare filename** and finds it wherever it lives.
 
 ---
 
 ## Integration Tests
 
-These tests run the full compiled LangGraph pipeline end-to-end against the fixture files above. Each test loads all rows from its fixture, fans them out concurrently via `asyncio.gather`, and records inputs and outputs to `.jsonl` files in the run directory.
+These tests run the full compiled LangGraph pipeline end-to-end against the fixture files above. For
+the RTM and test-case reviewers, every row of the selected JSONL fixture is expanded into its own
+parametrized pytest item (id = `req_id` / `test_id`) by a `pytest_generate_tests` hook in
+`tests/conftest.py`; inputs and outputs are recorded to `.jsonl` files in the run directory.
+
+### Selecting the input file
+
+Each test accepts a `--input-file` CLI option (a bare fixture filename, resolved across
+`tests/fixtures/` as described above). When omitted, each test falls back to its standard fixture.
+
+```bash
+# RTM / test-case reviewers: --input-file is the JSONL of input rows
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
+  --input-file=locating_device.jsonl
+
+# Preview which items a file expands to without spending any LLM calls
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
+  --input-file=locating_device.jsonl --collect-only
+
+# Hazard reviewer: --input-file is the SHA .xlsx; --pyjama-file overrides the traceability JSONL
+uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer \
+  --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl
+```
 
 ### Test Suite Reviewer
 
@@ -133,6 +160,12 @@ uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_ri
 ## API Happy-Path Tests
 
 These tests spin up the FastAPI app via the test client and exercise the full request/response cycle for each endpoint.
+
+> **Reviews are asynchronous.** Each `POST` returns `202 Accepted` + a `job_id`; the report is
+> retrieved by polling `GET /api/v1/jobs/{job_id}` until `completed` and then `GET /api/v1/jobs/{job_id}/result`.
+> The happy-path tests drive this through the `submit_and_wait` fixture in `tests/conftest.py`
+> (submit → poll → fetch result), so the "HTTP 200, `text/html`" assertions below describe the
+> **result download**, not the initial `POST`.
 
 ### Test Suite Reviewer
 
@@ -199,17 +232,19 @@ accept an inline `HazardRecord` JSON body):
 | `file`         | Yes      | —           | SHA Excel file (`.xlsx`/`.xls`)    |
 | `sheet_name`   | No       | `SHA Table` | Worksheet holding the hazard table |
 | `use_cache`    | No       | `true`      | Partial caching vs full recompute  |
+| `test_mode`    | No       | server default | Cache-only JAMA (no live calls); omit to use `PYJAMA_TEST_MODE` |
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
+# Submit (→ 202 + job_id), then poll GET /jobs/{id} and download GET /jobs/{id}/result
+JOB=$(curl -s -X POST http://localhost:8000/api/v1/hazard-risk-review \
   -F "project_name=Infusion Pump" \
   -F "file=@tests/fixtures/external/software_hazard_analysis.xlsx" \
-  -F "sheet_name=SHA Table" \
-  --output autoqa_hazard_review.html
+  -F "sheet_name=SHA Table" | jq -r .job_id)
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_hazard_review.html
 ```
 
-**Validated in response:** HTTP 200, `Content-Type: text/html`. Each row's `hazard_assessment`
-(7 H-code findings) and `requirement_reviews` are written to `outputs.jsonl`.
+**Validated in response:** the result download returns HTTP 200, `Content-Type: text/html`. Each
+row's `hazard_assessment` (7 H-code findings) and `requirement_reviews` are written to `outputs.jsonl`.
 
 ---
 

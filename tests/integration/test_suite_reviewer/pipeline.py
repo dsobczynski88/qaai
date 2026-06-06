@@ -12,13 +12,12 @@ from autoqa.components.test_suite_reviewer.core import (
     Requirement, TestCase, DesignDocument, DecomposedRequirement,
     TestSuite, EvaluatedSpec, SynthesizedAssessment,
 )
-from tests.helpers import load_jsonl, serialize_state
+from tests.helpers import serialize_state
 
 
-# Load fixture rows at collection time so pytest can enumerate test items.
-# Mirrors the pattern used by test_hazard_risk_reviewer_batch_via_transformation.
-_RTM_FIXTURE = "test_suite_review_all_fields.jsonl"
-_RTM_ROWS = load_jsonl(_RTM_FIXTURE)
+# The `row` argument is parametrized at collection time by pytest_generate_tests
+# in tests/conftest.py, over the rows of the fixture selected via --input-file
+# (default: test_suite_review_all_fields.jsonl).
 
 
 def _assert_partial_invariants(sa: SynthesizedAssessment) -> None:
@@ -53,17 +52,14 @@ def _assert_partial_invariants(sa: SynthesizedAssessment) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(
-    "row",
-    _RTM_ROWS,
-    ids=[row["requirement"]["req_id"] for row in _RTM_ROWS],
-)
 async def test_test_suite_reviewer(real_client, real_model, jsonl_recorders, row):
     """Run the full RTM pipeline for one fixture row against a real LLM.
 
-    Parametrized over every row in test_suite_review_all_fields.jsonl so each
-    requirement is its own pytest item — failures are attributed to a specific
-    req_id and rows can be re-run individually with -k <req_id>.
+    Parametrized (in conftest's pytest_generate_tests) over every row in the
+    selected fixture (default test_suite_review_all_fields.jsonl, overridable
+    with --input-file) so each requirement is its own pytest item — failures are
+    attributed to a specific req_id and rows can be re-run individually with
+    -k <req_id>.
 
     Tests the full field set: requirement + test cases + design docs (M1-M5 + R6).
     """

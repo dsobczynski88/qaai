@@ -55,7 +55,7 @@ curl http://localhost:8000/api/v1/health
 ```json
 {
   "status": "healthy",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "services": {
     "rtm_service": "available",
     "hazard_service": "available",
@@ -66,6 +66,24 @@ curl http://localhost:8000/api/v1/health
 
 ---
 
+## The Asynchronous Job Model
+
+A review can take several minutes. If the report were returned synchronously, an upstream
+proxy (JupyterHub's jupyter-server-proxy, AWS ALB, etc.) would see an idle upstream for the
+whole run and return a **504** to the browser. To avoid this, the three review endpoints run
+the work as a **background job**:
+
+1. **Submit** — `POST` a review endpoint. It returns `202 Accepted` with `{"job_id": "...", "status": "pending"}` in well under a second.
+2. **Poll** — `GET /api/v1/jobs/{job_id}` returns `{job_id, status, filename, error}`. `status` is one of `pending`, `running`, `completed`, `failed`. Repeat until terminal (`completed` / `failed`).
+3. **Download** — `GET /api/v1/jobs/{job_id}/result` returns the HTML report (`200`) when the job is `completed`. It returns `404` for an unknown id, `425 Too Early` while still pending/running, and the job's failure status (`400` for bad input, `500` otherwise) when it failed.
+
+Jobs live in an **in-memory** registry (`autoqa/api/jobs.py`, most-recent 200 retained) and run
+one at a time, which assumes a **single uvicorn worker** (see [Production Deployment](#production-deployment)).
+The frontend performs the submit → poll → download loop automatically (polling every ~4s and
+showing elapsed time).
+
+---
+
 ## Testing the Hazard Upload Endpoint
 
 The hazard reviewer works with just an Excel file—no JAMA credentials required.
@@ -73,17 +91,24 @@ The hazard reviewer works with just an Excel file—no JAMA credentials required
 ### Via curl
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
+# 1. Submit the job → 202 {"job_id": "...", "status": "pending"}
+JOB=$(curl -s -X POST http://localhost:8000/api/v1/hazard-risk-review \
   -F "project_name=Test Project" \
   -F "file=@tests/fixtures/external/software_hazard_analysis.xlsx" \
   -F "sheet_name=SHA Table" \
-  -F "use_cache=true" \
-  --output autoqa_hazard_review.html
+  -F "use_cache=true" | jq -r .job_id)
+
+# 2. Poll until "status" is "completed"
+curl -s http://localhost:8000/api/v1/jobs/$JOB
+
+# 3. Download the completed report
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_hazard_review.html
 ```
 
 The multipart form fields are `project_name` (required), `file` (required, `.xlsx`/`.xls`),
-`sheet_name` (default `SHA Table`), and `use_cache` (default `true` — partial caching; set
-`false` to recompute from scratch). The per-row thread ID is derived from the request ID server-side.
+`sheet_name` (default `SHA Table`), `use_cache` (default `true` — partial caching; set `false`
+to recompute from scratch), and `test_mode` (optional — cache-only JAMA; omit to use the
+server's `PYJAMA_TEST_MODE` default). The per-row thread ID is derived from the job ID server-side.
 
 Then open the downloaded `autoqa_hazard_review.html` in a browser to see the viewer.
 
@@ -93,8 +118,8 @@ Then open the downloaded `autoqa_hazard_review.html` in a browser to see the vie
 2. Enter a project name (e.g., "Test Project")
 3. Drag and drop `tests/fixtures/external/software_hazard_analysis.xlsx` onto the upload zone
 4. Leave **"Use cached results"** checked (or uncheck to recompute from scratch)
-5. Click **"Run Review"** → wait for the spinner
-6. Once complete, click the download link to save the HTML viewer
+5. Click **"Run Review"** → the page submits the job and polls for status, showing elapsed time
+6. Once the job completes, click the download link to save the HTML viewer
 
 ---
 
@@ -109,7 +134,8 @@ JAMA_CLIENT_ID=<your_client_id>
 JAMA_CLIENT_SECRET=<your_client_secret>
 ```
 
-If JAMA is not configured, the endpoints return:
+If JAMA is not configured, the `POST` still returns `202` but the **job fails**: `GET /api/v1/jobs/{job_id}`
+reports `"status": "failed"`, and `GET /api/v1/jobs/{job_id}/result` returns the error, e.g.:
 ```json
 {
   "detail": "PyJama is not installed — JAMA baseline fetching unavailable."
@@ -119,37 +145,36 @@ If JAMA is not configured, the endpoints return:
 ### RTM Review from Baseline
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/test-suite-review \
+# Submit (→ 202 + job_id), then poll + download per the async job model above
+JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-suite-review \
   -H "Content-Type: application/json" \
-  -d '{
-    "baseline_id": "BASE-12345",
-    "use_cache": true
-  }' \
-  --output autoqa_rtm_review.html
+  -d '{"baseline_id": "BASE-12345", "use_cache": true}' | jq -r .job_id)
+curl -s http://localhost:8000/api/v1/jobs/$JOB                       # poll until completed
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_rtm_review.html
 ```
 
 ### Test Case Review from Baseline
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/test-case-review \
+JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-case-review \
   -H "Content-Type: application/json" \
-  -d '{
-    "baseline_id": "BASE-67890",
-    "use_cache": true
-  }' \
-  --output autoqa_tc_review.html
+  -d '{"baseline_id": "BASE-67890", "use_cache": true}' | jq -r .job_id)
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_tc_review.html
 ```
 
 Replace `BASE-12345` and `BASE-67890` with actual JAMA baseline IDs. Both endpoints accept a
-`BaselineRequest` body of `{baseline_id, use_cache}` — `use_cache` (default `true`) selects partial
-caching vs a full recompute. The per-record thread ID is derived from the request ID server-side.
+`BaselineRequest` body of `{baseline_id, use_cache, test_mode}` — `use_cache` (default `true`)
+selects partial caching vs a full recompute, and `test_mode` (optional) forces cache-only JAMA
+(no live calls), falling back to the server's `PYJAMA_TEST_MODE` when omitted. The per-record
+thread ID is derived from the job ID server-side.
 
 ---
 
 ## Understanding the Response
 
-All batch review endpoints return HTML viewer files that can be opened directly in a browser.
-These viewers contain:
+The review endpoints return `202 Accepted` + a `job_id` (see [The Asynchronous Job Model](#the-asynchronous-job-model)).
+The HTML report is downloaded from `GET /api/v1/jobs/{job_id}/result` once the job is `completed`.
+The downloaded viewer file can be opened directly in a browser and contains:
 - A summary of all processed items (requirements, test cases, or hazards)
 - Per-item review rubric results
 - Links to trace matrices and supporting artifacts
@@ -175,6 +200,7 @@ Key settings can be configured via `.env`:
 | `JAMA_HOST_ADDRESS` | No | JAMA instance hostname |
 | `JAMA_CLIENT_ID` | No | JAMA OAuth client ID |
 | `JAMA_CLIENT_SECRET` | No | JAMA OAuth client secret |
+| `PYJAMA_TEST_MODE` | No | Cache-only JAMA: fetch baselines from disk cache only, no live calls (default `false`; per-request `test_mode` overrides) |
 | `ALLOWED_ORIGINS` | No | CORS allowed origins (default: `*`) |
 | `ENVIRONMENT` | No | `development` or `production` (hides API docs in prod) |
 
@@ -188,11 +214,12 @@ See `autoqa/core/config.py` for the complete settings list.
 
 Real-time logs appear in the console and are also written to `logs/run-<timestamp>/autoqa.log`.
 
-Log entries include request IDs for tracing concurrent requests:
+Log entries include request IDs for tracing concurrent requests. Because reviews run as
+background jobs, the `POST` completes almost immediately with `202`, and the actual review
+progress is logged separately under the job's `logs/run-<timestamp>/` folder:
 ```
 Request started: POST /api/v1/hazard-risk-review
-...
-Request completed: POST /api/v1/hazard-risk-review - 200
+Request completed: POST /api/v1/hazard-risk-review - 202
 ```
 
 ### Inspect Network Activity
@@ -215,15 +242,21 @@ Each run writes `token_usage.jsonl` with per-call token and cost metrics:
 
 For production:
 1. Remove `--reload` flag (Uvicorn with auto-reload is dev-only)
-2. Use a production ASGI server (Gunicorn with Uvicorn workers, or similar)
+2. Use a production ASGI server (Gunicorn with a Uvicorn worker, or similar)
 3. Set `ENVIRONMENT=production` to hide API documentation endpoints
 4. Set `ALLOWED_ORIGINS` to your domain(s) instead of `*`
 5. Ensure all required environment variables are set and secrets are not in `.env`
 
+> **Run a single worker.** The async job registry (`autoqa/api/jobs.py`) is in-memory, so a
+> `job_id` created on one worker would be invisible to another — polling `GET /jobs/{id}` could
+> hit a worker that never saw the job. Keep `--workers 1` until the registry is moved to a shared
+> backend (Redis is already a dependency). Jobs are also serialized one-at-a-time to preserve the
+> per-run logging invariant.
+
 Example production command:
 ```bash
 gunicorn autoqa.api.main:app \
-  --workers 4 \
+  --workers 1 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000
 ```

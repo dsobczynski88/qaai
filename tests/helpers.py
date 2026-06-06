@@ -4,22 +4,26 @@ from unittest.mock import MagicMock, AsyncMock
 from pydantic import BaseModel
 from autoqa.components.clients import RateLimitOpenAIClient
 
-def load_jsonl(fixture_name: str) -> list[dict]:
-    """Load test cases from a JSONL fixture file in tests/fixtures/.
-    
+def resolve_fixture_path(fixture_name: str) -> Path:
+    """Resolve a fixture filename to a concrete path under tests/fixtures/.
+
     Searches in the following subdirectories in order:
     1. mock/ - Mock LLM responses for unit tests
     2. gold/ - Canonical labeled datasets for evaluation
     3. local/ - Project-specific converted/derived fixtures
     4. external/ - Third-party or reference datasets
     5. Root fixtures/ directory (for backwards compatibility)
-    
+
+    Works for any file type (e.g. .jsonl or .xlsx) since it only resolves the
+    path and does not parse the file.
+
     Args:
-        fixture_name: Name of the fixture file (e.g., 'decomposer_cases.jsonl')
-        
+        fixture_name: Name of the fixture file (e.g., 'decomposer_cases.jsonl'
+            or 'software_hazard_analysis.xlsx')
+
     Returns:
-        List of dictionaries parsed from JSONL file
-        
+        Path to the first matching fixture file.
+
     Raises:
         FileNotFoundError: If fixture file not found in any search path
     """
@@ -31,17 +35,36 @@ def load_jsonl(fixture_name: str) -> list[dict]:
         fixtures_root / "external" / fixture_name,
         fixtures_root / fixture_name,  # Backwards compatibility
     ]
-    
+
     for path in search_paths:
         if path.exists():
-            with path.open() as f:
-                return [json.loads(line) for line in f if line.strip()]
-    
+            return path
+
     # If not found, raise with helpful message
     raise FileNotFoundError(
         f"Fixture '{fixture_name}' not found in any of: "
         f"{', '.join(str(p.parent.name) + '/' for p in search_paths[:-1])} or root fixtures/"
     )
+
+
+def load_jsonl(fixture_name: str) -> list[dict]:
+    """Load test cases from a JSONL fixture file in tests/fixtures/.
+
+    Uses resolve_fixture_path() for the search order (mock -> gold -> local ->
+    external -> root fixtures/).
+
+    Args:
+        fixture_name: Name of the fixture file (e.g., 'decomposer_cases.jsonl')
+
+    Returns:
+        List of dictionaries parsed from JSONL file
+
+    Raises:
+        FileNotFoundError: If fixture file not found in any search path
+    """
+    path = resolve_fixture_path(fixture_name)
+    with path.open() as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 
 def serialize_state(state: dict) -> dict:
