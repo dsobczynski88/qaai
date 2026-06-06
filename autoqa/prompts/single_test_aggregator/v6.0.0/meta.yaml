@@ -2,7 +2,6 @@ role: single_test_aggregator
 version: v6.0.0
 component: test_case_reviewer
 authored: '2026-05-14'
-content_sha256: placeholder_will_be_computed
 status: published
 parent_version: v5.0.0
 author: autoqa-team

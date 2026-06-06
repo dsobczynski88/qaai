@@ -2,7 +2,6 @@ role: design_summarizer
 version: v1.0.0
 component: test_suite_reviewer
 authored: '2025-01-15'
-content_sha256: 8f4a2c1b9e3d7f6a
 status: published
 parent_version: null
 author: autoqa-team

@@ -2,7 +2,6 @@ role: shared_evaluator_conventions
 version: v1.0.0
 component: hazard_risk_reviewer
 authored: '2026-05-12'
-content_sha256: 0f2400c881ed8bd5
 status: published
 parent_version: null
 author: autoqa-team

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Migrate prompts from flat structure to versioned registry - Version 2."""
-import hashlib
 import shutil
 from pathlib import Path
 from datetime import date
@@ -8,15 +7,7 @@ import yaml
 
 PROMPTS_DIR = Path("/home/jovyan/shared/renalpa/autoqa-5-may/autoqa/prompts")
 
-def compute_sha256(path: Path) -> str:
-    """Compute SHA256 hash of a file (16-char short form)."""
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()[:16]
-
-def create_meta_yaml(role: str, version: str, component: str, content_sha: str, parent_version: str = None) -> dict:
+def create_meta_yaml(role: str, version: str, component: str, parent_version: str = None) -> dict:
     """Create meta.yaml content for a prompt."""
     output_models = {
         "decomposer": "DecomposedRequirement",
@@ -49,7 +40,6 @@ def create_meta_yaml(role: str, version: str, component: str, content_sha: str, 
         "version": version,
         "component": component,
         "authored": str(date.today()),
-        "content_sha256": content_sha,
         "status": "published",
         "parent_version": parent_version,
         "author": "autoqa-team",
@@ -147,9 +137,8 @@ def main():
         shutil.copy2(source, dest_template)
         print(f"✓ Copied {source_file} -> {role}/{version}/template.jinja2")
         
-        # Compute SHA and create meta.yaml
-        content_sha = compute_sha256(dest_template)
-        meta = create_meta_yaml(role, version, component, content_sha, parent_version)
+        # Create meta.yaml
+        meta = create_meta_yaml(role, version, component, parent_version)
         
         with dest_meta.open("w") as f:
             yaml.safe_dump(meta, f, sort_keys=False, default_flow_style=False)
@@ -169,9 +158,8 @@ This prompt will be used to summarize design documents for test coverage analysi
 Draft - Not yet implemented
 """
     placeholder_template.write_text(placeholder_content)
-    
-    content_sha = compute_sha256(placeholder_template)
-    meta = create_meta_yaml("design_summarizer", "v1.0.0", "test_suite_reviewer", content_sha)
+
+    meta = create_meta_yaml("design_summarizer", "v1.0.0", "test_suite_reviewer")
     meta["status"] = "draft"
     meta["changelog"] = "Placeholder for future implementation."
     

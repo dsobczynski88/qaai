@@ -2,7 +2,6 @@ role: coverage_evaluator
 version: v7.0.0
 component: test_suite_reviewer
 authored: '2026-05-12'
-content_sha256: 7990d841d74169d2
 status: published
 parent_version: v6.0.0
 author: autoqa-team

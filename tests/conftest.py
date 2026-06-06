@@ -43,6 +43,79 @@ from autoqa.components.test_suite_reviewer.core import (
 
 from autoqa.api.main import app, lifespan
 
+from tests.helpers import load_jsonl, resolve_fixture_path
+
+
+# Default fixture files per parametrized reviewer test, used when --input-file
+# is not supplied. Keyed by test function name.
+_DEFAULT_INPUT_FILES = {
+    "test_test_case_reviewer": "test_case_review_all_fields.jsonl",
+    "test_test_suite_reviewer": "test_suite_review_all_fields.jsonl",
+}
+
+
+def pytest_addoption(parser):
+    """Register CLI options to select the integration tests' input fixture file.
+
+    Bare filenames are resolved through the tests/fixtures/ search order
+    (mock -> gold -> local -> external -> root) by load_jsonl /
+    resolve_fixture_path.
+    """
+    parser.addoption(
+        "--input-file",
+        action="store",
+        default=None,
+        help=(
+            "Fixture filename to use as the integration test input. JSONL for the "
+            "test_case / test_suite reviewers; the .xlsx SHA workbook for the hazard "
+            "reviewer. Resolved across tests/fixtures/{local,external,...}. "
+            "Defaults to each reviewer's standard fixture when omitted."
+        ),
+    )
+    parser.addoption(
+        "--pyjama-file",
+        action="store",
+        default=None,
+        help=(
+            "Hazard reviewer only: pyjama traceability JSONL filename. "
+            "Defaults to pyjama_response_unified.jsonl."
+        ),
+    )
+
+
+def _row_id(row: dict, index: int) -> str:
+    """Best-effort stable id for a parametrized fixture row.
+
+    Prefers the test_case.test_id (TC reviewer) or requirement.req_id (RTM
+    reviewer), falling back to a positional id so an arbitrary custom file still
+    collects without erroring.
+    """
+    try:
+        if "test_case" in row:
+            return row["test_case"]["test_id"]
+        if "requirement" in row:
+            return row["requirement"]["req_id"]
+    except (KeyError, TypeError):
+        pass
+    return f"row{index}"
+
+
+def pytest_generate_tests(metafunc):
+    """Parametrize the test_case / test_suite reviewer tests over JSONL rows.
+
+    Resolution happens at collection time (pytest_generate_tests), so the
+    --input-file option is available before fixtures run. Falls back to each
+    reviewer's default fixture when the option is omitted.
+    """
+    fn = metafunc.function.__name__
+    if fn not in _DEFAULT_INPUT_FILES or "row" not in metafunc.fixturenames:
+        return
+
+    fixture_name = metafunc.config.getoption("--input-file") or _DEFAULT_INPUT_FILES[fn]
+    rows = load_jsonl(fixture_name)
+    ids = [_row_id(row, i) for i, row in enumerate(rows)]
+    metafunc.parametrize("row", rows, ids=ids)
+
 
 @pytest.fixture(scope="session")
 def token_tracker():
@@ -233,18 +306,25 @@ def sample_test_suite(sample_requirement, sample_test_cases):
     )
 
 
-def _load_hazard_fixture(include_design_docs: bool, gids_format: str) -> HazardRowWithTraceMatrix:
-    """Assemble HazardRowWithTraceMatrix from Excel + unified pyjama traceability response."""
+def _load_hazard_fixture(
+    include_design_docs: bool,
+    gids_format: str,
+    excel_file: str = "software_hazard_analysis.xlsx",
+    pyjama_file: str = "pyjama_response_unified.jsonl",
+) -> HazardRowWithTraceMatrix:
+    """Assemble HazardRowWithTraceMatrix from Excel + unified pyjama traceability response.
+
+    excel_file / pyjama_file are fixture filenames resolved across
+    tests/fixtures/{local,external,...} via resolve_fixture_path.
+    """
     from autoqa.components.hazard_risk_reviewer.loader import (
         parse_sha_excel,
         merge_hazard_with_pyjama_traceability,
     )
     from autoqa.components.hazard_risk_reviewer.core import HazardTraceMatrix
 
-    fixtures_dir = Path(__file__).parent / "fixtures" / "external"
-
     excel_results = parse_sha_excel(
-        file_path=str(fixtures_dir / "software_hazard_analysis.xlsx"),
+        file_path=str(resolve_fixture_path(excel_file)),
         extract_gids_format=gids_format,
     )
     excel_rows = excel_results.rows
@@ -252,7 +332,7 @@ def _load_hazard_fixture(include_design_docs: bool, gids_format: str) -> HazardR
         raise ValueError("No hazard rows found in Excel file")
 
     pyjama_lookup = {}
-    with (fixtures_dir / "pyjama_response_unified.jsonl").open(encoding="utf-8") as f:
+    with resolve_fixture_path(pyjama_file).open(encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 data = json.loads(line)
@@ -280,13 +360,22 @@ def _load_hazard_fixture(include_design_docs: bool, gids_format: str) -> HazardR
 
 
 @pytest.fixture
-def hazard_full_traceability(hazard_analysis_requirement_id_format):
+def hazard_full_traceability(request, hazard_analysis_requirement_id_format):
     """Full-traceability HazardRowWithTraceMatrix: requirements, test_cases, design_docs, user_needs,
     and system_requirements all populated.
 
-    Used for the M1-M5 + R6 (6 findings per requirement) test path.
+    Used for the M1-M5 + R6 (6 findings per requirement) test path. Honors the
+    --input-file (Excel SHA workbook) and --pyjama-file (traceability JSONL)
+    options, falling back to the standard fixtures when omitted.
     """
-    return _load_hazard_fixture(include_design_docs=True, gids_format=hazard_analysis_requirement_id_format)
+    excel_file = request.config.getoption("--input-file") or "software_hazard_analysis.xlsx"
+    pyjama_file = request.config.getoption("--pyjama-file") or "pyjama_response_unified.jsonl"
+    return _load_hazard_fixture(
+        include_design_docs=True,
+        gids_format=hazard_analysis_requirement_id_format,
+        excel_file=excel_file,
+        pyjama_file=pyjama_file,
+    )
 
 
 def _recorder_fixture(viewer_fn: str, label: str):

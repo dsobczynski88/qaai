@@ -21,7 +21,7 @@ The reviewers do **not** accept inline review payloads over HTTP. Each endpoint 
 - **Test Suite Reviewer** and **Test Case Reviewer** fetch a **JAMA baseline** by `baseline_id` (via [PyJama](https://github.com/dsobczynski88/pyjama-fastapi.git), installed as the `pyjama` git dependency). They require JAMA credentials in the server's `.env`.
 - **Hazard Risk Reviewer** parses an **uploaded SHA Excel file** (`.xlsx`) — no JAMA required.
 
-Every endpoint returns a self-contained **HTML viewer** (`FileResponse`, `text/html`) rather than a JSON body. The underlying structured assessments are also serialized to `outputs.jsonl` in the run directory.
+A review can take several minutes, so the three review endpoints run **asynchronously**: a `POST` submits a background job and returns `202 Accepted` with a `job_id` immediately, the client polls `GET /api/v1/jobs/{job_id}` until the status is `completed`, then downloads the report from `GET /api/v1/jobs/{job_id}/result`. The result is a self-contained **HTML viewer** (`FileResponse`, `text/html`) rather than a JSON body. This keeps every HTTP request sub-second so an upstream proxy (JupyterHub, AWS ALB) never sees a multi-minute idle request and can't return a 504. See [Asynchronous job flow](#asynchronous-job-flow) for details. The underlying structured assessments are also serialized to `outputs.jsonl` in the run directory.
 
 ---
 
@@ -178,6 +178,7 @@ API_MODEL=<your model name>
 JAMA_HOST_ADDRESS=<your jama host>
 JAMA_CLIENT_ID=<your client id>
 JAMA_CLIENT_SECRET=<your client secret>
+PYJAMA_TEST_MODE=false   # true = fetch baselines from disk cache only, no live JAMA calls
 
 # Caching (optional — defaults shown)
 ENABLE_CACHE=true
@@ -207,6 +208,7 @@ PROMPT_SET=              # named prompt-set manifest, e.g. test_case_reviewer_v2
 | `JAMA_HOST_ADDRESS`       | No¹      | —             | JAMA instance hostname (for baseline fetching)                     |
 | `JAMA_CLIENT_ID`          | No¹      | —             | JAMA OAuth client ID                                                |
 | `JAMA_CLIENT_SECRET`      | No¹      | —             | JAMA OAuth client secret                                            |
+| `PYJAMA_TEST_MODE`        | No       | `false`       | Cache-only JAMA: fetch baselines from the disk cache only, make no live JAMA calls (per-request `test_mode` overrides this) |
 | `ENABLE_CACHE`            | No       | `true`        | Master switch for the shared reviewer cache                        |
 | `CACHE_DIR`               | No       | `./cache`     | Disk cache root (one folder per entity id)                         |
 | `REDIS_URL`               | No       | unset         | Optional Redis (Tier 2) connection string                          |
@@ -244,7 +246,7 @@ Each endpoint exposes a **`use_cache`** toggle (default `true`) that the API map
 
 ## Web Frontend
 
-When the server is running, a single-page UI is served at the root (`http://localhost:8000/`) from `autoqa/api/static/index.html`. It presents three reviewer cards — **Requirement Coverage** (RTM), **Test Case Adequacy** (TC), and **Software Hazard Analysis** (hazard) — each fading in an input form (baseline ID or Excel upload) plus a "Use cached results" checkbox that drives the `use_cache` flag. Interactive API docs are at `http://localhost:8000/docs`.
+When the server is running, a single-page UI is served at the root (`http://localhost:8000/`) from `autoqa/api/static/index.html`. It presents three reviewer cards — **Requirement Coverage** (RTM), **Test Case Adequacy** (TC), and **Software Hazard Analysis** (hazard) — each fading in an input form (baseline ID or Excel upload) plus a "Use cached results" checkbox that drives the `use_cache` flag. On submit the page kicks off a background job and **polls for status every few seconds** (showing elapsed time) until the report is ready, then offers it as a download. Interactive API docs are at `http://localhost:8000/docs`.
 
 ---
 
@@ -273,7 +275,24 @@ uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_ri
 
 Integration tests read `PYTEST_API_KEY` / `PYTEST_BASE_URL` / `PYTEST_MODEL` from `.env`; a safety check in `tests/conftest.py` rejects any base URL containing `prod`.
 
-Fixture inputs live under `tests/fixtures/external/` (`test_suite_review_all_fields.jsonl`, `test_case_review_all_fields.jsonl`, `software_hazard_analysis.xlsx`, `pyjama_response_unified.jsonl`, plus `*_min_fields.jsonl` variants), with labelled gold datasets under `tests/fixtures/gold/` and per-node mocks under `tests/fixtures/mock/`. Append a line to the relevant JSONL file to add a parametrized scenario.
+#### Selecting the input fixture
+
+Each of the three per-reviewer integration tests accepts a `--input-file` CLI option to choose which fixture file it runs against, resolved across `tests/fixtures/` in the order `mock/ → gold/ → local/ → external/ → root`. Pass a bare filename (no path):
+
+```bash
+# RTM / Test Case reviewers: --input-file is the JSONL of input rows
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
+  --input-file=locating_device.jsonl -m integration -s
+
+# Hazard reviewer: --input-file is the SHA .xlsx workbook;
+# --pyjama-file (optional) overrides the traceability JSONL
+uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer \
+  --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl -m integration -s
+```
+
+When omitted, each test falls back to its standard fixture (`test_suite_review_all_fields.jsonl`, `test_case_review_all_fields.jsonl`, and `software_hazard_analysis.xlsx` + `pyjama_response_unified.jsonl` respectively). For the RTM and Test Case tests, every row in the selected JSONL becomes its own parametrized pytest item (id = `req_id` / `test_id`); use `--collect-only` to preview the items a given file expands to without spending any LLM calls.
+
+Fixture inputs live under `tests/fixtures/external/` (`test_suite_review_all_fields.jsonl`, `test_case_review_all_fields.jsonl`, `software_hazard_analysis.xlsx`, `pyjama_response_unified.jsonl`, plus `*_min_fields.jsonl` variants) and `tests/fixtures/local/` (project-specific files such as `locating_device.jsonl`), with labelled gold datasets under `tests/fixtures/gold/` and per-node mocks under `tests/fixtures/mock/`. Append a line to the relevant JSONL file to add a scenario, or drop a new file into `local/` (or `external/`) and point `--input-file` at it.
 
 The integration suite includes session-scoped `jsonl_recorders` / `jsonl_recorders_tc` / `jsonl_recorders_hz` fixtures that write `inputs.jsonl` and `outputs.jsonl` to the active `logs/run-.../` folder and, on teardown, invoke the matching `autoqa.viewer` `write_viewer*` function whenever `outputs.jsonl` has records — no manual step required.
 
@@ -349,16 +368,18 @@ autoqa/viewer/
 uv run uvicorn autoqa.api.main:app --reload
 ```
 
-Interactive API documentation is available at `http://localhost:8000/docs`. At startup the lifespan handler builds a single shared `RTMReviewerRunnable` and reuses it inside the hazard pipeline's `RequirementReviewerNode`, so the RTM graph compiles and renders `graph.png` only once per process even though multiple endpoints exercise it. All three services share a single `ReviewCacheManager`.
+Interactive API documentation is available at `http://localhost:8000/docs`. At startup the lifespan handler builds a single shared `RTMReviewerRunnable` and reuses it inside the hazard pipeline's `RequirementReviewerNode`, so the RTM graph compiles and renders `graph.png` only once per process even though multiple endpoints exercise it. All three services share a single `ReviewCacheManager`, and a single in-memory `JobManager` (`autoqa/api/jobs.py`) backs the asynchronous review jobs.
 
 ### Endpoint Reference
 
 | Method | Path                          | Source                | Returns        | Description                                                                 |
 | ------ | ----------------------------- | --------------------- | -------------- | --------------------------------------------------------------------------- |
 | `GET`  | `/api/v1/health`              | —                     | JSON           | Health check for load balancers and monitoring                              |
-| `POST` | `/api/v1/test-suite-review`   | JAMA baseline         | HTML viewer    | Run the RTM coverage review (M1-M5 + R6) for every requirement in a baseline |
-| `POST` | `/api/v1/test-case-review`    | JAMA baseline         | HTML viewer    | Run the 5-objective test-case adequacy review for every test case in a baseline |
-| `POST` | `/api/v1/hazard-risk-review`  | Uploaded SHA Excel    | HTML viewer    | Run the H1-H7 hazard mitigation review for every row in an SHA table        |
+| `POST` | `/api/v1/test-suite-review`   | JAMA baseline         | `202` + job_id | Submit the RTM coverage review (M1-M5 + R6) for every requirement in a baseline |
+| `POST` | `/api/v1/test-case-review`    | JAMA baseline         | `202` + job_id | Submit the 5-objective test-case adequacy review for every test case in a baseline |
+| `POST` | `/api/v1/hazard-risk-review`  | Uploaded SHA Excel    | `202` + job_id | Submit the H1-H7 hazard mitigation review for every row in an SHA table      |
+| `GET`  | `/api/v1/jobs/{job_id}`       | —                     | JSON           | Poll a submitted job's status (`pending` / `running` / `completed` / `failed`) |
+| `GET`  | `/api/v1/jobs/{job_id}/result`| —                     | HTML viewer    | Download a completed job's HTML report (`425 Too Early` while still running) |
 
 #### Health Check
 
@@ -371,7 +392,7 @@ curl http://localhost:8000/api/v1/health
 ```json
 {
   "status": "healthy",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "services": {
     "rtm_service": "available",
     "hazard_service": "available",
@@ -384,50 +405,77 @@ If any service is uninitialized the endpoint returns HTTP 503 with `"status": "d
 
 ---
 
+### Asynchronous job flow
+
+The three review endpoints do **not** return the report on the `POST`. Each `POST` enqueues a background job and returns `202 Accepted` with a `job_id`; the report is fetched later:
+
+```bash
+# 1. Submit — returns 202 {"job_id": "...", "status": "pending"}
+JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-suite-review \
+  -H "Content-Type: application/json" \
+  -d '{"baseline_id": "BASE-84429", "use_cache": true}' | jq -r .job_id)
+
+# 2. Poll — repeat until "status" is "completed" (or "failed")
+curl -s http://localhost:8000/api/v1/jobs/$JOB
+# {"job_id":"...","status":"running","filename":"autoqa_rtm_review.html","error":null}
+
+# 3. Download the HTML report once completed
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_rtm_review.html
+```
+
+- `GET /api/v1/jobs/{job_id}` returns `{job_id, status, filename, error}` where `status` ∈ `pending` / `running` / `completed` / `failed` (`error` is populated only on `failed`).
+- `GET /api/v1/jobs/{job_id}/result` returns the HTML report (`200`) when the job is `completed`; `404` for an unknown id, `425 Too Early` while still pending/running, and the job's failure status (`400` for bad input such as an unknown baseline, `500` otherwise) when it failed.
+- Jobs are held in an **in-memory** registry (most-recent 200) and run one at a time. This assumes a **single uvicorn worker** — see the Production Deployment section in `docs/api.md`.
+
+The web frontend performs this submit → poll → download loop automatically.
+
+---
+
 ### Test Suite Reviewer — `POST /api/v1/test-suite-review`
 
-Fetches a JAMA baseline and runs the RTM review for every requirement, returning a downloadable `viewer.html`. Requires JAMA credentials in the server's `.env`.
+Submits an RTM review job for every requirement in a JAMA baseline; the completed job yields a downloadable `viewer.html`. Requires JAMA credentials in the server's `.env`. Follow the [Asynchronous job flow](#asynchronous-job-flow) to retrieve the report.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/test-suite-review \
   -H "Content-Type: application/json" \
-  -d '{"baseline_id": "BASE-84429", "use_cache": true}' \
-  --output autoqa_rtm_review.html
+  -d '{"baseline_id": "BASE-84429", "use_cache": true}'
+# → 202 {"job_id": "...", "status": "pending"}
 ```
 
 | Body field   | Type   | Required | Default | Description                                                              |
 | ------------ | ------ | -------- | ------- | ------------------------------------------------------------------------ |
 | `baseline_id`| string | Yes      | —       | JAMA baseline ID, e.g. `BASE-84429`                                      |
 | `use_cache`  | bool   | No       | `true`  | Reuse cached intermediate results (`partial`); set `false` to recompute (`off`) |
+| `test_mode`  | bool   | No       | `null`  | Cache-only JAMA — fetch the baseline from the disk cache only, no live JAMA calls. `null` falls back to the server's `PYJAMA_TEST_MODE` |
 
-Open the downloaded `autoqa_rtm_review.html` in a browser to page through the M1-M5 + R6 rubric for every requirement.
+Once the job completes, open the downloaded `viewer.html` in a browser to page through the M1-M5 + R6 rubric for every requirement.
 
 ---
 
 ### Test Case Reviewer — `POST /api/v1/test-case-review`
 
-Same `BaselineRequest` body as the RTM endpoint; returns a `viewer_tc.html` with the 5-objective checklist for every test case in the baseline.
+Same `BaselineRequest` body as the RTM endpoint (`baseline_id`, `use_cache`, `test_mode`); the completed job yields a `viewer_tc.html` with the 5-objective checklist for every test case in the baseline.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/test-case-review \
   -H "Content-Type: application/json" \
-  -d '{"baseline_id": "BASE-84429", "use_cache": true}' \
-  --output autoqa_tc_review.html
+  -d '{"baseline_id": "BASE-84429", "use_cache": true}'
+# → 202 {"job_id": "...", "status": "pending"}  (poll + download per the async job flow)
 ```
 
 ---
 
 ### Hazard Risk Reviewer — `POST /api/v1/hazard-risk-review`
 
-Accepts a **multipart upload** of an SHA Excel file and runs the H1-H7 review for every hazard row. Runs with Excel-derived data only (no JAMA traceability). A sample SHA workbook lives at `tests/fixtures/external/software_hazard_analysis.xlsx`.
+Accepts a **multipart upload** of an SHA Excel file and submits the H1-H7 review job for every hazard row. Runs with Excel-derived data only (no JAMA traceability). A sample SHA workbook lives at `tests/fixtures/external/software_hazard_analysis.xlsx`. Retrieve the report via the [Asynchronous job flow](#asynchronous-job-flow).
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
   -F "project_name=Infusion Pump" \
   -F "file=@tests/fixtures/external/software_hazard_analysis.xlsx" \
   -F "sheet_name=SHA Table" \
-  -F "use_cache=true" \
-  --output autoqa_hazard_review.html
+  -F "use_cache=true"
+# → 202 {"job_id": "...", "status": "pending"}
 ```
 
 | Form field     | Type   | Required | Default     | Description                                            |
@@ -436,7 +484,8 @@ curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
 | `file`         | file   | Yes      | —           | SHA Excel file (`.xlsx`/`.xls`) containing the hazard table |
 | `sheet_name`   | string | No       | `SHA Table` | Worksheet holding the hazard table                     |
 | `use_cache`    | bool   | No       | `true`      | Partial caching (`true`) vs recompute from scratch (`false`) |
+| `test_mode`    | bool   | No       | `null`      | Cache-only JAMA (no live calls); `null` uses the server's `PYJAMA_TEST_MODE` |
 
 H5 (Verification Depth and Hazard-Path Effectiveness) is the only finding that may be `N-A` — it applies when `software_related_causes` indicates no software cause. H1-H4, H6, and H7 always resolve to `Yes` or `No`.
 
-> **Note:** The endpoints return HTML viewers rather than JSON. The underlying structured assessments (`SynthesizedAssessment`, `TestCaseAssessment`, `HazardAssessment`) are serialized to `outputs.jsonl` in the run directory; see `docs/user_guide.md` for the full output data-model reference.
+> **Note:** The review endpoints are asynchronous — the `POST` returns `202` + a `job_id`, and the HTML report is downloaded from `GET /api/v1/jobs/{job_id}/result` once the job completes (see [Asynchronous job flow](#asynchronous-job-flow)). The underlying structured assessments (`SynthesizedAssessment`, `TestCaseAssessment`, `HazardAssessment`) are also serialized to `outputs.jsonl` in the run directory; see `docs/user_guide.md` for the full output data-model reference.

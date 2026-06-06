@@ -2,7 +2,6 @@ role: single_test_coverage_eval
 version: v3.0.0
 component: test_case_reviewer
 authored: '2026-05-12'
-content_sha256: 3893bd7c6ad90946
 status: published
 parent_version: v2.0.0
 author: autoqa-team

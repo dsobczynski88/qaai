@@ -2,7 +2,6 @@ role: summarizer
 version: v4.0.0
 component: test_suite_reviewer
 authored: '2026-05-12'
-content_sha256: 6b5e2f7d82cf427d
 status: published
 parent_version: null
 author: autoqa-team

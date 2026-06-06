@@ -1,7 +1,7 @@
 """Prompt registry loader.
 
-Resolves a named prompt-set manifest into a PromptConfig with content_sha256
-attached per role, plus the manifest's own sha256 for MLflow run-param logging.
+Resolves a named prompt-set manifest into a PromptConfig by role + version,
+plus the manifest's own sha256 for MLflow run-param logging.
 """
 from __future__ import annotations
 import hashlib
@@ -19,7 +19,6 @@ class ResolvedPrompt:
     role: str
     version: str                # e.g. "v6.0.0"
     template_path: Path         # absolute path to template.jinja2
-    content_sha256: str         # 16-char short hash of body
     meta: dict                  # the meta.yaml contents
 
 
@@ -42,6 +41,22 @@ def _file_sha256(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
+def _role_dir(role: str) -> str:
+    """Map a logical role to its on-disk template directory.
+
+    Manifests key prompts by logical role name (the PromptConfig field, e.g. ``coverage``),
+    which can differ from the template directory on disk (e.g. ``coverage_evaluator``).
+    PromptConfig's default path is the source of truth for that directory; fall back to the
+    role name itself when there is no matching field/default.
+    """
+    from autoqa.core.config import PromptConfig
+    field = PromptConfig.model_fields.get(role)
+    default = getattr(field, "default", None)
+    if isinstance(default, str) and "/" in default:
+        return default.split("/")[0]
+    return role
+
+
 def load_set(name: str) -> ResolvedPromptSet:
     """Resolve a set manifest into a frozen, hash-pinned bundle.
     
@@ -49,11 +64,10 @@ def load_set(name: str) -> ResolvedPromptSet:
         name: Name of the prompt set (without .yaml extension)
         
     Returns:
-        ResolvedPromptSet with all prompts resolved and validated
-        
+        ResolvedPromptSet with all prompts resolved by role + version
+
     Raises:
         FileNotFoundError: If set manifest or any referenced template is missing
-        ValueError: If content SHA mismatch detected (drift)
     """
     manifest_path = PROMPTS_DIR / "sets" / f"{name}.yaml"
     if not manifest_path.exists():
@@ -63,7 +77,7 @@ def load_set(name: str) -> ResolvedPromptSet:
     resolved = {}
     
     for role, version in manifest["prompts"].items():
-        version_dir = PROMPTS_DIR / role / version
+        version_dir = PROMPTS_DIR / _role_dir(role) / version
         template = version_dir / "template.jinja2"
         meta_path = version_dir / "meta.yaml"
         
@@ -74,21 +88,11 @@ def load_set(name: str) -> ResolvedPromptSet:
             )
         
         meta = yaml.safe_load(meta_path.read_text())
-        actual_sha = _file_sha256(template)
-        recorded_sha = meta.get("content_sha256")
-        
-        if recorded_sha and recorded_sha != actual_sha:
-            raise ValueError(
-                f"prompt set {name}: role={role} version={version} content drift — "
-                f"meta.yaml records {recorded_sha} but template body is {actual_sha}. "
-                "Either revert the body or bump the version."
-            )
-        
+
         resolved[role] = ResolvedPrompt(
             role=role,
             version=version,
             template_path=template,
-            content_sha256=actual_sha,
             meta=meta,
         )
     

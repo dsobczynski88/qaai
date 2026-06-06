@@ -1,0 +1,19 @@
+role: decomposer
+version: v6.0.0
+component: common
+authored: '2026-06-06'
+status: published
+parent_version: v5.0.0
+author: autoqa-team
+required_template_vars: []
+output_pydantic_model: DecomposedRequirement
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: |
+  Edge-case-focused decomposition. In addition to explicit and logically-unavoidable
+  implicit obligations, runs a mandatory seven-dimension Edge-Case Analysis (boundary/
+  threshold, repetition/concurrency, temporal collision, state/mode, null/degenerate
+  inputs, ordering/attribution, interface/delivery) gated by a three-part Grounding Test
+  (source anchor, named escaped-defect failure mode, no invented mechanism). Surfaces
+  edge conditions as first-class specs to prevent escaped field defects. Parent: v5.0.0.
