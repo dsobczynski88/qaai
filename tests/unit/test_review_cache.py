@@ -258,6 +258,32 @@ async def test_rtm_per_spec_off_mode_no_cache(cache, tmp_path):
     assert list(tmp_path.rglob("*.json")) == []
 
 
+async def test_rtm_per_spec_payload_includes_summarized_designs():
+    from autoqa.components.test_suite_reviewer.core import SummarizedDesignSpec
+
+    node, client = _make_rtm_spec_node(cache=None)  # no cache → always calls LLM
+    state = _rtm_spec_state("S1", cache_mode="off")
+    state["summarized_designs"] = [
+        SummarizedDesignSpec(
+            doc_id="DOC-1", design_intent="intent", implements="REQ-1",
+            key_components=["c1"], verification_hooks=["h1"],
+        )
+    ]
+    await node(state)
+    messages = client.chat_completion.call_args.kwargs["messages"]
+    payload = json.loads(messages[-1]["content"])
+    assert "summarized_designs" in payload
+    assert payload["summarized_designs"][0]["doc_id"] == "DOC-1"
+
+
+async def test_rtm_per_spec_payload_null_designs_when_absent():
+    node, client = _make_rtm_spec_node(cache=None)
+    await node(_rtm_spec_state("S1", cache_mode="off"))
+    messages = client.chat_completion.call_args.kwargs["messages"]
+    payload = json.loads(messages[-1]["content"])
+    assert payload["summarized_designs"] is None
+
+
 def _tc_spec_state(spec_id: str, cache_mode="partial"):
     tc = TestCase(test_id="TEST-1", description="d", in_baseline=True)
     req = Requirement(req_id="REQ-1", text="The system shall do X.")
@@ -307,6 +333,44 @@ def test_rtm_dispatch_propagates_cache_mode():
     })
     assert len(sends) == 2
     assert all(s.arg["cache_mode"] == "off" for s in sends)
+
+
+def test_rtm_dispatch_propagates_summarized_designs():
+    from autoqa.components.test_suite_reviewer.core import (
+        DecomposedRequirement,
+        SummarizedDesignSpec,
+    )
+
+    req = Requirement(req_id="REQ-1", text="x")
+    specs = [
+        DecomposedSpec(spec_id="S1", description="d", acceptance_criteria="a", rationale="r"),
+        DecomposedSpec(spec_id="S2", description="d", acceptance_criteria="a", rationale="r"),
+    ]
+    decomposed = DecomposedRequirement(requirement=req, decomposed_specifications=specs)
+    suite = TestSuite(requirement=req, test_cases=[], summary=[])
+    designs = [
+        SummarizedDesignSpec(
+            doc_id="DOC-1",
+            design_intent="intent",
+            implements="REQ-1",
+            key_components=["c1"],
+            verification_hooks=["h1"],
+        )
+    ]
+    # Present: every Send carries the same design list.
+    sends = rtm_dispatch_coverage({
+        "requirement": req, "decomposed_requirement": decomposed,
+        "test_suite": suite, "summarized_designs": designs,
+    })
+    assert len(sends) == 2
+    assert all(s.arg["summarized_designs"] == designs for s in sends)
+
+    # Absent: key still present (null-safe), set to None.
+    sends_none = rtm_dispatch_coverage({
+        "requirement": req, "decomposed_requirement": decomposed,
+        "test_suite": suite,
+    })
+    assert all(s.arg["summarized_designs"] is None for s in sends_none)
 
 
 def test_tc_dispatch_propagates_cache_mode():

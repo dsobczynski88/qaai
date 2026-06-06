@@ -26,7 +26,7 @@ class PromptConfig(BaseModel):
     decomposer: str = "decomposer/v5.0.0/template.jinja2"
     summarizer: str = "summarizer/v4.0.0/template.jinja2"
     design_summarizer: str = "design_summarizer/v1.0.0/template.jinja2"
-    coverage: str = "coverage_evaluator/v7.0.0/template.jinja2"
+    coverage: str = "coverage_evaluator/v8.0.0/template.jinja2"
     synthesizer: str = "synthesizer/v8.0.0/template.jinja2"
     
     # Test Case Reviewer prompts
@@ -62,19 +62,19 @@ class PromptConfig(BaseModel):
             >>> config.single_test_aggregator
             'single_test_aggregator/v6.0.0/template.jinja2'
         """
-        from autoqa.prompts._registry import load_set
+        from autoqa.prompts._registry import PROMPTS_DIR, load_set
         resolved = load_set(set_name)
-        
+
         # Start with current defaults
         current = cls()
         kwargs = current.model_dump()
-        
-        # Override with resolved prompts from the set
+
+        # Override with resolved prompts from the set. The template directory can differ
+        # from the logical role key (e.g. role "coverage" -> dir "coverage_evaluator"), so
+        # derive the relative path from the resolved template path rather than the role.
         for role, prompt in resolved.prompts.items():
-            # Build relative path: role/version/template.jinja2
-            relative_path = f"{prompt.role}/{prompt.version}/template.jinja2"
-            kwargs[role] = relative_path
-        
+            kwargs[role] = prompt.template_path.relative_to(PROMPTS_DIR).as_posix()
+
         return cls(**kwargs)
 
 class Settings(BaseSettings):

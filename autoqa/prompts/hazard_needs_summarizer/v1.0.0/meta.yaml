@@ -2,7 +2,6 @@ role: hazard_needs_summarizer
 version: v1.0.0
 component: hazard_risk_reviewer
 authored: '2025-01-15'
-content_sha256: 3c8d5e1f9a2b7c4e
 status: published
 parent_version: null
 author: autoqa-team

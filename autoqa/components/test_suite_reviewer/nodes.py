@@ -159,11 +159,16 @@ def dispatch_coverage(state: RTMReviewState) -> List[Send]:
         logger.warning("dispatch_coverage: incomplete state, skipping fan-out")
         return []
     cache_mode = state.get("cache_mode", "partial")
+    # summarized_designs joined at coverage_router (may be None when a
+    # requirement has no design docs). Send only forwards the keys placed in
+    # this dict, so it must be threaded through explicitly to reach spec_evaluator.
+    summarized_designs = state.get("summarized_designs")
     return [
         Send("spec_evaluator", {
             "requirement": requirement,
             "decomposed_spec": spec,
             "test_suite": test_suite,
+            "summarized_designs": summarized_designs,
             "cache_mode": cache_mode,
         })
         for spec in decomposed.decomposed_specifications
@@ -204,6 +209,7 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
         requirement = state["requirement"]
         spec = state["decomposed_spec"]
         test_suite = state["test_suite"]
+        summarized_designs = state.get("summarized_designs")
 
         entity_id = self._get_cache_entity_id(state)
         node_name = self._cache_node_name(state)
@@ -221,6 +227,11 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
             "original_requirement": requirement.model_dump(),
             "decomposed_spec": spec.model_dump(),
             "test_suite": test_suite.model_dump(),
+            # Optional supporting context for the R6-style design alignment lens.
+            # Null-safe shape mirrors SynthesizerNode._build_payload.
+            "summarized_designs": (
+                [s.model_dump() for s in summarized_designs] if summarized_designs else None
+            ),
         }
 
         messages = [
@@ -344,7 +355,7 @@ def make_coverage_evaluator(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "coverage_evaluator/v7.0.0/template.jinja2",
+    prompt_template: str = "coverage_evaluator/v8.0.0/template.jinja2",
     cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SingleSpecEvaluatorNode:

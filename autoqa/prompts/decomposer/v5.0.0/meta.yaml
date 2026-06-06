@@ -2,7 +2,6 @@ role: decomposer
 version: v5.0.0
 component: common
 authored: '2026-05-12'
-content_sha256: fd771a101ae2f39c
 status: published
 parent_version: null
 author: autoqa-team

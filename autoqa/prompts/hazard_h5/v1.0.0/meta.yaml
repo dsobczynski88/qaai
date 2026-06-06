@@ -2,7 +2,6 @@ role: hazard_h5
 version: v1.0.0
 component: hazard_risk_reviewer
 authored: '2026-05-12'
-content_sha256: 83ed53d1b0063260
 status: published
 parent_version: null
 author: autoqa-team
