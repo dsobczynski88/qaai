@@ -11,6 +11,7 @@ Pipeline shape (v3 prompts onwards — only the coverage axis fans out per spec)
                 -> aggregator
 """
 import json
+import logging
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -26,7 +27,6 @@ from autoqa.components.shared.nodes import (
 )
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
-from autoqa.prj_logger import ProjectLogger
 from autoqa.utils import render_prompt
 
 from .core import (
@@ -38,9 +38,7 @@ from .core import (
     TestCaseAssessment,
 )
 
-project_logger = ProjectLogger(name="logger.test_case_reviewer.nodes", log_file=settings.log_file_path)
-project_logger.config()
-logger = project_logger.get_logger()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

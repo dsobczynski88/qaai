@@ -7,13 +7,12 @@ suite-specific nodes: SummaryNode, DesignSummarizerNode, SingleSpecEvaluatorNode
 and SynthesizerNode, plus the dispatch_coverage Send fan-out.
 """
 import json
+import logging
 import re
 from typing import Optional, List, Any
 from langgraph.types import Send
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.utils import render_prompt
-from autoqa.prj_logger import ProjectLogger
-from autoqa.core.config import settings
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.components.shared.nodes import (
     BaseLLMNode,
@@ -24,9 +23,7 @@ from autoqa.components.shared.nodes import (
     sanitize_requirement_text,
 )
 
-project_logger = ProjectLogger(name="logger.nodes", log_file=settings.log_file_path)
-project_logger.config()
-logger = project_logger.get_logger()
+logger = logging.getLogger(__name__)
 from .core import (
     RTMReviewState,
     DecomposedRequirement,
@@ -328,7 +325,7 @@ def make_summarizer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "summarizer/v4.0.0/template.jinja2",
+    prompt_template: str,
     cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SummaryNode:
@@ -355,7 +352,7 @@ def make_coverage_evaluator(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "coverage_evaluator/v8.0.0/template.jinja2",
+    prompt_template: str,
     cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SingleSpecEvaluatorNode:
@@ -389,7 +386,7 @@ def make_synthesizer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "synthesizer/v8.0.0/template.jinja2",
+    prompt_template: str,
     cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> SynthesizerNode:
@@ -426,7 +423,7 @@ def make_design_summarizer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "design_summarizer/v1.0.0/template.jinja2",
+    prompt_template: str,
     cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> DesignSummarizerNode:

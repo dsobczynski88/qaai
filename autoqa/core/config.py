@@ -23,7 +23,7 @@ class PromptConfig(BaseModel):
     Use PromptConfig.from_set("set_name") to load from a named prompt set manifest.
     """
     # Test Suite Reviewer prompts
-    decomposer: str = "decomposer/v5.0.0/template.jinja2"
+    decomposer: str = "decomposer/v6.0.0/template.jinja2"
     summarizer: str = "summarizer/v4.0.0/template.jinja2"
     design_summarizer: str = "design_summarizer/v1.0.0/template.jinja2"
     coverage: str = "coverage_evaluator/v8.0.0/template.jinja2"
@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     # startup (create_app) and again at the start of every review request — which
     # updates this value to logs/run-<ts>/autoqa.log.
     log_file_path: str = "./logs/autoqa.log"
+
+    # Base directory under which start_new_run() creates each run-<ts>/ folder.
+    # Production/front-end uses ./logs; the test harness (conftest) overrides this
+    # to ./logs/tests so test artifacts never mix with server runs.
+    log_base_dir: str = "./logs"
 
     # Token cost rates in USD per million tokens — set in .env to match your model pricing.
     token_cost_input_per_m: float = Field(default=1.00, alias="TOKEN_COST_INPUT_PER_M")

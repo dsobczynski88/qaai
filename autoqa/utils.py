@@ -20,29 +20,46 @@ def make_output_directory(fold_path):
     Path(output_directory).mkdir(parents=True, exist_ok=True)
     return output_directory
 
-def save_graph_png(graph, output_path: Union[str, Path]) -> None:
-    """
-    Render a compiled LangGraph runnable as a Mermaid PNG and save it to disk.
+def render_graph_png(graph) -> Union[bytes, None]:
+    """Render a compiled LangGraph runnable to Mermaid PNG bytes (or None).
 
     Uses LangGraph's built-in draw_mermaid_png() which calls the Mermaid.ink
     public API — requires an internet connection. The PNG is a developer
-    convenience artefact, so a render failure (offline, mermaid.ink outage)
-    must NOT abort the overall pipeline run; we log a warning and continue.
+    convenience artefact, so a render failure (offline, mermaid.ink outage) must
+    NOT abort the run; we warn and return None. Render once at graph build time,
+    then write the cached bytes into each per-run folder via write_graph_png_bytes.
 
     Args:
         graph: A compiled LangGraph runnable (result of StateGraph.compile()).
-        output_path: Destination path for the PNG file. Parent directories are
-                     created automatically.
     """
+    try:
+        return graph.get_graph().draw_mermaid_png()
+    except Exception as e:
+        print(f"warning: could not render graph png (mermaid.ink unreachable?): {e}")
+        return None
+
+
+def write_graph_png_bytes(png_bytes: Union[bytes, None], output_path: Union[str, Path]) -> None:
+    """Write previously-rendered PNG bytes to disk, creating parent dirs.
+
+    No-op when png_bytes is None (render failed), so a missing diagram never
+    aborts a run.
+    """
+    if not png_bytes:
+        return
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        png_bytes = graph.get_graph().draw_mermaid_png()
-    except Exception as e:
-        print(f"warning: could not render {output_path.name} (mermaid.ink unreachable?): {e}")
-        return
     output_path.write_bytes(png_bytes)
     print(f"Graph diagram saved to: {output_path}")
+
+
+def save_graph_png(graph, output_path: Union[str, Path]) -> None:
+    """Render a compiled LangGraph runnable as a Mermaid PNG and save it to disk.
+
+    Thin wrapper around render_graph_png + write_graph_png_bytes for callers that
+    render-and-write in one step.
+    """
+    write_graph_png_bytes(render_graph_png(graph), output_path)
 
 
 # Prompt Template Loading (Jinja2)

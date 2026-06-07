@@ -11,6 +11,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,15 @@ class TokenUsageTracker:
 
     def __init__(
         self,
-        file_path: str,
+        file_path: Optional[str] = None,
         input_cost_per_million: float = 1.00,
         output_cost_per_million: float = 5.00,
     ):
-        self.file_path = file_path
+        # When file_path is None the tracker resolves its write target from
+        # settings.telemetry_file_path at each write, so a single start_new_run()
+        # call re-points logs AND telemetry into the same per-run folder. An
+        # explicit file_path pins the target (used by some standalone callers).
+        self._file_path = file_path
         self.input_cost_per_million = input_cost_per_million
         self.output_cost_per_million = output_cost_per_million
 
@@ -52,7 +57,23 @@ class TokenUsageTracker:
         self._tokens_saved_prompt: int = 0
         self._tokens_saved_completion: int = 0
 
-        Path(file_path).write_text("", encoding="utf-8")
+    @property
+    def file_path(self) -> str:
+        """Resolve the JSONL output path, deferring to settings when unpinned.
+
+        start_new_run() updates settings.log_file_path (and thus the derived
+        telemetry_file_path) and truncates the new file, so reading it lazily
+        here keeps telemetry in the current run folder.
+        """
+        if self._file_path is not None:
+            return self._file_path
+        from autoqa.core.config import settings
+
+        return settings.telemetry_file_path
+
+    @file_path.setter
+    def file_path(self, value: Optional[str]) -> None:
+        self._file_path = value
 
     async def record(self, prompt_tokens: int, completion_tokens: int, model: str) -> None:
         """Append one per-call record and update running totals."""

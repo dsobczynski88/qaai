@@ -6,8 +6,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 from autoqa.core.config import settings, PromptConfig
 from autoqa.core.cache import ReviewCacheManager
-from autoqa.utils import save_graph_png
-from autoqa.prj_logger import ProjectLogger
+from autoqa.utils import render_graph_png, write_graph_png_bytes
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.data_integration import (
     DataIntegrationNode,
@@ -168,5 +167,11 @@ class RTMReviewerRunnable:
         sg.add_edge("synthesizer", END)
 
         flow = sg.compile(checkpointer=self.checkpointer)
-        save_graph_png(flow, Path(settings.log_file_path).parent / "graph.png")
+        # Render the diagram once (network call to mermaid.ink); each run writes
+        # the cached bytes into its own folder via write_graph_png(run_dir).
+        self._graph_png_bytes = render_graph_png(flow)
         return flow
+
+    def write_graph_png(self, run_dir: Union[str, Path]) -> None:
+        """Write the cached graph diagram into a per-run folder as graph.png."""
+        write_graph_png_bytes(self._graph_png_bytes, Path(run_dir) / "graph.png")

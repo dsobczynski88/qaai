@@ -75,6 +75,7 @@ class RTMReviewService:
 
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
+        self.graph.write_graph_png(run_dir)
 
         self._logger.info(
             "Starting batch RTM review for baseline %s (test_mode=%s)", baseline_id, test_mode
@@ -96,6 +97,11 @@ class RTMReviewService:
 
         state_dicts = transform_test_suite_review_to_state(jama_data)
         self._logger.info("Baseline %s: %d requirements to review", baseline_id, len(state_dicts))
+
+        inputs_path = run_dir / "inputs.jsonl"
+        with inputs_path.open("w", encoding="utf-8") as f:
+            for state_dict in state_dicts:
+                f.write(json.dumps(state_dict, default=_json_default) + "\n")
 
         outputs_path = run_dir / "outputs.jsonl"
         outputs_path.write_text("", encoding="utf-8")
@@ -249,12 +255,18 @@ class HazardReviewService:
 
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
+        self.graph.write_graph_png(run_dir)
 
         self._logger.info(
             "Starting upload hazard review: %s (project=%s, test_mode=%s)",
             filename, project_name, test_mode,
         )
         hazard_rows = self._parse_uploaded_excel(file_bytes, filename, sheet_name)
+
+        inputs_path = run_dir / "inputs.jsonl"
+        with inputs_path.open("w", encoding="utf-8") as f:
+            for hazard_row in hazard_rows:
+                f.write(json.dumps(hazard_row, default=_json_default) + "\n")
 
         outputs_path = run_dir / "outputs.jsonl"
         outputs_path.write_text("", encoding="utf-8")
@@ -349,6 +361,7 @@ class TestCaseReviewService:
 
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
+        self.graph.write_graph_png(run_dir)
 
         self._logger.info(
             "Starting batch TC review for baseline %s (test_mode=%s)", baseline_id, test_mode
@@ -372,6 +385,12 @@ class TestCaseReviewService:
         self._logger.info("Baseline %s: %d test cases to review", baseline_id, len(state_dicts))
 
         default_objectives = load_default_review_objectives()
+
+        inputs_path = run_dir / "inputs.jsonl"
+        with inputs_path.open("w", encoding="utf-8") as f:
+            for state_dict in state_dicts:
+                f.write(json.dumps(state_dict, default=_json_default) + "\n")
+
         outputs_path = run_dir / "outputs.jsonl"
         outputs_path.write_text("", encoding="utf-8")
 

@@ -18,7 +18,7 @@ from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
 from autoqa.core.telemetry import TokenUsageTracker
-from autoqa.core.logging_config import start_new_run
+from autoqa.core.logging_config import bootstrap_console_logging
 
 
 logger = logging.getLogger("autoqa.api.main")
@@ -57,13 +57,15 @@ def build_pyjama_config():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize telemetry tracker before client
+    # Initialize telemetry tracker before client. file_path=None ⇒ the tracker
+    # resolves its target from settings.telemetry_file_path at each write, so the
+    # per-request start_new_run() re-points token_usage.jsonl into that run folder.
     telemetry_tracker = TokenUsageTracker(
-        file_path=settings.telemetry_file_path,
+        file_path=None,
         input_cost_per_million=settings.token_cost_input_per_m,
         output_cost_per_million=settings.token_cost_output_per_m,
     )
-    logger.info("Telemetry tracker initialized (file: %s)", settings.telemetry_file_path)
+    logger.info("Telemetry tracker initialized (per-run token_usage.jsonl)")
 
     # Initialize OpenAI client with all required parameters
     client = RateLimitOpenAIClient(
@@ -144,12 +146,13 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    # Initialize logging FIRST, before anything else. This startup folder captures
-    # lifespan/startup logs; each review request later calls start_new_run() again
-    # to create its own logs/run-<ts>/ folder.
-    run_dir = start_new_run(base_logs_dir="./logs")
+    # Console-only logging at boot — we deliberately do NOT create a run folder
+    # here. The first logs/run-<ts>/ folder is created by the first review request
+    # (start_new_run inside the service), so there is exactly one folder per
+    # endpoint hit. Boot/lifespan logs go to stdout (captured by the process
+    # manager / container runtime).
+    bootstrap_console_logging()
 
-    # Now get logger after logging is configured
     startup_logger = logging.getLogger("autoqa.api.main")
     startup_logger.info("Application startup initiated")
     
@@ -163,12 +166,10 @@ def create_app() -> FastAPI:
         docs_url="/docs" if not is_production else None,
         redoc_url="/redoc" if not is_production else None,
     )
-    
-    # Store run directory in app state for reference
-    app.state.run_dir = run_dir
 
     app.middleware("http")(log_requests)
     app.middleware("http")(limit_request_size)
+    # Note: no app.state.run_dir — run folders are created per request, not at boot.
 
     allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
     if allowed_origins != ["*"]:
