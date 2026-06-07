@@ -16,6 +16,7 @@ consumption by H4/H5 evaluators.
 """
 
 import json
+import logging
 from typing import Any, List, Optional
 
 from langgraph.types import Send
@@ -24,8 +25,6 @@ from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.components.shared.nodes import BaseLLMNode, BatchedLLMNode, StandardLLMNode
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import ReviewCacheManager
-from autoqa.core.config import settings
-from autoqa.prj_logger import ProjectLogger
 from autoqa.utils import render_prompt
 
 from .core import (
@@ -40,9 +39,7 @@ from .core import (
     RequirementReview,
 )
 
-project_logger = ProjectLogger(name="logger.hazard.nodes", log_file=settings.log_file_path)
-project_logger.config()
-logger = project_logger.get_logger()
+logger = logging.getLogger(__name__)
 
 
 # --- design and user needs summarizer nodes -------------------------------

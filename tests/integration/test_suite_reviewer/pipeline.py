@@ -52,7 +52,7 @@ def _assert_partial_invariants(sa: SynthesizedAssessment) -> None:
 
 
 @pytest.mark.integration
-async def test_test_suite_reviewer(real_client, real_model, jsonl_recorders, row):
+async def test_test_suite_reviewer(real_client, real_model, jsonl_recorders, test_run_dir, row):
     """Run the full RTM pipeline for one fixture row against a real LLM.
 
     Parametrized (in conftest's pytest_generate_tests) over every row in the
@@ -75,11 +75,18 @@ async def test_test_suite_reviewer(real_client, real_model, jsonl_recorders, row
 
     # Build the graph. Compilation is non-trivial but amortized against the
     # LLM call time (~30-40s) that follows.
+    if real_model == "gpt-5-mini":
+        model_kwargs={"max_completion_tokens": settings.max_output_tokens}
+    else:
+        model_kwargs={"max_tokens": settings.max_output_tokens}
+
     graph = RTMReviewerRunnable(
         client=real_client,
         model=real_model,
-        model_kwargs={"max_tokens": settings.max_output_tokens},
+        model_kwargs=model_kwargs,
     )
+    # Mirror the API: drop the graph diagram into the per-session run folder.
+    graph.write_graph_png(test_run_dir)
 
     state = {"requirement": requirement, "test_cases": test_cases}
     if design_docs:

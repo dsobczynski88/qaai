@@ -25,7 +25,7 @@ from autoqa.components.shared.data_integration import (
 )
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import settings
-from autoqa.utils import save_graph_png
+from autoqa.utils import render_graph_png, write_graph_png_bytes
 
 from .core import TCReviewState
 from .nodes import (
@@ -146,5 +146,10 @@ class TCReviewerRunnable:
         sg.add_edge("aggregator", END)
 
         flow = sg.compile(checkpointer=self.checkpointer)
-        save_graph_png(flow, Path(settings.log_file_path).parent / "tc_graph.png")
+        # Render once (mermaid.ink); each run writes the cached bytes via write_graph_png.
+        self._graph_png_bytes = render_graph_png(flow)
         return flow
+
+    def write_graph_png(self, run_dir: Union[str, Path]) -> None:
+        """Write the cached graph diagram into a per-run folder as tc_graph.png."""
+        write_graph_png_bytes(self._graph_png_bytes, Path(run_dir) / "tc_graph.png")

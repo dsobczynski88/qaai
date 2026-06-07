@@ -77,6 +77,36 @@ def _reset_managed_handlers() -> None:
                 pass
 
 
+def bootstrap_console_logging() -> None:
+    """Attach console-only handlers to the managed loggers at process boot.
+
+    We deliberately do NOT create a run folder at startup: the first
+    ``logs/run-<ts>/`` folder is created by the first review request (via
+    ``start_new_run``). Until then, boot/lifespan logs (model, services
+    initialized, etc.) go to stdout — standard for a long-lived server, whose
+    stdout is captured by the process manager / container runtime.
+
+    Idempotent: existing handlers on the managed loggers are detached first, and
+    a later ``setup_logging()`` cleanly swaps these console handlers for the
+    per-run file+console handlers.
+    """
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+    _reset_managed_handlers()
+    console_format = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+    for name in _MANAGED_LOGGERS:
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(console_format)
+        logger.addHandler(handler)
+
+
 def setup_logging(run_dir: Path) -> None:
     """Configure logging for the FastAPI application.
 
@@ -220,26 +250,36 @@ def setup_logging(run_dir: Path) -> None:
     startup_logger.info("=" * 80)
 
 
-def start_new_run(base_logs_dir: str = "./logs") -> Path:
+def start_new_run(base_logs_dir: str | None = None) -> Path:
     """Begin a fresh run: create a timestamped directory and re-point all logging.
 
-    Called once at startup (for startup/lifespan logs) and again at the start of
-    every review request, so each review gets its own ``logs/run-<ts>/`` holding
-    that run's ``api.log`` / ``autoqa.log`` / ``pyjama.log`` alongside its
-    ``outputs.jsonl`` and viewer. Updates ``settings.log_file_path`` so the
-    services (which derive their output dir from it) write into the same folder.
+    Called at the start of every review request (and once per integration-test
+    session), so each run gets its own ``logs/run-<ts>/`` holding that run's
+    ``api.log`` / ``autoqa.log`` / ``pyjama.log`` alongside its ``inputs.jsonl``,
+    ``outputs.jsonl``, viewer, graph png and ``token_usage.jsonl``. Updates
+    ``settings.log_file_path`` so the services (which derive their output dir and
+    ``telemetry_file_path`` from it) write into the same folder.
 
     Args:
-        base_logs_dir: Base directory for all run folders (default: "./logs")
+        base_logs_dir: Base directory for all run folders. Defaults to
+            ``settings.log_base_dir`` (``./logs`` in production, ``./logs/tests``
+            under the test harness).
 
     Returns:
         Path to the new run directory.
     """
+    from autoqa.core.config import settings
+
+    if base_logs_dir is None:
+        base_logs_dir = settings.log_base_dir
+
     run_dir = create_timestamped_run_directory(base_logs_dir)
     setup_logging(run_dir)
 
     # Update the shared pointer the services read to locate their run directory.
-    from autoqa.core.config import settings
-
+    # telemetry_file_path is a property derived from log_file_path, so this also
+    # re-points token_usage.jsonl into the new folder. Truncate it so the run's
+    # file starts empty.
     settings.log_file_path = str(run_dir / "autoqa.log")
+    Path(settings.telemetry_file_path).write_text("", encoding="utf-8")
     return run_dir

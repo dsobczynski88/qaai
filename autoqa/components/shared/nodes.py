@@ -15,20 +15,19 @@ Class hierarchy:
 import asyncio
 import html
 import json
+import logging
 import re
 from typing import Optional, Any
 from abc import ABC, abstractmethod
 
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.utils import render_prompt
-from autoqa.prj_logger import ProjectLogger
-from autoqa.core.config import settings
 
 from .core import DecomposedRequirement
 
-project_logger = ProjectLogger(name="logger.shared.nodes", log_file=settings.log_file_path)
-project_logger.config()
-logger = project_logger.get_logger()
+# Child of the "autoqa" logger, so node logs flow through the re-pointable file
+# handler that setup_logging() attaches per run (logs/run-<ts>/autoqa.log).
+logger = logging.getLogger(__name__)
 
 
 def sanitize_requirement_text(text: str, max_length: int = 3000, req_id: Optional[str] = None) -> str:
@@ -652,7 +651,7 @@ def make_decomposer_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: str = "decomposer/v5.0.0/template.jinja2",
+    prompt_template: str,
     cache_manager: Optional[Any] = None,
     **template_vars,
 ) -> DecomposerNode:

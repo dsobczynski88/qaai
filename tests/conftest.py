@@ -2,7 +2,6 @@ import truststore
 truststore.inject_into_ssl()
 
 import json
-import logging
 import os
 from pathlib import Path
 import pytest
@@ -14,13 +13,12 @@ from httpx import AsyncClient, ASGITransport
 
 from autoqa.core.config import settings
 from autoqa.core.telemetry import TokenUsageTracker
-from autoqa.prj_logger import ProjectLogger
-from autoqa.utils import make_output_directory
 
-# All test-run artifacts (logs, JSONL records, telemetry) go under logs/tests/
-# to keep them separate from production/API-server runs under logs/.
-_TEST_RUN_DIR = Path(make_output_directory("./logs/tests"))
-_TEST_LOG_FILE = str(_TEST_RUN_DIR / "autoqa.log")
+# All test-run artifacts (logs, JSONL records, telemetry, viewers, graph pngs) go
+# under logs/tests/ to keep them separate from production/API-server runs under
+# logs/. Setting this BEFORE importing autoqa.api.main (below) ensures both the
+# import-time create_app() and every start_new_run() resolve to logs/tests.
+settings.log_base_dir = "./logs/tests"
 
 from autoqa.components.clients import (
     RateLimitOpenAIClient
@@ -118,18 +116,35 @@ def pytest_generate_tests(metafunc):
 
 
 @pytest.fixture(scope="session")
-def token_tracker():
+def test_run_dir():
+    """Single per-session run folder under logs/tests for integration artifacts.
+
+    Calls start_new_run() (base resolves to settings.log_base_dir = ./logs/tests),
+    which also wires setup_logging() so node/app logs land in this folder's
+    autoqa.log — mirroring how the API produces one folder per review batch. Only
+    integration tests depend on this (via token_tracker / jsonl_recorders), so API
+    tests don't get an extra session folder — they get the per-request folder that
+    the service's own start_new_run() creates.
+    """
+    from autoqa.core.logging_config import start_new_run
+
+    return start_new_run()
+
+
+@pytest.fixture(scope="session")
+def token_tracker(test_run_dir):
     """Session-scoped token usage tracker.
 
     Accumulates prompt/completion tokens and simulated cost across all
     integration tests in the session. Calls log_summary() at teardown so
     the totals appear in autoqa.log and are written to token_usage.jsonl.
 
-    Cost rates are read from settings (TOKEN_COST_INPUT_PER_M /
-    TOKEN_COST_OUTPUT_PER_M in .env). Defaults: $0.15 / $0.60 per 1M tokens.
+    file_path=None ⇒ the tracker resolves its target from settings.telemetry_file_path
+    (re-pointed into test_run_dir by start_new_run). Cost rates are read from
+    settings (TOKEN_COST_INPUT_PER_M / TOKEN_COST_OUTPUT_PER_M in .env).
     """
     tracker = TokenUsageTracker(
-        file_path=str(_TEST_RUN_DIR / "token_usage.jsonl"),
+        file_path=None,
         input_cost_per_million=settings.token_cost_input_per_m,
         output_cost_per_million=settings.token_cost_output_per_m,
     )
@@ -214,28 +229,6 @@ def submit_and_wait(client):
 @pytest.fixture
 def hazard_analysis_requirement_id_format():
     return "REQ-PUMP-\\d+"
-
-
-@pytest.fixture(scope="session", autouse=True)
-def configure_test_logger():
-    """Configure the logger for test runs to write to the run directory's autoqa.log.
-    This is autouse=True so it runs automatically for all test sessions."""
-    # Configure the test pipeline logger
-    test_logger = ProjectLogger("autoqa.test.pipeline", _TEST_LOG_FILE).config()
-    
-    # Also configure other loggers that might be used
-    for logger_name in ["autoqa.hazard_pipeline", "autoqa.api.rtm", "autoqa.api.hazard"]:
-        logger = logging.getLogger(logger_name)
-        if not logger.handlers:  # Only add handlers if not already configured
-            proj_logger = ProjectLogger(logger_name, _TEST_LOG_FILE).config()
-    
-    yield
-    
-    # Cleanup: flush and close handlers
-    for logger_name in ["autoqa.test.pipeline", "autoqa.hazard_pipeline", "autoqa.api.rtm", "autoqa.api.hazard"]:
-        logger = logging.getLogger(logger_name)
-        for handler in logger.handlers:
-            handler.flush()
 
 
 def _load_test_suite_fixture() -> dict:
@@ -388,9 +381,9 @@ def _recorder_fixture(viewer_fn: str, label: str):
     import importlib
 
     @pytest.fixture(scope="session")
-    def _fixture():
-        inputs_path = _TEST_RUN_DIR / "inputs.jsonl"
-        outputs_path = _TEST_RUN_DIR / "outputs.jsonl"
+    def _fixture(test_run_dir):
+        inputs_path = test_run_dir / "inputs.jsonl"
+        outputs_path = test_run_dir / "outputs.jsonl"
         inputs_path.write_text("", encoding="utf-8")
         outputs_path.write_text("", encoding="utf-8")
 

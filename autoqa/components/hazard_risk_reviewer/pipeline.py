@@ -32,6 +32,7 @@ overall_verdict is computed deterministically: Yes iff every
 mandatory_findings[i].verdict ∈ {Yes, N-A} (only H5 may be N-A).
 """
 
+import logging
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -48,8 +49,7 @@ from autoqa.components.shared.data_integration import (
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.core.cache import ReviewCacheManager
 from autoqa.core.config import PromptConfig, settings
-from autoqa.utils import save_graph_png
-from autoqa.prj_logger import ProjectLogger
+from autoqa.utils import render_graph_png, write_graph_png_bytes
 
 from .core import HazardReviewState
 from .nodes import (
@@ -64,9 +64,7 @@ from .nodes import (
     RequirementReviewerNode,
 )
 
-project_logger = ProjectLogger(name="logger.hazard_pipeline", log_file=settings.log_file_path)
-project_logger.config()
-logger = project_logger.get_logger()
+logger = logging.getLogger(__name__)
 
 
 class HazardReviewerRunnable:
@@ -275,5 +273,10 @@ class HazardReviewerRunnable:
         sg.add_edge("final_assessment", END)
 
         flow = sg.compile(checkpointer=self.checkpointer)
-        save_graph_png(flow, Path(settings.log_file_path).parent / "hazard_graph.png")
+        # Render once (mermaid.ink); each run writes the cached bytes via write_graph_png.
+        self._graph_png_bytes = render_graph_png(flow)
         return flow
+
+    def write_graph_png(self, run_dir: Union[str, Path]) -> None:
+        """Write the cached graph diagram into a per-run folder as hazard_graph.png."""
+        write_graph_png_bytes(self._graph_png_bytes, Path(run_dir) / "hazard_graph.png")

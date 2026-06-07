@@ -6,7 +6,7 @@ from fastapi import status
 async def test_test_suite_review_happy_path(submit_and_wait):
     """Submit /api/v1/test-suite-review, poll the job, and download the HTML viewer."""
     response = await submit_and_wait(
-        "/api/v1/test-suite-review", json={"baseline_id": "BASE-84429"}, max_wait=600
+        "/api/v1/test-suite-review", json={"baseline_id": "BASE-12345"}, max_wait=600
     )
     assert response.status_code == status.HTTP_200_OK
     assert "text/html" in response.headers.get("content-type", "")
