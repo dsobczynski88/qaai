@@ -49,7 +49,11 @@ testpaths = ["tests"]
 python_classes = []
 
 [tool.uv.sources]
-pyjama = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git" }
+# pyjama tracks the `main` branch of pyjama-fastapi. uv still locks a specific
+# commit SHA in uv.lock for reproducibility — a plain `uv sync`/`--frozen` installs
+# that locked SHA. To advance the pin to the latest commit on `main`, run:
+#   uv sync --upgrade-package pyjama --native-tls   (or: scripts/update_pyjama.sh / .ps1)
+pyjama = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git", branch = "main" }
 
 [project.scripts]
 autoqa-api = "autoqa.api.run:main"

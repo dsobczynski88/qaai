@@ -161,8 +161,21 @@ The five review objectives default to `autoqa/components/test_case_reviewer/revi
 ```bash
 git clone <repo-url>
 cd autoqa
-uv sync --frozen   # installs deps, including pyjama from the pyjama-fastapi git source
+uv sync --frozen   # installs deps, including pyjama pinned to the SHA in uv.lock
 ```
+
+`pyjama` (the `pyjama-fastapi` package) is a git dependency. `uv sync` installs the
+commit pinned in `uv.lock` — it does **not** auto-pull newer commits. To advance the
+pin to the latest commit on `main` and reinstall:
+
+```bash
+uv sync --upgrade-package pyjama --native-tls   # re-pins uv.lock to latest pyjama-fastapi, reinstalls
+# or use the helper: scripts/update_pyjama.sh  (PowerShell: scripts/update_pyjama.ps1)
+```
+
+> `--native-tls` uses the OS trust store; it's required behind corporate CAs (e.g. the
+> Baxter network) where uv otherwise fails reaching pypi.org with an "invalid peer
+> certificate" error. Drop it if you don't hit that error.
 
 ### Environment Setup
 

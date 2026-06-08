@@ -25,10 +25,12 @@ if ! grep -q "request_timeout.*600" "$JUPYTER_SERVER_CONFIG" 2>/dev/null; then
     cat >> "$JUPYTER_SERVER_CONFIG" << 'EOF'
 # AutoQA API Configuration - Increased timeouts for long-running workflows
 c.ServerApp.tornado_settings = {
-    'request_timeout': 600,  # 10 minutes (in seconds)
+    'request_timeout': 600,           # 10 minutes (in seconds)
+    'websocket_ping_interval': 30,    # Keep-alive ping every 30s
+    'websocket_ping_timeout': 900,    # 15 minute timeout for pings
 }
 EOF
-    echo "   ✓ Added request_timeout: 600s (10 minutes)"
+    echo "   ✓ Added request_timeout: 600s (10 minutes), websocket ping settings"
 else
     echo "   ✓ JupyterServer timeout already configured"
 fi

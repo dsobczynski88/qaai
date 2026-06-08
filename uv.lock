@@ -237,7 +237,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "pyjama", git = "https://github.com/dsobczynski88/pyjama-fastapi.git" },
+    { name = "pyjama", git = "https://github.com/dsobczynski88/pyjama-fastapi.git?branch=main" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -2747,7 +2747,7 @@ wheels = [
 [[package]]
 name = "pyjama"
 version = "1.0.0"
-source = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git#e89313c31f6e0dd5a45f25b1f678ba36617caab6" }
+source = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git?branch=main#9b747a145d16fca7506a53ae9cabce5af3cfd612" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },
