@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
+from autoqa.core.constants import INPUT_JSONL_FILENAME
+
 # Import hazard-related models
 try:
     from autoqa.components.hazard_risk_reviewer.core import (
@@ -444,7 +446,7 @@ def transform_test_case_review_to_state(
 def transform_hazard_record_to_state(
     excel_file_path: str,
     pyjama_response_file_path: str,
-    output_jsonl_path: str = "inputs.jsonl",
+    output_jsonl_path: str = INPUT_JSONL_FILENAME,
     sheet_name: str = "SHA Table",
     extract_gids_format: str = "GID-\\d+",
 ) -> List[HazardRowWithTraceMatrix]:

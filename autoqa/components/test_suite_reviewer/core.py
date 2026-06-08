@@ -16,6 +16,9 @@ from autoqa.components.shared.core import (
     DecomposedRequirement,
     TestCase,
     DesignDocument,
+    Verdict,
+    VerdictNA,
+    BaseReviewState,
 )
 
 __all__ = [
@@ -41,8 +44,8 @@ __all__ = [
 
 
 Dimension = Literal["functional", "negative", "boundary"]
-Verdict = Literal["Yes", "No"]
-VerdictNA = Literal["Yes", "No", "N-A"]
+# Verdict / VerdictNA are imported from autoqa.components.shared.core (single
+# source of truth) and re-exported via __all__ for backward compatibility.
 
 
 class SummarizedTestCase(BaseModel):
@@ -224,17 +227,12 @@ class SynthesizedAssessment(BaseModel):
     )
 
 
-class RTMReviewState(TypedDict, total=False):
-    # Caching control: "off" | "partial" (default) | "full". Threaded from the
-    # API/service into every node; see autoqa.core.cache.ReviewCacheManager.
-    cache_mode: str
+class RTMReviewState(BaseReviewState, total=False):
+    # cache_mode + JAMA integration fields (pyjama_request / jama_data /
+    # jama_metadata) are inherited from BaseReviewState.
     # Data source fields (Option 1: local OR Option 2: JAMA)
     requirement: Requirement
     test_cases: List[TestCase]
-    # JAMA integration fields (Option 2 only)
-    pyjama_request: Optional[Any]  # PyJamaRequest, but avoid import cycle
-    jama_data: Optional[List[Dict[str, Any]]]
-    jama_metadata: Optional[Dict[str, Any]]
     # Pipeline state fields
     design_docs: Optional[List[DesignDocument]]
     decomposed_requirement: Optional[DecomposedRequirement]

@@ -3,29 +3,10 @@ const STORAGE_KEY = "visualize-batch-outputs/{{RUN_KEY}}";
 let idx = 0;
 const feedback = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
 
-function save() {
-  const rec = RECORDS[idx];
-  const key = rec.requirement?.req_id || `rec-${idx}`;
-  const rating = document.querySelector('input[name="rating"]:checked');
-  feedback[key] = {
-    rating: rating ? parseInt(rating.value, 10) : null,
-    notes: document.getElementById("notes").value || "",
-    saved_at: new Date().toISOString(),
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(feedback));
-}
-
-function escapeHTML(s) {
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
-}
-
-function renderRatings() {
-  const box = document.getElementById("rating");
-  box.innerHTML = [1,2,3,4,5].map(n =>
-    `<label><input type="radio" name="rating" value="${n}"><span>${n}</span></label>`
-  ).join("");
+// save(), escapeHTML(), renderRatings() live in common/shared.js (concatenated
+// ahead of this file). Define how this viewer extracts a record's feedback key.
+function feedbackKey(rec, idx) {
+  return rec.requirement?.req_id;
 }
 
 function renderLeft() {

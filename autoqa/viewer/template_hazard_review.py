@@ -13,7 +13,7 @@ _COMMON = Path(__file__).parent / "common"
 _HERE   = Path(__file__).parent / "hazard_reviewer"
 
 _css  = (_COMMON / "base.css").read_text(encoding="utf-8") + (_HERE / "style.css").read_text(encoding="utf-8")
-_js   = (_HERE / "script.js").read_text(encoding="utf-8")
+_js   = (_COMMON / "shared.js").read_text(encoding="utf-8") + "\n" + (_HERE / "script.js").read_text(encoding="utf-8")
 _html = (_COMMON / "layout.html").read_text(encoding="utf-8")
 
 HZ_HTML_TEMPLATE = (

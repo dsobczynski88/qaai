@@ -1,24 +1,7 @@
 from pathlib import Path
 from typing import Any, Union
-from datetime import datetime
 from jinja2 import Environment, FileSystemLoader, Template
 import autoqa
-
-def get_current_date_time():
-    # Get the current date and time
-    now = datetime.now()
-    # Extract date, month, and time
-    current_date = now.date()  # YYYY-MM-DD format
-    current_month = now.month  # Numeric month (1-12)
-    current_time = now.time()  # HH:MM:SS.microseconds format
-    formatted_time = now.strftime("%Y-%m-%d-%H-%M-%S")
-    return formatted_time  
-
-def make_output_directory(fold_path):
-    run_name = f"run-{get_current_date_time()}"
-    output_directory = f"{fold_path}/{run_name}"
-    Path(output_directory).mkdir(parents=True, exist_ok=True)
-    return output_directory
 
 def render_graph_png(graph) -> Union[bytes, None]:
     """Render a compiled LangGraph runnable to Mermaid PNG bytes (or None).
@@ -51,15 +34,6 @@ def write_graph_png_bytes(png_bytes: Union[bytes, None], output_path: Union[str,
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(png_bytes)
     print(f"Graph diagram saved to: {output_path}")
-
-
-def save_graph_png(graph, output_path: Union[str, Path]) -> None:
-    """Render a compiled LangGraph runnable as a Mermaid PNG and save it to disk.
-
-    Thin wrapper around render_graph_png + write_graph_png_bytes for callers that
-    render-and-write in one step.
-    """
-    write_graph_png_bytes(render_graph_png(graph), output_path)
 
 
 # Prompt Template Loading (Jinja2)

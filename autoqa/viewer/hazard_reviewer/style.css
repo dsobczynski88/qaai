@@ -4,12 +4,7 @@
 .field-grid dt { color: var(--mute); font-weight: 600; }
 .field-grid dd { margin: 0; }
 .verdict-row { flex-wrap: wrap; }
-.cited { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--mute); }
-tr.covered   { background: var(--ok); }
-tr.uncovered { background: var(--bad); }
-.dim-chip { display: inline-block; margin: 0 2px 0 0; padding: 1px 6px; border-radius: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; background: #eef2ff; color: #2b3a8b; }
-.tc-list { list-style: none; padding: 0; margin: 0; }
-.tc-list li { margin: 2px 0; }
+/* .cited, tr.covered/.uncovered, .dim-chip, .tc-list, .tc-list li → common/base.css */
 .req-card { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin: 8px 0; }
 .req-card .req-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .req-card .req-head .link-like { font-size: 12px; }

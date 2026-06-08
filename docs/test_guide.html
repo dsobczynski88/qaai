@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoQA · Test Guide</title>
+<style>
+  :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
+    --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--maxw:860px}
+  @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;
+    --line:#222a33;--accent:#6ea8ff;--code-bg:#161b22;--sidebar:#11161c;--ok:#5bd07e;--warn:#e3b341}}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .layout{display:grid;grid-template-columns:266px 1fr;min-height:100vh}
+  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:24px 18px;background:var(--sidebar);border-right:1px solid var(--line);font-size:14px}
+  nav.toc strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
+  nav.toc a{display:block;color:var(--mute);text-decoration:none;padding:3px 0}
+  nav.toc a:hover,nav.toc a.active{color:var(--accent)}
+  main{max-width:var(--maxw);padding:32px 30px 90px;margin:0 auto;width:100%}
+  header.doc{border-bottom:1px solid var(--line);margin-bottom:8px;padding-bottom:12px}
+  header.doc .meta{color:var(--mute);font-size:13px}
+  h1,h2,h3{line-height:1.25;scroll-margin-top:14px}
+  h2{margin-top:40px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{margin-top:26px}
+  a{color:var(--accent)}
+  code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
+  pre code{background:none;padding:0}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--code-bg)}
+  .src{color:var(--mute);font:12px ui-monospace,monospace}
+  .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
+  .warn{border-left-color:var(--warn)}
+  footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
+  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}}
+  @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Table of contents">
+  <strong>Test Guide</strong>
+  <a href="#setup">Setup &amp; install</a>
+  <a href="#running">Running the suites</a>
+  <a href="#api">tests/api</a>
+  <a href="#integration">tests/integration</a>
+  <a href="#fixtures">Default fixtures</a>
+  <a href="#custom">Custom files</a>
+  <a href="#artifacts">Run artifacts</a>
+  <strong style="margin-top:16px">More docs</strong>
+  <a href="index.html">← Docs home</a>
+  <a href="api.html">API guide</a>
+  <a href="configuration.html">Configuration</a>
+  <a href="design/agents.html">Agent design</a>
+</nav>
+<main>
+<header class="doc">
+  <h1>Test Guide</h1>
+  <div class="meta">AutoQA (autoqa-may23) · generated from the codebase 2026-06-08</div>
+</header>
+
+<p>This guide covers how to set up, install, and run the test suites under
+<code>tests/api</code> and <code>tests/integration</code>, the default fixture files each
+test uses, and how to run the tests against your own custom input files.</p>
+
+<h2 id="setup">Setup &amp; install</h2>
+<p>AutoQA uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>
+<span class="src">pyproject.toml:9</span>.</p>
+<pre><code>uv sync --frozen        # install locked dependencies (incl. pyjama-fastapi from git)</code></pre>
+<p>pytest configuration <span class="src">pyproject.toml:44-48</span>:
+<code>asyncio_mode = "auto"</code>, test path <code>tests/</code>, and a single marker —
+<code>integration</code> (<em>"marks tests that make real LLM API calls"</em>).</p>
+
+<h3>Environment variables for tests</h3>
+<p>Integration tests read their <strong>own</strong> live-LLM credentials from a repo-root
+<code>.env</code> <span class="src">tests/conftest.py:155-183</span>:</p>
+<pre><code>PYTEST_API_KEY=&lt;your-key&gt;
+PYTEST_BASE_URL=&lt;your-api-url&gt;
+PYTEST_MODEL=gpt-4o-mini</code></pre>
+<div class="note warn"><strong>Production guard.</strong> The <code>real_client</code> fixture
+rejects any <code>PYTEST_BASE_URL</code> containing the string <code>"prod"</code> to prevent
+accidental production charges <span class="src">tests/conftest.py:167-172</span>.</div>
+<p>Test runs are isolated from server runs: logs are written under <code>logs/tests/</code>
+(set via <code>settings.log_base_dir</code> before <code>autoqa.api.main</code> is imported)
+<span class="src">tests/conftest.py:21</span>.</p>
+
+<h2 id="running">Running the suites</h2>
+<table>
+<thead><tr><th>Command</th><th>What runs</th></tr></thead>
+<tbody>
+<tr><td><code>uv run pytest -m "not integration"</code></td><td>Fast unit/contract tests — no live LLM calls</td></tr>
+<tr><td><code>uv run pytest -m integration</code></td><td>Integration + API happy-path tests (real LLM; needs <code>.env</code>)</td></tr>
+<tr><td><code>uv run pytest tests/api -v</code></td><td>API contract + happy-path tests only</td></tr>
+<tr><td><code>uv run pytest tests/integration -v</code></td><td>End-to-end pipeline tests only</td></tr>
+<tr><td><code>uv run pytest path::test_name</code></td><td>A single test</td></tr>
+</tbody></table>
+
+<h2 id="api">tests/api — FastAPI contract &amp; happy-path tests</h2>
+<p>These spin up the FastAPI app via an in-process <code>AsyncClient</code> (wrapped in the
+app's lifespan so services initialize) <span class="src">tests/conftest.py:186-197</span>.
+Files live under <code>tests/api/v1/</code>:</p>
+<table>
+<thead><tr><th>File</th><th>Tests</th><th>Checks</th></tr></thead>
+<tbody>
+<tr><td><code>test_health.py</code></td><td><code>test_health_check</code></td><td><code>GET /health</code> → 200 with <code>status</code>/<code>version</code>/<code>services</code></td></tr>
+<tr><td><code>test_general.py</code></td><td>invalid JSON, missing <code>baseline_id</code>, request-id header</td><td>422 validation; <code>X-Request-ID</code> present</td></tr>
+<tr><td><code>test_test_suite_reviewer.py</code></td><td><code>test_test_suite_review_happy_path</code> (+ 422 cases)</td><td><span class="src">@integration</span> submit → poll → result is 200 <code>text/html</code></td></tr>
+<tr><td><code>test_test_case_reviewer.py</code></td><td><code>test_tc_review_happy_path</code> (+ 422 cases)</td><td>same async flow for the TC endpoint</td></tr>
+<tr><td><code>test_hazard_risk_reviewer.py</code></td><td><code>test_hazard_risk_review_happy_path</code> (+ missing file/project, 400 bad type)</td><td>multipart upload; non-Excel → 400</td></tr>
+<tr><td><code>test_cache_toggle.py</code></td><td><code>use_cache</code> / <code>test_mode</code> mapping</td><td><code>use_cache=false</code> → <code>cache_mode="off"</code>; default → <code>"partial"</code></td></tr>
+</tbody></table>
+<div class="note"><strong>Reviews are asynchronous.</strong> The happy-path tests drive
+submit → poll → result through the <code>submit_and_wait</code> fixture
+<span class="src">tests/conftest.py:200-226</span>, so the "200 / <code>text/html</code>"
+assertion describes the <em>result download</em>, not the initial <code>POST</code>
+(which returns <code>202</code>).</div>
+<pre><code>uv run pytest tests/api/v1/test_test_suite_reviewer.py::test_test_suite_review_happy_path</code></pre>
+
+<h2 id="integration">tests/integration — end-to-end pipeline tests</h2>
+<p>These run the full compiled LangGraph pipeline against fixture files. For the RTM and
+test-case reviewers, every row of the selected JSONL fixture is expanded into its own
+parametrized item (id = <code>req_id</code> / <code>test_id</code>) by the
+<code>pytest_generate_tests</code> hook <span class="src">tests/conftest.py:101-115</span>.</p>
+<table>
+<thead><tr><th>Test</th><th>Validates</th><th>Outputs</th></tr></thead>
+<tbody>
+<tr><td><code>test_suite_reviewer/pipeline.py::test_test_suite_reviewer</code></td>
+<td>One <code>SynthesizedAssessment</code> per requirement; all 6 findings (M1–M5 + R6); <code>overall_verdict=Yes</code> iff M1–M5 ∈ {Yes, N-A}</td>
+<td><code>inputs.jsonl</code>, <code>outputs.jsonl</code>, <code>viewer.html</code></td></tr>
+<tr><td><code>test_case_reviewer/pipeline.py::test_test_case_reviewer</code></td>
+<td>One <code>TestCaseAssessment</code> per test case; 5-item <code>evaluated_checklist</code>; spec-align verdict derived from coverage count</td>
+<td><code>inputs.jsonl</code>, <code>outputs.jsonl</code>, <code>viewer_tc.html</code></td></tr>
+<tr><td><code>hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer</code></td>
+<td>One <code>RequirementReview</code> per traced requirement (each embeds a <code>SynthesizedAssessment</code>); <code>HazardAssessment</code> with 7 findings (H1–H7); only H5 may be <code>N-A</code></td>
+<td>+ <code>hazard_pipeline_state.json</code> <span class="src">pipeline.py:192</span></td></tr>
+</tbody></table>
+<pre><code>uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer
+uv run pytest tests/integration/test_case_reviewer/pipeline.py::test_test_case_reviewer
+uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer</code></pre>
+
+<h2 id="fixtures">Default fixtures</h2>
+<p>Fixtures are resolved by <code>resolve_fixture_path</code> / <code>load_jsonl</code>
+<span class="src">tests/helpers.py:7-47</span> using the search order
+<code>mock/ → gold/ → local/ → external/ → root</code>, so a test's
+<code>--input-file</code> takes a <strong>bare filename</strong> and finds it wherever it
+lives under <code>tests/fixtures/</code>.</p>
+<p><strong>Default fixture each integration test falls back to</strong> when
+<code>--input-file</code> is omitted <span class="src">tests/conftest.py:49-52, 355-371</span>:</p>
+<table>
+<thead><tr><th>Reviewer</th><th>Default fixture(s)</th></tr></thead>
+<tbody>
+<tr><td>Test Suite (RTM)</td><td><code>test_suite_review_all_fields.jsonl</code></td></tr>
+<tr><td>Test Case</td><td><code>test_case_review_all_fields.jsonl</code></td></tr>
+<tr><td>Hazard Risk</td><td><code>software_hazard_analysis.xlsx</code> + <code>pyjama_response_unified.jsonl</code> (<code>--pyjama-file</code>)</td></tr>
+</tbody></table>
+<p>Files currently present under <code>tests/fixtures/</code>:</p>
+<table>
+<thead><tr><th>Directory</th><th>Files</th></tr></thead>
+<tbody>
+<tr><td><code>external/</code></td><td><code>test_suite_review_all_fields.jsonl</code>, <code>test_suite_review_min_fields.jsonl</code>, <code>test_case_review_all_fields.jsonl</code>, <code>test_case_review_min_fields.jsonl</code>, <code>software_hazard_analysis.xlsx</code>, <code>pyjama_response_unified.jsonl</code></td></tr>
+<tr><td><code>gold/</code></td><td><code>gold_dataset.jsonl</code>, <code>gold_dataset_labeled.jsonl</code>, <code>gold_dataset-tc.jsonl</code>, <code>api_test_inputs.jsonl</code></td></tr>
+<tr><td><code>local/</code></td><td><code>locating_device.jsonl</code></td></tr>
+<tr><td><code>mock/</code></td><td><code>decomposer_cases.jsonl</code>, <code>summarizer_cases.jsonl</code>, <code>generator_cases.jsonl</code>, <code>coverage_evaluator_cases.jsonl</code>, <code>synthesizer_cases.jsonl</code>, <code>tc_aggregator_cases.jsonl</code></td></tr>
+</tbody></table>
+<p>JSONL fixtures are newline-delimited; each line is a self-contained graph-input object.
+The hazard test assembles its <code>HazardRowWithTraceMatrix</code> input
+<strong>programmatically</strong> from the Excel + PyJama fixtures (there is no single
+<code>hazard_full_traceability.jsonl</code>).</p>
+
+<h2 id="custom">Running with custom files</h2>
+<p>Each integration test accepts CLI options <span class="src">tests/conftest.py:55-81</span>:
+<code>--input-file</code> (a bare fixture filename — JSONL for RTM/TC, <code>.xlsx</code> for
+hazard) and <code>--pyjama-file</code> (hazard traceability JSONL).</p>
+<pre><code># RTM / test-case: --input-file is the JSONL of input rows
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
+  --input-file=locating_device.jsonl
+
+# Preview which items a file expands to, without spending any LLM calls
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
+  --input-file=locating_device.jsonl --collect-only
+
+# Run a single row by its id
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
+  --input-file=locating_device.jsonl -k REQ-PUMP-001
+
+# Hazard: --input-file is the SHA .xlsx; --pyjama-file overrides the traceability JSONL
+uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer \
+  --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl</code></pre>
+<h3>Adding your own fixture</h3>
+<ol>
+<li>Drop the file into a fixtures subdir — <code>tests/fixtures/local/</code> is recommended
+for project-specific data, e.g. <code>tests/fixtures/local/my_requirements.jsonl</code>.</li>
+<li>Match the reviewer's graph-input schema per row:
+<ul>
+<li>RTM: <code>{"requirement": {...}, "test_cases": [...], "design_docs": [...]}</code></li>
+<li>TC: <code>{"test_case": {...}, "requirements": [...], "design_docs": [...]}</code></li>
+</ul></li>
+<li>Run by <strong>bare filename</strong>: <code>--input-file=my_requirements.jsonl</code>
+(found via the search order above, unless shadowed by a same-named file in
+<code>mock/</code> or <code>gold/</code>).</li>
+</ol>
+
+<h2 id="artifacts">Run artifacts</h2>
+<p>Session-scoped recorder fixtures (<code>jsonl_recorders</code> / <code>_tc</code> /
+<code>_hz</code>) append each input/output and generate the HTML viewer from
+<code>outputs.jsonl</code> at session teardown <span class="src">tests/conftest.py:373-415</span>.
+Per session, under <code>logs/tests/run-&lt;timestamp&gt;/</code>:</p>
+<ul>
+<li><code>inputs.jsonl</code> / <code>outputs.jsonl</code> — recorded records</li>
+<li><code>viewer.html</code> / <code>viewer_tc.html</code> / <code>viewer_hz.html</code> — generated viewer</li>
+<li><code>autoqa.log</code> — node/app logs for the run</li>
+<li><code>hazard_pipeline_state.json</code> — full hazard graph state (hazard test only)</li>
+</ul>
+
+<footer class="doc">Generated from the AutoQA codebase on 2026-06-08. · <a href="index.html">Docs home</a></footer>
+</main>
+</div>
+<script>
+  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
+  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
+    links.forEach(l=>l.classList.remove('active'));
+    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
+    {rootMargin:'-10% 0px -80% 0px'});
+  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>
