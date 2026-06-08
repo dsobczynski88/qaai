@@ -16,7 +16,7 @@ from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnab
 from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from autoqa.components.test_case_reviewer.pipeline import TCReviewerRunnable
 from autoqa.components.test_case_reviewer.nodes import load_default_review_objectives
-from autoqa.prj_logger import format_elapsed_time
+from autoqa.core.constants import INPUT_JSONL_FILENAME, OUTPUT_JSONL_FILENAME
 
 
 def _json_default(obj):
@@ -24,6 +24,52 @@ def _json_default(obj):
     if hasattr(obj, 'model_dump'):
         return obj.model_dump()
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+async def _run_batch_review(
+    *,
+    logger: logging.Logger,
+    run_dir: Path,
+    items: list,
+    graph,
+    thread_id_fn,
+    graph_input_fn,
+    viewer_writer,
+    item_noun: str,
+) -> str:
+    """Shared batch loop for the three reviewer services.
+
+    Writes ``inputs.jsonl``, invokes the compiled ``graph`` once per item while
+    appending each final state to ``outputs.jsonl``, renders the viewer, and
+    returns its path. The per-reviewer differences — thread-id source, graph
+    input shape, and which ``write_viewer*`` to call — are injected as callables.
+    """
+    inputs_path = run_dir / INPUT_JSONL_FILENAME
+    with inputs_path.open("w", encoding="utf-8") as f:
+        for item in items:
+            f.write(json.dumps(item, default=_json_default) + "\n")
+
+    outputs_path = run_dir / OUTPUT_JSONL_FILENAME
+    outputs_path.write_text("", encoding="utf-8")
+
+    start = time.perf_counter()
+    for i, item in enumerate(items):
+        config = {"configurable": {"thread_id": thread_id_fn(i, item)}}
+        final_state = await graph.ainvoke(graph_input_fn(i, item), config)
+        logger.info("[%d/%d] Completed %s review", i + 1, len(items), item_noun)
+        with outputs_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(final_state, default=_json_default) + "\n")
+
+    viewer_path = viewer_writer(outputs_path)
+    if viewer_path is None:
+        raise ValueError(f"{item_noun} review produced no output records")
+
+    elapsed = time.perf_counter() - start
+    logger.info(
+        "Batch %s review complete: %d items in %.1fs, viewer at %s",
+        item_noun, len(items), elapsed, viewer_path,
+    )
+    return str(viewer_path)
 
 
 class RTMReviewService:
@@ -98,35 +144,16 @@ class RTMReviewService:
         state_dicts = transform_test_suite_review_to_state(jama_data)
         self._logger.info("Baseline %s: %d requirements to review", baseline_id, len(state_dicts))
 
-        inputs_path = run_dir / "inputs.jsonl"
-        with inputs_path.open("w", encoding="utf-8") as f:
-            for state_dict in state_dicts:
-                f.write(json.dumps(state_dict, default=_json_default) + "\n")
-
-        outputs_path = run_dir / "outputs.jsonl"
-        outputs_path.write_text("", encoding="utf-8")
-
-        start = time.perf_counter()
-        for i, state_dict in enumerate(state_dicts):
-            thread_id = f"{thread_id_prefix}-{i:03d}"
-            config = {"configurable": {"thread_id": thread_id}}
-            final_state = await self.graph.graph.ainvoke(
-                {**state_dict, "cache_mode": cache_mode}, config
-            )
-            self._logger.info("[%d/%d] Completed requirement review", i + 1, len(state_dicts))
-            with outputs_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(final_state, default=_json_default) + "\n")
-
-        viewer_path = write_viewer(outputs_path)
-        if viewer_path is None:
-            raise ValueError("Baseline review produced no output records")
-
-        elapsed = time.perf_counter() - start
-        self._logger.info(
-            "Batch RTM review complete: %d requirements in %.1fs, viewer at %s",
-            len(state_dicts), elapsed, viewer_path,
+        return await _run_batch_review(
+            logger=self._logger,
+            run_dir=run_dir,
+            items=state_dicts,
+            graph=self.graph.graph,
+            thread_id_fn=lambda i, _item: f"{thread_id_prefix}-{i:03d}",
+            graph_input_fn=lambda _i, state_dict: {**state_dict, "cache_mode": cache_mode},
+            viewer_writer=write_viewer,
+            item_noun="requirement",
         )
-        return str(viewer_path)
 
 
 class HazardReviewService:
@@ -263,23 +290,14 @@ class HazardReviewService:
         )
         hazard_rows = self._parse_uploaded_excel(file_bytes, filename, sheet_name)
 
-        inputs_path = run_dir / "inputs.jsonl"
-        with inputs_path.open("w", encoding="utf-8") as f:
-            for hazard_row in hazard_rows:
-                f.write(json.dumps(hazard_row, default=_json_default) + "\n")
-
-        outputs_path = run_dir / "outputs.jsonl"
-        outputs_path.write_text("", encoding="utf-8")
-
-        start = time.perf_counter()
-        for i, hazard_row in enumerate(hazard_rows):
-            thread_id = (
+        def _hazard_thread_id(i, hazard_row):
+            return (
                 f"{thread_id_prefix}-{hazard_row.hazard_id}"
                 if hazard_row.hazard_id
                 else f"{thread_id_prefix}-{i:03d}"
             )
-            config = {"configurable": {"thread_id": thread_id}}
 
+        def _hazard_graph_input(i, hazard_row):
             graph_input = {"hazard": hazard_row, "cache_mode": cache_mode}
             if test_mode is not None:
                 graph_input["pyjama_test_mode"] = test_mode
@@ -296,24 +314,18 @@ class HazardReviewService:
                     "Hazard %s: bidirectional_trace fetch for %d identifiers",
                     hazard_row.hazard_id, len(identifiers),
                 )
+            return graph_input
 
-            final_state = await self.graph.graph.ainvoke(graph_input, config)
-            self._logger.info(
-                "[%d/%d] Hazard review complete for %s", i + 1, len(hazard_rows), hazard_row.hazard_id
-            )
-            with outputs_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(final_state, default=_json_default) + "\n")
-
-        viewer_path = write_viewer_hz(outputs_path)
-        if viewer_path is None:
-            raise ValueError("Hazard upload review produced no output records")
-
-        elapsed = time.perf_counter() - start
-        self._logger.info(
-            "Hazard upload review complete: %d rows in %.1fs, viewer at %s",
-            len(hazard_rows), elapsed, viewer_path,
+        return await _run_batch_review(
+            logger=self._logger,
+            run_dir=run_dir,
+            items=hazard_rows,
+            graph=self.graph.graph,
+            thread_id_fn=_hazard_thread_id,
+            graph_input_fn=_hazard_graph_input,
+            viewer_writer=write_viewer_hz,
+            item_noun="hazard",
         )
-        return str(viewer_path)
 
 
 class TestCaseReviewService:
@@ -386,36 +398,18 @@ class TestCaseReviewService:
 
         default_objectives = load_default_review_objectives()
 
-        inputs_path = run_dir / "inputs.jsonl"
-        with inputs_path.open("w", encoding="utf-8") as f:
-            for state_dict in state_dicts:
-                f.write(json.dumps(state_dict, default=_json_default) + "\n")
-
-        outputs_path = run_dir / "outputs.jsonl"
-        outputs_path.write_text("", encoding="utf-8")
-
-        start = time.perf_counter()
-        for i, state_dict in enumerate(state_dicts):
-            thread_id = f"{thread_id_prefix}-{i:03d}"
-            graph_input = {
+        return await _run_batch_review(
+            logger=self._logger,
+            run_dir=run_dir,
+            items=state_dicts,
+            graph=self.graph.graph,
+            thread_id_fn=lambda i, _item: f"{thread_id_prefix}-{i:03d}",
+            graph_input_fn=lambda _i, state_dict: {
                 **state_dict,
                 "review_objectives": state_dict.get("review_objectives") or default_objectives,
                 "design_docs": state_dict.get("design_docs") or [],
                 "cache_mode": cache_mode,
-            }
-            config = {"configurable": {"thread_id": thread_id}}
-            final_state = await self.graph.graph.ainvoke(graph_input, config)
-            self._logger.info("[%d/%d] Completed test case review", i + 1, len(state_dicts))
-            with outputs_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(final_state, default=_json_default) + "\n")
-
-        viewer_path = write_viewer_tc(outputs_path)
-        if viewer_path is None:
-            raise ValueError("Baseline TC review produced no output records")
-
-        elapsed = time.perf_counter() - start
-        self._logger.info(
-            "Batch TC review complete: %d test cases in %.1fs, viewer at %s",
-            len(state_dicts), elapsed, viewer_path,
+            },
+            viewer_writer=write_viewer_tc,
+            item_noun="test case",
         )
-        return str(viewer_path)

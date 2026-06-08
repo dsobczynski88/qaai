@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoQA · Reviewer Agent Design</title>
+<style>
+  :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
+    --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--maxw:880px}
+  @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;
+    --line:#222a33;--accent:#6ea8ff;--code-bg:#161b22;--sidebar:#11161c;--ok:#5bd07e;--warn:#e3b341}}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .layout{display:grid;grid-template-columns:274px 1fr;min-height:100vh}
+  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:24px 18px;background:var(--sidebar);border-right:1px solid var(--line);font-size:14px}
+  nav.toc strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
+  nav.toc a{display:block;color:var(--mute);text-decoration:none;padding:3px 0}
+  nav.toc a:hover,nav.toc a.active{color:var(--accent)}
+  main{max-width:var(--maxw);padding:32px 30px 90px;margin:0 auto;width:100%}
+  header.doc{border-bottom:1px solid var(--line);margin-bottom:8px;padding-bottom:12px}
+  header.doc .meta{color:var(--mute);font-size:13px}
+  h1,h2,h3{line-height:1.25;scroll-margin-top:14px}
+  h2{margin-top:40px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{margin-top:26px}
+  a{color:var(--accent)}
+  code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
+  pre code{background:none;padding:0}
+  pre.diagram{line-height:1.35}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--code-bg)}
+  .src{color:var(--mute);font:12px ui-monospace,monospace}
+  .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
+  footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
+  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}}
+  @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Table of contents">
+  <strong>Agent Design</strong>
+  <a href="#overview">Overview</a>
+  <a href="#layout">Four-file layout</a>
+  <a href="#rtm">Test Suite (RTM)</a>
+  <a href="#tc">Test Case</a>
+  <a href="#hazard">Hazard Risk</a>
+  <a href="#nodes">Shared node engine</a>
+  <a href="#cache">Cache manager</a>
+  <a href="#logging">Logging &amp; telemetry</a>
+  <a href="#viewers">Output viewers</a>
+  <a href="#prompts">Prompt creation</a>
+  <a href="#patterns">Design patterns</a>
+  <strong style="margin-top:16px">More docs</strong>
+  <a href="../index.html">← Docs home</a>
+  <a href="../api.html">API guide</a>
+  <a href="../configuration.html">Configuration</a>
+  <a href="../test_guide.html">Test guide</a>
+</nav>
+<main>
+<header class="doc">
+  <h1>Reviewer Agent Design</h1>
+  <div class="meta">AutoQA (autoqa-may23) · generated from the codebase 2026-06-08</div>
+</header>
+
+<h2 id="overview">Overview</h2>
+<p>AutoQA implements three independent LangGraph reviewers, each a compiled async
+pipeline that emits a structured, SoP-gating rubric with a binary Yes/No verdict:</p>
+<table>
+<thead><tr><th>Reviewer</th><th>Package</th><th>Rubric</th><th>Output model</th></tr></thead>
+<tbody>
+<tr><td>Test Suite (RTM)</td><td><code>autoqa.components.test_suite_reviewer</code></td><td>M1–M5 + R6</td><td><code>SynthesizedAssessment</code></td></tr>
+<tr><td>Test Case</td><td><code>autoqa.components.test_case_reviewer</code></td><td>5 review objectives</td><td><code>TestCaseAssessment</code></td></tr>
+<tr><td>Hazard Risk</td><td><code>autoqa.components.hazard_risk_reviewer</code></td><td>H1–H7</td><td><code>HazardAssessment</code></td></tr>
+</tbody></table>
+<p>The hazard reviewer <strong>embeds the full RTM reviewer as a subgraph</strong>: each
+requirement traced from a hazard record is reviewed by invoking the RTM graph.</p>
+
+<h2 id="layout">The canonical four-file layout</h2>
+<p>Every reviewer lives under <code>autoqa/components/&lt;reviewer&gt;/</code> with the same
+four files:</p>
+<table>
+<thead><tr><th>File</th><th>Responsibility</th></tr></thead>
+<tbody>
+<tr><td><code>core.py</code></td><td>Pydantic output models (one per node) <em>and</em> the <code>TypedDict</code> graph state. Parallel fan-in fields use <code>Annotated[List[X], operator.add]</code> so <code>Send</code> results concatenate.</td></tr>
+<tr><td><code>nodes.py</code></td><td>Node classes (subclasses of the shared base nodes), paired <code>make_*_node(...)</code> factories, and <code>dispatch_*(state) -&gt; List[Send]</code> fan-out functions (which return <code>[]</code> on invalid state).</td></tr>
+<tr><td><code>pipeline.py</code></td><td>A <code>*Runnable</code> class whose <code>build()</code> constructs the <code>StateGraph</code>, wires edges, compiles with an optional checkpointer, and renders <code>graph.png</code>.</td></tr>
+<tr><td><code>__init__.py</code></td><td>Exports the Runnable. (Hazard adds <code>loader.py</code> for parsing the SHA Excel.)</td></tr>
+</tbody></table>
+
+<h2 id="rtm">Test Suite Reviewer (RTM)</h2>
+<p>State: <code>RTMReviewState</code> with fan-in field
+<code>coverage_analysis: Annotated[List[EvaluatedSpec], operator.add]</code>
+<span class="src">test_suite_reviewer/core.py:241</span>. Built by
+<code>RTMReviewerRunnable.build()</code> <span class="src">test_suite_reviewer/pipeline.py:27-173</span>:</p>
+<pre class="diagram"><code>START
+  -> data_integration            (JAMA fetch, or no-op when data already in state)
+  -> transform                   (JAMA rows -> graph state)
+  -> [ decomposer | summarizer | design_summarizer ]   (parallel)
+  -> coverage_router             (join)
+  -> dispatch_coverage  --Send xN-->  spec_evaluator    (parallel, one per decomposed spec)
+  -> synthesizer                 (reduces coverage_analysis via operator.add)
+  -> END</code></pre>
+<p>Nodes: <code>SummaryNode</code> / <code>DesignSummarizerNode</code>
+(<code>BatchedLLMNode</code>), <code>SingleSpecEvaluatorNode</code>, and the
+<code>SynthesizerNode</code> (marked <code>is_final_output=True</code>) plus the shared
+<code>DecomposerNode</code>. <code>dispatch_coverage</code> fans out one <code>Send</code>
+per decomposed spec and copies <code>cache_mode</code> into each payload
+<span class="src">test_suite_reviewer/nodes.py:147-173</span>.</p>
+
+<h2 id="tc">Test Case Reviewer</h2>
+<p>State: <code>TCReviewState</code>; coverage fans out per spec
+(<code>coverage_analysis: Annotated[List[SpecAnalysis], operator.add]</code>) while the
+logical and prereqs axes are single test-case-level nodes
+<span class="src">test_case_reviewer/core.py:209-214</span>. Built by
+<code>TCReviewerRunnable.build()</code> <span class="src">test_case_reviewer/pipeline.py:41-151</span>:</p>
+<pre class="diagram"><code>START
+  -> data_integration -> transform
+  -> decomposer                   (sequential over requirements)
+  -> coverage_router
+       |-- dispatch_coverage --Send xN--> coverage_evaluator
+       |-- (direct edge) -------------->  logical_evaluator
+       |-- (direct edge) -------------->  prereqs_evaluator
+  -> aggregator                   (5-row evaluated_checklist)
+  -> END</code></pre>
+<p>The five review objectives are loaded from <code>review_objectives.yaml</code>.</p>
+
+<h2 id="hazard">Hazard Risk Reviewer</h2>
+<p>State: <code>HazardReviewState</code> with two fan-in fields —
+<code>requirement_reviews</code> and <code>hazard_findings</code> (both
+<code>operator.add</code>) <span class="src">hazard_risk_reviewer/core.py:408,411</span>.
+The graph is staged by data dependency
+<span class="src">hazard_risk_reviewer/pipeline.py:70-282</span>:</p>
+<pre class="diagram"><code>START -> data_integration -> transform
+  transform --Send--> [ h1 | h2 | h3 | h7 ]            (early evaluators)
+  transform --Send xN--> requirement_reviewer          (each runs the RTM SUBGRAPH)
+  transform -> design_summarizer ,  needs_summarizer
+        \\ (all of the above join) //
+  -> late_evaluator_router
+  -> dispatch_late --Send--> [ h4 | h5 ]
+  -> h6                       (joins after H4/H5; H3 reaches it via the reducer)
+  -> final_assessment         (deterministic; waits on h1,h2,h6,h7)
+  -> END</code></pre>
+<p>The <code>final_assessment</code> node computes <code>overall_verdict</code>
+<strong>deterministically</strong> from the seven Yes/No/N-A findings (never by the LLM).
+<code>RequirementReviewerNode</code> wraps a shared <code>RTMReviewerRunnable</code> and
+invokes <code>await self.rtm.graph.ainvoke(rtm_input)</code> for one requirement, caching
+the whole-subgraph result as one <code>req_id</code>-keyed blob
+<span class="src">hazard_risk_reviewer/nodes.py:241-360</span>.</p>
+
+<h2 id="nodes">Shared node engine</h2>
+<p>All nodes derive from base classes in
+<code>autoqa/components/shared/nodes.py</code>. <code>StandardLLMNode</code> is a
+<strong>Template Method</strong>: its <code>__call__</code> runs a fixed pipeline and
+subclasses fill in only the hooks
+<span class="src">shared/nodes.py:309-433</span>:</p>
+<pre class="diagram"><code>__call__(state):
+  _validate_state(state)         -> False ? return _get_skip_response()  (soft-fail)
+  cache read (if allowed)        -> hit ? return _format_response(restored)
+  _build_payload(state)          -> messages
+  client.chat_completion(...)    -> raw LLM output
+  _parse_llm_response(...)       -> Pydantic model (JSON extraction + validation)
+  cache write (if allowed)
+  _format_response(parsed)       -> state delta</code></pre>
+<p><code>BatchedLLMNode</code> fans multiple items in parallel via
+<code>asyncio.gather</code>. JSON extraction handles markdown fences, bracket balancing,
+and Llama-style missing delimiters — node code never hand-parses LLM JSON.
+<strong>Soft-fail</strong> is the rule: a failed validate/parse returns an empty/skip
+response rather than raising, so a missing upstream field shows up as a node that
+"skips" in the logs, not a crash.</p>
+
+<h2 id="cache">Cache manager system</h2>
+<p><code>ReviewCacheManager</code> is a 3-tier write-through cache shared by all reviewers
+<span class="src">autoqa/core/cache.py</span>: Tier 2 = Redis (optional, 24&nbsp;h TTL),
+Tier 3 = disk JSON at <code>{cache_dir}/{entity_id}/{node}_{prompt_version}.json</code>.
+Key = <code>review:{entity_id}:{node}:{prompt_version}</code>. <code>get()</code> checks
+Redis → disk (backfilling Redis on a disk hit); <code>set()</code> writes disk then Redis.</p>
+<p>Caching is governed per node by <code>cache_mode</code> threaded through state
+<span class="src">shared/nodes.py:122-137</span>: <code>off</code> disables reads+writes;
+<code>partial</code> (default) caches interim nodes but always re-runs nodes flagged
+<code>is_final_output=True</code>; <code>full</code> caches finals too (used for the
+embedded RTM subgraph). Because <code>Send</code> creates fresh payloads, every dispatcher
+copies <code>cache_mode</code> into each fan-out payload so children inherit the policy.
+Bumping a prompt version changes the key — the invalidation mechanism. See
+<a href="../configuration.html#caching">Configuration → Caching</a>.</p>
+
+<h2 id="logging">Logging &amp; telemetry</h2>
+<p>Each run creates a timestamped folder <code>logs/run-&lt;timestamp&gt;/</code> via
+<code>start_new_run()</code> <span class="src">autoqa/core/logging_config.py</span>, holding
+<code>autoqa.log</code> (and <code>api.log</code> / <code>pyjama.log</code> for the server).
+The <code>TokenUsageTracker</code> appends one record per LLM call — and cache hit/miss
+events — to <code>token_usage.jsonl</code>, with a cost computed from the
+<code>TOKEN_COST_*</code> rates, plus a summary record at teardown
+<span class="src">autoqa/core/telemetry.py</span>.</p>
+
+<h2 id="viewers">Output viewer files</h2>
+<p>At the end of a run, the <code>autoqa.viewer</code> package renders a self-contained
+HTML report from <code>outputs.jsonl</code>: <code>write_viewer</code> →
+<code>viewer.html</code> (RTM), <code>write_viewer_tc</code> → <code>viewer_tc.html</code>,
+<code>write_viewer_hz</code> → <code>viewer_hz.html</code>
+<span class="src">autoqa/viewer/generator.py:83-135</span>. Each template is assembled
+modularly from <code>viewer/common/</code> (shared <code>base.css</code>,
+<code>layout.html</code>, <code>shared.js</code>) plus the reviewer's own
+<code>style.css</code> / <code>script.js</code>, producing a single static file with no
+external dependencies (reviewer ratings persist in <code>localStorage</code>).</p>
+
+<h2 id="prompts">How prompts are created</h2>
+<p>Prompts are a versioned registry, not flat files. Each node role maps (via
+<code>PromptConfig</code>) to a template at
+<code>autoqa/prompts/&lt;role&gt;/&lt;version&gt;/template.jinja2</code> with a
+<code>meta.yaml</code> sidecar; <code>make_*_node</code> factories render the template with
+<code>render_prompt(path, **vars)</code> and extract the version for the cache key. Named
+<strong>prompt sets</strong> (manifests in <code>autoqa/prompts/sets/</code>) pin a version
+per role so a whole bundle can be swapped via the <code>PROMPT_SET</code> env var — see
+<a href="../configuration.html#promptsets">Configuration → Prompt sets</a>.</p>
+
+<h2 id="patterns">Design patterns at a glance</h2>
+<table>
+<thead><tr><th>Pattern</th><th>Where</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Template Method</td><td><code>StandardLLMNode.__call__</code> <span class="src">shared/nodes.py:369-433</span></td><td>One orchestration; nodes implement only payload/format hooks.</td></tr>
+<tr><td>Send fan-out + <code>operator.add</code> reduce</td><td><code>dispatch_*</code> + <code>Annotated[List, operator.add]</code></td><td>Maximize parallelism; results concatenate deterministically.</td></tr>
+<tr><td>Subgraph embedding</td><td><code>RequirementReviewerNode</code> <span class="src">hazard_risk_reviewer/nodes.py:241-360</span></td><td>Reuse the entire RTM pipeline per traced requirement.</td></tr>
+<tr><td>Soft-fail nodes</td><td><code>_validate_state</code> / dispatchers returning <code>[]</code></td><td>Missing upstream data degrades to a skip, not a crash.</td></tr>
+<tr><td>Factory functions</td><td><code>make_*_node(...)</code></td><td>Inject client/model/prompt + cache wiring consistently.</td></tr>
+<tr><td>3-tier write-through cache</td><td><code>ReviewCacheManager</code> <span class="src">core/cache.py</span></td><td>Hot Redis + durable disk evidence; graceful degradation.</td></tr>
+<tr><td>Versioned prompt registry</td><td><code>autoqa/prompts</code> + <code>_registry.py</code></td><td>Reproducible prompts; version is the cache-invalidation key.</td></tr>
+</tbody></table>
+
+<footer class="doc">Generated from the AutoQA codebase on 2026-06-08. · <a href="../index.html">Docs home</a></footer>
+</main>
+</div>
+<script>
+  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
+  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
+    links.forEach(l=>l.classList.remove('active'));
+    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
+    {rootMargin:'-10% 0px -80% 0px'});
+  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>

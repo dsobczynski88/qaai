@@ -10,6 +10,10 @@ from tqdm.asyncio import tqdm_asyncio
 from langchain_core.runnables import RunnableSequence
 from openai import OpenAI, AsyncOpenAI, RateLimitError
 from openai.types.chat import ChatCompletion
+from autoqa.core.constants import (
+    DEFAULT_MAX_REQUESTS_PER_MINUTE,
+    DEFAULT_MAX_TOKENS_PER_MINUTE,
+)
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from autoqa.core.telemetry import TokenUsageTracker
@@ -172,7 +176,7 @@ async def async_retry_with_backoff(
 class OpenAIRateLimiter:
     """Rate limiter for OpenAI API to stay under requests per minute (RPM)."""
 
-    def __init__(self, max_requests_per_minute: int = 490):  # Buffer under the limit
+    def __init__(self, max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE):
         self.max_requests = max_requests_per_minute
         self.request_timestamps: deque[float] = deque()
         self.lock = asyncio.Lock()
@@ -306,8 +310,8 @@ class RateLimitOpenAIClient:
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        max_requests_per_minute: int = 490,
-        max_tokens_per_minute: Optional[int] = 200000,
+        max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE,
+        max_tokens_per_minute: Optional[int] = DEFAULT_MAX_TOKENS_PER_MINUTE,
         token_estimator: Optional[Callable[[List[Dict[str, Any]], str], int]] = None,
         telemetry_tracker: Optional["TokenUsageTracker"] = None,
         ):

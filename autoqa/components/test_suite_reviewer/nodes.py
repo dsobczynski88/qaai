@@ -14,6 +14,7 @@ from langgraph.types import Send
 from autoqa.components.clients import RateLimitOpenAIClient
 from autoqa.utils import render_prompt
 from autoqa.core.cache import ReviewCacheManager
+from autoqa.core.constants import DEFAULT_BATCH_SIZE
 from autoqa.components.shared.nodes import (
     BaseLLMNode,
     BatchedLLMNode,
@@ -40,7 +41,7 @@ from .core import (
 class SummaryNode(BatchedLLMNode):
     """Summarizes raw test cases into structured format with batching support."""
 
-    BATCH_SIZE = 25  # Tune based on model output limits (25 works well for Haiku)
+    BATCH_SIZE = DEFAULT_BATCH_SIZE  # Tune via core.constants (25 works well for Haiku)
 
     def _validate_state(self, state: RTMReviewState) -> bool:
         return state.get("requirement") is not None and state.get("test_cases") is not None

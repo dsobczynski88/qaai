@@ -37,6 +37,8 @@ from autoqa.components.shared.core import (
     DecomposedRequirement,
     TestCase,
     DesignDocument,
+    Verdict,
+    BaseReviewState,
 )
 
 __all__ = [
@@ -55,7 +57,8 @@ __all__ = [
 ]
 
 
-Verdict = Literal["Yes", "No"]
+# Verdict is imported from autoqa.components.shared.core (single source of truth)
+# and re-exported via __all__ for backward compatibility.
 
 
 class ReviewObjective(BaseModel):
@@ -192,19 +195,14 @@ class TestCaseAssessment(BaseModel):
         return self
 
 
-class TCReviewState(TypedDict, total=False):
-    # Caching control: "off" | "partial" (default) | "full". Threaded from the
-    # API/service into every node; see autoqa.core.cache.ReviewCacheManager.
-    cache_mode: str
+class TCReviewState(BaseReviewState, total=False):
+    # cache_mode + JAMA integration fields (pyjama_request / jama_data /
+    # jama_metadata) are inherited from BaseReviewState.
     # Data source fields (Option 1: local OR Option 2: JAMA)
     test_case: TestCase
     requirements: List[Requirement]
     design_docs: List[DesignDocument]
     review_objectives: List[ReviewObjective]
-    # JAMA integration fields (Option 2 only)
-    pyjama_request: Optional[Any]  # PyJamaRequest, but avoid import cycle
-    jama_data: Optional[List[Dict[str, Any]]]
-    jama_metadata: Optional[Dict[str, Any]]
     # Pipeline state fields
     decomposed_requirements: Optional[List[DecomposedRequirement]]
     # Coverage stays per-spec — Send fan-out emits one SpecAnalysis per spec.

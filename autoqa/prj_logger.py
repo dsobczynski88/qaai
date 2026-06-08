@@ -1,12 +1,10 @@
 import sys
 import time
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from autoqa.prj_exception import CustomException
-
-# US Central Time zone (handles both CST and CDT automatically)
-US_CENTRAL = ZoneInfo("America/Chicago")
+# CTFormatter (US-Central log timestamps) has a single definition in
+# autoqa.core.logging_config; import it here rather than duplicating the class.
+from autoqa.core.logging_config import CTFormatter
 
 
 def format_elapsed_time(seconds: float) -> str:
@@ -25,18 +23,6 @@ def format_elapsed_time(seconds: float) -> str:
     else:
         return f"{remaining_seconds} seconds"
 
-
-class CTFormatter(logging.Formatter):
-    """Custom formatter that uses US Central Time for all log timestamps."""
-    
-    def formatTime(self, record, datefmt=None):
-        """Override formatTime to use US Central Time instead of local/UTC."""
-        dt = datetime.fromtimestamp(record.created, tz=US_CENTRAL)
-        if datefmt:
-            return dt.strftime(datefmt)
-        else:
-            # Default format: '2026-05-07 13:47:06,639' (CT)
-            return dt.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
 
 def timing(loggername):
     def decorator(func):

@@ -118,6 +118,20 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 """Standard log format for file handlers."""
 
 # ============================================================================
+# Run Artifact Filenames
+# ============================================================================
+
+INPUT_JSONL_FILENAME = "inputs.jsonl"
+"""Per-run input records written by each reviewer service into the run directory."""
+
+OUTPUT_JSONL_FILENAME = "outputs.jsonl"
+"""Per-run final-state records written by each reviewer service; the viewer reads these."""
+
+TOKEN_USAGE_JSONL_FILENAME = "token_usage.jsonl"
+"""Per-run token/cost telemetry records written by TokenUsageTracker."""
+
+
+# ============================================================================
 # Error Codes
 # ============================================================================
 

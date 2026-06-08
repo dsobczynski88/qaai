@@ -8,6 +8,7 @@ from autoqa.core.constants import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     DEFAULT_MAX_TOKENS_PER_MINUTE,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    TOKEN_USAGE_JSONL_FILENAME,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ class Settings(BaseSettings):
     
     @property
     def telemetry_file_path(self) -> str:
-        return str(Path(self.log_file_path).parent / "token_usage.jsonl")
+        return str(Path(self.log_file_path).parent / TOKEN_USAGE_JSONL_FILENAME)
 
     @property
     def prompt_config(self) -> PromptConfig:

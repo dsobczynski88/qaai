@@ -31,6 +31,8 @@ from autoqa.components.shared.core import (
     Requirement,
     TestCase,
     DesignDocument as SharedDesignDocument,
+    Verdict,
+    VerdictNA,
 )
 from autoqa.components.test_suite_reviewer.core import (
     EvaluatedSpec,
@@ -77,8 +79,10 @@ HazardDimension = Literal[
     "Residual Risk Closure and Acceptability Decision",
     "HSHA Update and Newly Identified Hazard / Hazardous Situation Capture",
 ]
-HazardVerdict = Literal["Yes", "No"]
-HazardVerdictNA = Literal["Yes", "No", "N-A"]
+# Same semantics as the shared Verdict / VerdictNA; aliased (not redefined) so the
+# hazard-specific names remain available while sharing one source of truth.
+HazardVerdict = Verdict
+HazardVerdictNA = VerdictNA
 
 # Backward compatibility alias
 DesignDocument = SharedDesignDocument
@@ -389,6 +393,9 @@ class FinalAssessorProse(BaseModel):
 
 
 class HazardReviewState(TypedDict, total=False):
+    # Does NOT inherit shared.core.BaseReviewState: this state declares narrower
+    # JAMA types (typed PyJamaRequest, jama_data/metadata as List[Any]/Any) and
+    # adds pyjama_test_mode, so the fields are kept local by design.
     # Caching control: "off" | "partial" (default) | "full". Threaded from the
     # API/service into every node; see autoqa.core.cache.ReviewCacheManager.
     cache_mode: str

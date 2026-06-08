@@ -68,3 +68,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 table.detail { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 table.detail th, table.detail td { border: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
 table.detail th { background: #f2f4f7; font-weight: 600; }
+
+/* shared across reviewer viewers (per-viewer style.css adds .modal sizing) */
+.cited { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--mute); }
+tr.covered  { background: var(--ok); }
+tr.uncovered { background: var(--bad); }
+.dim-chip { display: inline-block; margin: 0 2px 0 0; padding: 1px 6px; border-radius: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; background: #eef2ff; color: #2b3a8b; }
+.tc-list { list-style: none; padding: 0; margin: 0; }
+.tc-list li { margin: 2px 0; }

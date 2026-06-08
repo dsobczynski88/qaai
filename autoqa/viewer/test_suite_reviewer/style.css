@@ -1,9 +1,4 @@
-.tc-list { list-style: none; padding: 0; margin: 0; }
-.tc-list li { margin: 2px 0; }
+/* .tc-list, .tc-list li, .cited, tr.covered/.uncovered, .dim-chip → common/base.css */
 .tc-list a { font-family: ui-monospace, Menlo, monospace; color: var(--accent); cursor: pointer; text-decoration: none; }
 .tc-list a:hover { text-decoration: underline; }
-.cited { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--mute); }
-tr.covered  { background: var(--ok); }
-tr.uncovered { background: var(--bad); }
-.dim-chip { display: inline-block; margin: 0 2px 0 0; padding: 1px 6px; border-radius: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; background: #eef2ff; color: #2b3a8b; }
 .modal { max-width: 900px; width: 92vw; max-height: 84vh; }
