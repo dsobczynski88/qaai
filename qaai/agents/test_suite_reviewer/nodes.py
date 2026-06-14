@@ -2,7 +2,7 @@
 Node implementations for RTM review agent (test suite reviewer).
 
 Generic base classes and the reusable DecomposerNode/make_decomposer_node
-are imported from qaai.components.shared.nodes. This module defines the
+are imported from qaai.agents.shared.nodes. This module defines the
 suite-specific nodes: SummaryNode, DesignSummarizerNode, SingleSpecEvaluatorNode,
 and SynthesizerNode, plus the dispatch_coverage Send fan-out.
 """
@@ -11,11 +11,11 @@ import logging
 import re
 from typing import Optional, List, Any
 from langgraph.types import Send
-from qaai.components.clients import RateLimitOpenAIClient
+from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.utils import render_prompt
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.constants import DEFAULT_BATCH_SIZE
-from qaai.components.shared.nodes import (
+from qaai.agents.shared.nodes import (
     BaseLLMNode,
     BatchedLLMNode,
     StandardLLMNode,

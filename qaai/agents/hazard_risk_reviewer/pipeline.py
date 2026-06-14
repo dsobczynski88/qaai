@@ -40,13 +40,13 @@ from langchain_core.runnables import Runnable
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from qaai.components.clients import RateLimitOpenAIClient
-from qaai.components.shared.data_integration import (
+from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.shared.data_integration import (
     DataIntegrationNode,
     PyJamaNodeConfig,
     make_transform_node_bidirectional_trace,
 )
-from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import PromptConfig, settings
 from qaai.utils import render_graph_png, write_graph_png_bytes

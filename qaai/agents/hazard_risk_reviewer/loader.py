@@ -172,7 +172,7 @@ def merge_hazard_with_pyjama_traceability(
                 req_data = pyjama_item["requirement"]
                 if req_data and isinstance(req_data, dict):
                     try:
-                        from qaai.components.shared.core import Requirement
+                        from qaai.agents.shared.core import Requirement
                         req_obj = Requirement(**req_data) if isinstance(req_data, dict) else req_data
                         if req_obj not in requirements:
                             requirements.append(req_obj)
@@ -185,7 +185,7 @@ def merge_hazard_with_pyjama_traceability(
                 for tc_data in tcs:
                     if tc_data:
                         try:
-                            from qaai.components.shared.core import TestCase
+                            from qaai.agents.shared.core import TestCase
                             tc_obj = TestCase(**tc_data) if isinstance(tc_data, dict) else tc_data
                             if tc_obj not in test_cases:
                                 test_cases.append(tc_obj)
@@ -198,7 +198,7 @@ def merge_hazard_with_pyjama_traceability(
                 for dd_data in dds:
                     if dd_data:
                         try:
-                            from qaai.components.shared.core import DesignDocument
+                            from qaai.agents.shared.core import DesignDocument
                             dd_obj = DesignDocument(**dd_data) if isinstance(dd_data, dict) else dd_data
                             if dd_obj not in design_docs:
                                 design_docs.append(dd_obj)
@@ -211,7 +211,7 @@ def merge_hazard_with_pyjama_traceability(
                 for sys_req_data in sys_reqs:
                     if sys_req_data:
                         try:
-                            from qaai.components.shared.core import Requirement
+                            from qaai.agents.shared.core import Requirement
                             sys_req_obj = Requirement(**sys_req_data) if isinstance(sys_req_data, dict) else sys_req_data
                             if sys_req_obj not in system_requirements:
                                 system_requirements.append(sys_req_obj)
@@ -224,7 +224,7 @@ def merge_hazard_with_pyjama_traceability(
                             for u_need_data in u_needs:
                                 if u_need_data:
                                     try:
-                                        from qaai.components.shared.core import Requirement
+                                        from qaai.agents.shared.core import Requirement
                                         u_need_obj = Requirement(**u_need_data) if isinstance(u_need_data, dict) else u_need_data
                                         if u_need_obj not in user_needs:
                                             user_needs.append(u_need_obj)

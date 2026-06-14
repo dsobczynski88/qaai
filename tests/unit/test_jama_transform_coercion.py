@@ -2,20 +2,20 @@
 
 pyjama's transforms emit pyjama's own Requirement/TestCase/DesignDoc classes
 (and TestCase uses `in_review_baseline`). qaai's pipeline models (e.g.
-TestSuite) require qaai.components.shared.core classes (`in_baseline`). Without
+TestSuite) require qaai.agents.shared.core classes (`in_baseline`). Without
 coercion, downstream construction raises a Pydantic v2 `model_type` error. These
 tests assert the qaai transform wrappers return qaai-class instances and that
 a TestSuite builds cleanly from them.
 """
 import pytest
 
-from qaai.components.shared import data_integration as di
-from qaai.components.shared.core import (
+from qaai.agents.shared import data_integration as di
+from qaai.agents.shared.core import (
     DesignDocument as AutoqaDesignDocument,
     Requirement as AutoqaRequirement,
     TestCase as AutoqaTestCase,
 )
-from qaai.components.test_suite_reviewer.core import TestSuite
+from qaai.agents.test_suite_reviewer.core import TestSuite
 
 pytestmark = pytest.mark.skipif(
     not di.PYJAMA_AVAILABLE, reason="pyjama not installed"

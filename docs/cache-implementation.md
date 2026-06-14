@@ -36,7 +36,7 @@ checkbox maps **checked → `partial`** and **unchecked → `off`**. `full` is i
 - **`off`** bypasses the cache entirely (no reads, no writes).
 
 The gating lives in `BaseLLMNode._cache_read_allowed(state)` / `_cache_write_allowed(state)`
-(`qaai/components/shared/nodes.py`). A node is marked final by constructing it with
+(`qaai/agents/shared/nodes.py`). A node is marked final by constructing it with
 `is_final_output=True` (done in the synthesizer/aggregator/final-assessor factories).
 
 The global `ENABLE_CACHE` setting is a hard master switch: when `false`, no cache manager is

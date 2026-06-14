@@ -18,7 +18,7 @@ import pytest
 
 def test_hazard_review_state_has_pyjama_request():
     """Verify HazardReviewState includes pyjama_request field."""
-    from qaai.components.hazard_risk_reviewer.core import HazardReviewState
+    from qaai.agents.hazard_risk_reviewer.core import HazardReviewState
     
     # Check that HazardReviewState TypedDict has pyjama_request
     annotations = HazardReviewState.__annotations__
@@ -34,7 +34,7 @@ def test_hazard_review_state_has_pyjama_request():
 
 def test_data_integration_node_factory():
     """Verify DataIntegrationNode can be instantiated directly."""
-    from qaai.components.shared.data_integration import DataIntegrationNode
+    from qaai.agents.shared.data_integration import DataIntegrationNode
 
     node = DataIntegrationNode(pyjama_config=None)
     assert isinstance(node, DataIntegrationNode), \
@@ -45,8 +45,8 @@ def test_data_integration_node_factory():
 
 def test_hazard_reviewer_runnable_has_data_integration():
     """Verify HazardReviewerRunnable graph includes data_integration node."""
-    from qaai.components.clients import RateLimitOpenAIClient
-    from qaai.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
+    from qaai.agents.clients import RateLimitOpenAIClient
+    from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
     import os
     
     # Create minimal client
@@ -68,8 +68,8 @@ def test_hazard_reviewer_runnable_has_data_integration():
 @pytest.mark.asyncio
 async def test_data_integration_node_local_mode():
     """Verify DataIntegrationNode passes through local mode (no pyjama_request)."""
-    from qaai.components.shared.data_integration import DataIntegrationNode
-    from qaai.components.hazard_risk_reviewer.core import HazardReviewState, HazardRecord
+    from qaai.agents.shared.data_integration import DataIntegrationNode
+    from qaai.agents.hazard_risk_reviewer.core import HazardReviewState, HazardRecord
     
     node = DataIntegrationNode(pyjama_config=None)
     
@@ -118,7 +118,7 @@ async def test_data_integration_node_local_mode():
 
 def test_transform_hazard_record_to_state_signature():
     """Verify transform_hazard_record_to_state has correct signature."""
-    from qaai.components.shared.data_integration import transform_hazard_record_to_state
+    from qaai.agents.shared.data_integration import transform_hazard_record_to_state
     import inspect
     
     sig = inspect.signature(transform_hazard_record_to_state)

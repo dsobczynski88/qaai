@@ -26,7 +26,7 @@ from typing import Annotated, Any, List, Literal, Optional, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
-from qaai.components.shared.core import (
+from qaai.agents.shared.core import (
     DecomposedRequirement,
     Requirement,
     TestCase,
@@ -34,7 +34,7 @@ from qaai.components.shared.core import (
     Verdict,
     VerdictNA,
 )
-from qaai.components.test_suite_reviewer.core import (
+from qaai.agents.test_suite_reviewer.core import (
     EvaluatedSpec,
     SynthesizedAssessment,
     TestSuite,

@@ -2,7 +2,7 @@
 Core data models for the single-test-case reviewer.
 
 Shared models (Requirement, DecomposedSpec, DecomposedRequirement, TestCase)
-live in qaai.components.shared.core. This module adds test-case-specific
+live in qaai.agents.shared.core. This module adds test-case-specific
 shapes:
 
 - ReviewObjective — input row of the review-objectives checklist (id +
@@ -31,7 +31,7 @@ def _coerce_partial_verdict(verdict: Any) -> tuple[Any, bool]:
         return "Yes", True
     return verdict, False
 
-from qaai.components.shared.core import (
+from qaai.agents.shared.core import (
     Requirement,
     DecomposedSpec,
     DecomposedRequirement,
@@ -57,7 +57,7 @@ __all__ = [
 ]
 
 
-# Verdict is imported from qaai.components.shared.core (single source of truth)
+# Verdict is imported from qaai.agents.shared.core (single source of truth)
 # and re-exported via __all__ for backward compatibility.
 
 

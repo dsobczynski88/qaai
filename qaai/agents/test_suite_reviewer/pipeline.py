@@ -7,8 +7,8 @@ from langgraph.graph import StateGraph, START, END
 from qaai.core.config import settings, PromptConfig
 from qaai.core.cache import ReviewCacheManager
 from qaai.utils import render_graph_png, write_graph_png_bytes
-from qaai.components.clients import RateLimitOpenAIClient
-from qaai.components.shared.data_integration import (
+from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.shared.data_integration import (
     DataIntegrationNode,
     make_transform_node_test_suite_review,
     PyJamaNodeConfig,

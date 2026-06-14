@@ -5,10 +5,10 @@ Tests that existing test patterns (local data input) still work after adding
 data_integration and transform nodes to the pipelines.
 """
 import pytest
-from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from qaai.components.test_case_reviewer.pipeline import TCReviewerRunnable
-from qaai.components.test_suite_reviewer.core import Requirement, TestCase
-from qaai.components.test_case_reviewer.core import ReviewObjective
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
+from qaai.agents.test_suite_reviewer.core import Requirement, TestCase
+from qaai.agents.test_case_reviewer.core import ReviewObjective
 
 
 @pytest.mark.integration

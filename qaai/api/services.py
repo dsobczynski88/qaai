@@ -8,14 +8,14 @@ from typing import List, Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 
-from qaai.components.clients import RateLimitOpenAIClient
+from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.core.cache import ReviewCacheManager
-from qaai.components.hazard_risk_reviewer.core import HazardRowWithTraceMatrix
-from qaai.components.shared.data_integration import PyJamaNodeConfig
-from qaai.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
-from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from qaai.components.test_case_reviewer.pipeline import TCReviewerRunnable
-from qaai.components.test_case_reviewer.nodes import load_default_review_objectives
+from qaai.agents.hazard_risk_reviewer.core import HazardRowWithTraceMatrix
+from qaai.agents.shared.data_integration import PyJamaNodeConfig
+from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
+from qaai.agents.test_case_reviewer.nodes import load_default_review_objectives
 from qaai.core.constants import INPUT_JSONL_FILENAME, OUTPUT_JSONL_FILENAME
 
 
@@ -107,7 +107,7 @@ class RTMReviewService:
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
         with no live API calls when True.
         """
-        from qaai.components.shared.data_integration import (
+        from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
             PyJamaRequest,
             PYJAMA_AVAILABLE,
@@ -209,7 +209,7 @@ class HazardReviewService:
         capability-gated: it raises a clear error until pyjama is upgraded. It is
         never reached from the default Excel flow (run_from_excel_upload).
         """
-        from qaai.components.shared.data_integration import PyJamaRequest, PYJAMA_AVAILABLE
+        from qaai.agents.shared.data_integration import PyJamaRequest, PYJAMA_AVAILABLE
 
         if not PYJAMA_AVAILABLE or PyJamaRequest is None:
             raise ValueError("PyJama is not installed — bidirectional_trace fetch unavailable.")
@@ -229,8 +229,8 @@ class HazardReviewService:
     def _parse_uploaded_excel(
         self, file_bytes: bytes, filename: str, sheet_name: str
     ) -> List[HazardRowWithTraceMatrix]:
-        from qaai.components.hazard_risk_reviewer.loader import parse_sha_excel
-        from qaai.components.hazard_risk_reviewer.core import HazardTraceMatrix
+        from qaai.agents.hazard_risk_reviewer.loader import parse_sha_excel
+        from qaai.agents.hazard_risk_reviewer.core import HazardTraceMatrix
 
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             tmp.write(file_bytes)
@@ -278,7 +278,7 @@ class HazardReviewService:
         """
         from qaai.viewer.generator import write_viewer_hz
         from qaai.core.logging_config import start_new_run
-        from qaai.components.shared.data_integration import PYJAMA_AVAILABLE
+        from qaai.agents.shared.data_integration import PYJAMA_AVAILABLE
 
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
@@ -359,7 +359,7 @@ class TestCaseReviewService:
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
         with no live API calls when True.
         """
-        from qaai.components.shared.data_integration import (
+        from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
             PyJamaRequest,
             PYJAMA_AVAILABLE,

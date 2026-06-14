@@ -143,7 +143,7 @@ The `overall_verdict` aggregates deterministically: it is `Yes` only when every 
 | `aggregated_assessment.overall_verdict`                                 | `Yes` iff every **mandatory** objective is `Yes`; partial-Yes still counts as `Yes`, and the one advisory objective (`test_case_setup_clarity`) never affects the verdict                                                     |
 | `aggregated_assessment.comments` / `clarification_questions`            | Same shape as the other reviewers                                                                                                                                                                                             |
 
-The five review objectives default to `qaai/components/test_case_reviewer/review_objectives.yaml`: `expected_result_support`, `expected_result_spec_align`, `test_case_achieves`, `test_case_logical_sequence` (all mandatory), and `test_case_setup_clarity` (advisory).
+The five review objectives default to `qaai/agents/test_case_reviewer/review_objectives.yaml`: `expected_result_support`, `expected_result_spec_align`, `test_case_achieves`, `test_case_logical_sequence` (all mandatory), and `test_case_setup_clarity` (advisory).
 
 ---
 

@@ -26,7 +26,7 @@ from qaai.core.constants import INPUT_JSONL_FILENAME
 
 # Import hazard-related models
 try:
-    from qaai.components.hazard_risk_reviewer.core import (
+    from qaai.agents.hazard_risk_reviewer.core import (
         HazardPackageFromExcel,
         HazardRowFromExcel,
         HazardRowWithTraceMatrix,
@@ -146,7 +146,7 @@ class DataIntegrationNode:
     
     Usage:
         # In pipeline.py
-        from qaai.components.shared.data_integration import DataIntegrationNode
+        from qaai.agents.shared.data_integration import DataIntegrationNode
         
         data_integration = DataIntegrationNode(pyjama_config)
         sg.add_node("data_integration", data_integration)
@@ -289,7 +289,7 @@ def _coerce_state_models_to_qaai(entry: Dict[str, Any]) -> Dict[str, Any]:
     pyjama's transforms emit pyjama's own Requirement / TestCase / DesignDoc
     classes (and its TestCase uses ``in_review_baseline``), but qaai's pipeline
     models (e.g. TestSuite, RTMReviewState) require the
-    qaai.components.shared.core classes (TestCase uses ``in_baseline``). Passing
+    qaai.agents.shared.core classes (TestCase uses ``in_baseline``). Passing
     the pyjama instances straight through makes Pydantic v2 raise a ``model_type``
     error downstream (e.g. in SummaryNode._build_result). This rebuilds each
     field as the qaai class, mapping ``in_review_baseline -> in_baseline``.
@@ -297,7 +297,7 @@ def _coerce_state_models_to_qaai(entry: Dict[str, Any]) -> Dict[str, Any]:
     Defensive: accepts pyjama model instances, qaai instances, or plain dicts.
     Idempotent for already-qaai entries.
     """
-    from qaai.components.shared.core import Requirement, TestCase, DesignDocument
+    from qaai.agents.shared.core import Requirement, TestCase, DesignDocument
 
     def _dump(o: Any) -> Dict[str, Any]:
         return o.model_dump() if hasattr(o, "model_dump") else dict(o)
@@ -490,7 +490,7 @@ def transform_hazard_record_to_state(
         ...     for row in enhanced_rows
         ... ])
     """
-    from qaai.components.hazard_risk_reviewer.loader import (
+    from qaai.agents.hazard_risk_reviewer.loader import (
         parse_sha_excel,
         merge_hazard_with_pyjama_traceability,
     )
@@ -640,7 +640,7 @@ def transform_bidirectional_trace_to_state(
             "Hazard models unavailable — cannot build HazardTraceMatrix from JAMA data."
         )
 
-    from qaai.components.shared.core import Requirement, TestCase, DesignDocument
+    from qaai.agents.shared.core import Requirement, TestCase, DesignDocument
 
     requirements: List[Any] = []
     test_cases: List[Any] = []

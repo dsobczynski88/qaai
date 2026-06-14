@@ -20,15 +20,15 @@ from qaai.core.telemetry import TokenUsageTracker
 # import-time create_app() and every start_new_run() resolve to logs/tests.
 settings.log_base_dir = "./logs/tests"
 
-from qaai.components.clients import (
+from qaai.agents.clients import (
     RateLimitOpenAIClient
 )
 
-from qaai.components.hazard_risk_reviewer.core import (
+from qaai.agents.hazard_risk_reviewer.core import (
     HazardRowWithTraceMatrix
 )
 
-from qaai.components.test_suite_reviewer.core import (
+from qaai.agents.test_suite_reviewer.core import (
     Requirement,
     TestCase,
     DecomposedSpec,
@@ -310,11 +310,11 @@ def _load_hazard_fixture(
     excel_file / pyjama_file are fixture filenames resolved across
     tests/fixtures/{local,external,...} via resolve_fixture_path.
     """
-    from qaai.components.hazard_risk_reviewer.loader import (
+    from qaai.agents.hazard_risk_reviewer.loader import (
         parse_sha_excel,
         merge_hazard_with_pyjama_traceability,
     )
-    from qaai.components.hazard_risk_reviewer.core import HazardTraceMatrix
+    from qaai.agents.hazard_risk_reviewer.core import HazardTraceMatrix
 
     excel_results = parse_sha_excel(
         file_path=str(resolve_fixture_path(excel_file)),

@@ -17,8 +17,8 @@ from langchain_core.runnables import Runnable
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
-from qaai.components.clients import RateLimitOpenAIClient
-from qaai.components.shared.data_integration import (
+from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.shared.data_integration import (
     DataIntegrationNode,
     make_transform_node_test_case_review,
     PyJamaNodeConfig,

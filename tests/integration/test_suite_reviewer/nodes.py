@@ -1,11 +1,11 @@
 import pytest
 
-from qaai.components.test_suite_reviewer.core import (
+from qaai.agents.test_suite_reviewer.core import (
     DecomposedRequirement,
     TestSuite,
     EvaluatedSpec,
 )
-from qaai.components.test_suite_reviewer.nodes import (
+from qaai.agents.test_suite_reviewer.nodes import (
     make_decomposer_node,
     make_summarizer_node,
     make_coverage_evaluator,

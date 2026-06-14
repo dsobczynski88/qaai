@@ -21,9 +21,9 @@ from typing import Any, List, Optional
 
 from langgraph.types import Send
 
-from qaai.components.clients import RateLimitOpenAIClient
-from qaai.components.shared.nodes import BaseLLMNode, BatchedLLMNode, StandardLLMNode
-from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.shared.nodes import BaseLLMNode, BatchedLLMNode, StandardLLMNode
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.utils import render_prompt
 

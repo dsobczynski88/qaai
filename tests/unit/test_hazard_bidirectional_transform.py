@@ -8,11 +8,11 @@ no-op in Excel/local mode).
 """
 import pytest
 
-from qaai.components.shared.data_integration import (
+from qaai.agents.shared.data_integration import (
     transform_bidirectional_trace_to_state,
     make_transform_node_bidirectional_trace,
 )
-from qaai.components.hazard_risk_reviewer.core import (
+from qaai.agents.hazard_risk_reviewer.core import (
     HazardRowWithTraceMatrix,
     HazardTraceMatrix,
 )

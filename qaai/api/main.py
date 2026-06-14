@@ -13,8 +13,8 @@ from qaai.api.middleware import limit_request_size, log_requests
 from qaai.api.jobs import JobManager
 from qaai.api.routes import router
 from qaai.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
-from qaai.components.clients import RateLimitOpenAIClient
-from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import settings
 from qaai.core.telemetry import TokenUsageTracker
@@ -37,7 +37,7 @@ def build_pyjama_config():
         return None
 
     try:
-        from qaai.components.shared.data_integration import PyJamaNodeConfig
+        from qaai.agents.shared.data_integration import PyJamaNodeConfig
 
         pyjama_config = PyJamaNodeConfig(
             host_address=settings.jama_host_address,

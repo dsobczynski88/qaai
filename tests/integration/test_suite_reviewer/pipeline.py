@@ -7,8 +7,8 @@ rows can be re-run with -k <req_id>.
 import pytest
 
 from qaai.core.config import settings
-from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from qaai.components.test_suite_reviewer.core import (
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.test_suite_reviewer.core import (
     Requirement, TestCase, DesignDocument, DecomposedRequirement,
     TestSuite, EvaluatedSpec, SynthesizedAssessment,
 )

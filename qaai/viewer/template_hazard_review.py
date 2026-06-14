@@ -1,6 +1,6 @@
 """HTML template for the hazard-risk-reviewer batch-output viewer.
 
-Renders HazardReviewState records produced by qaai.components.hazard_risk_reviewer.
+Renders HazardReviewState records produced by qaai.agents.hazard_risk_reviewer.
 Mirrors the RTM viewer layout; data shape differs — one HazardRecord plus an H1-H5
 rubric, with a coverage-analysis modal for per-requirement spec coverage.
 

@@ -18,8 +18,8 @@ from typing import Any, List, Optional
 import yaml
 from langgraph.types import Send
 
-from qaai.components.clients import RateLimitOpenAIClient
-from qaai.components.shared.nodes import (
+from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.shared.nodes import (
     BaseLLMNode,
     StandardLLMNode,
     DecomposerNode,

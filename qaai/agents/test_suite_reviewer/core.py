@@ -2,7 +2,7 @@
 Core data models for RTM review agent (test suite reviewer).
 
 Shared models (Requirement, DecomposedSpec, DecomposedRequirement, TestCase)
-live in qaai.components.shared.core and are re-exported here for
+live in qaai.agents.shared.core and are re-exported here for
 backward compatibility with existing call sites.
 """
 
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, RootModel
 import operator
 from typing import Optional, List, Literal, TypedDict, Annotated, Any, Dict
 
-from qaai.components.shared.core import (
+from qaai.agents.shared.core import (
     Requirement,
     DecomposedSpec,
     DecomposedRequirement,
@@ -44,7 +44,7 @@ __all__ = [
 
 
 Dimension = Literal["functional", "negative", "boundary"]
-# Verdict / VerdictNA are imported from qaai.components.shared.core (single
+# Verdict / VerdictNA are imported from qaai.agents.shared.core (single
 # source of truth) and re-exported via __all__ for backward compatibility.
 
 

@@ -1,5 +1,5 @@
 # Default review-objectives checklist for the single-test-case reviewer.
-# Load with qaai.components.test_case_reviewer.load_default_review_objectives().
+# Load with qaai.agents.test_case_reviewer.load_default_review_objectives().
 # Add, remove, or edit entries freely — the reviewer treats this as data, not schema.
 #
 # The 'mandatory' field determines whether a criterion affects overall_verdict:

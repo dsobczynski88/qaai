@@ -17,14 +17,14 @@ from pathlib import Path
 
 import pytest
 
-from qaai.components.hazard_risk_reviewer.core import (
+from qaai.agents.hazard_risk_reviewer.core import (
     HazardAssessment,
     HazardReviewState,
     RequirementReview,
 )
-from qaai.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
-from qaai.components.shared.data_integration import transform_hazard_record_to_state
-from qaai.components.test_suite_reviewer.core import SynthesizedAssessment
+from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
+from qaai.agents.shared.data_integration import transform_hazard_record_to_state
+from qaai.agents.test_suite_reviewer.core import SynthesizedAssessment
 from tests.conftest import _TEST_RUN_DIR
 from tests.helpers import serialize_state
 

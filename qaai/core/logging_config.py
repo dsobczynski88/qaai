@@ -112,7 +112,7 @@ def setup_logging(run_dir: Path) -> None:
 
     Sets up three loggers with separate file handlers:
     - 'qaai.api': Routes to api.log
-    - 'qaai': Routes to qaai.log (and child loggers like qaai.core, qaai.components)
+    - 'qaai': Routes to qaai.log (and child loggers like qaai.core, qaai.agents)
     - 'pyjama': Routes to pyjama.log
 
     Idempotent: existing handlers on the managed loggers are detached and closed

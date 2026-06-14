@@ -20,7 +20,7 @@ import re
 from typing import Optional, Any
 from abc import ABC, abstractmethod
 
-from qaai.components.clients import RateLimitOpenAIClient
+from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.utils import render_prompt
 
 from .core import DecomposedRequirement
