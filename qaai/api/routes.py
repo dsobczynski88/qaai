@@ -6,7 +6,12 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from qaai.api.jobs import COMPLETED, FAILED, JobManager
 from qaai.api.schemas import BaselineRequest
-from qaai.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
+from qaai.api.services import (
+    HazardReviewService,
+    RTMReviewService,
+    TestCaseReviewService,
+    resolve_prompt_set,
+)
 from qaai.core.config import settings
 
 logger = logging.getLogger("qaai.api.routes")
@@ -67,10 +72,13 @@ async def test_suite_review(
     """
     cache_mode = "partial" if body.use_cache else "off"
     test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
+    prompt_set = resolve_prompt_set(body.include_edge_case_analysis)
 
     return _submit_with_job_id(
         job_manager,
-        lambda job_id: service.run_from_baseline(body.baseline_id, job_id, cache_mode, test_mode),
+        lambda job_id: service.run_from_baseline(
+            body.baseline_id, job_id, cache_mode, test_mode, prompt_set=prompt_set,
+        ),
         "qaai_rtm_review.html",
     )
 
@@ -106,6 +114,7 @@ async def hazard_risk_review(
     sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
     use_cache: bool = Form(default=True, description="Reuse cached intermediate results (partial caching); disable to recompute from scratch"),
     test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
+    include_edge_case_analysis: bool = Form(default=False, description="Use the edge-case prompt set (test_suite_reviewer_v4) for the embedded RTM subgraph; default uses the baseline set (v3)"),
     service: HazardReviewService = Depends(get_hazard_service),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> JSONResponse:
@@ -124,6 +133,8 @@ async def hazard_risk_review(
     file_bytes = await file.read()
     filename = file.filename
 
+    prompt_set = resolve_prompt_set(include_edge_case_analysis)
+
     return _submit_with_job_id(
         job_manager,
         lambda job_id: service.run_from_excel_upload(
@@ -134,6 +145,7 @@ async def hazard_risk_review(
             sheet_name=sheet_name,
             cache_mode="partial" if use_cache else "off",
             test_mode=effective_test_mode,
+            prompt_set=prompt_set,
         ),
         "qaai_hazard_review.html",
     )

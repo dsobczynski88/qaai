@@ -21,9 +21,11 @@ def dummy_html(tmp_path):
 async def test_test_suite_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
+        rec["prompt_set"] = prompt_set
         return dummy_html
 
     app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
@@ -38,9 +40,11 @@ async def test_test_suite_use_cache_false_maps_to_off(submit_and_wait, dummy_htm
 async def test_test_suite_use_cache_default_is_partial(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
+        rec["prompt_set"] = prompt_set
         return dummy_html
 
     app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
@@ -54,9 +58,11 @@ async def test_test_suite_use_cache_default_is_partial(submit_and_wait, dummy_ht
 async def test_test_case_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
+        rec["prompt_set"] = prompt_set
         return dummy_html
 
     app.state.test_case_service.run_from_baseline = AsyncMock(side_effect=fake_run)
@@ -72,7 +78,8 @@ async def test_hazard_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None):
+                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         return dummy_html
@@ -92,7 +99,8 @@ async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None):
+                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         return dummy_html
@@ -112,7 +120,8 @@ async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
 async def test_test_suite_test_mode_propagates(submit_and_wait, dummy_html, sent, expected):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None):
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["test_mode"] = test_mode
         return dummy_html
 
@@ -131,7 +140,8 @@ async def test_hazard_test_mode_propagates(submit_and_wait, dummy_html, sent, ex
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None):
+                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
         rec["test_mode"] = test_mode
         return dummy_html
 
@@ -144,3 +154,71 @@ async def test_hazard_test_mode_propagates(submit_and_wait, dummy_html, sent, ex
     )
     assert resp.status_code == status.HTTP_200_OK
     assert rec["test_mode"] is expected
+
+
+# --- "Include Edge Case Analysis" toggle → prompt_set selection ---------------
+
+@pytest.mark.parametrize(
+    "sent,expected_set",
+    [(True, "test_suite_reviewer_v4"), (False, "test_suite_reviewer_v3")],
+)
+async def test_test_suite_edge_case_toggle_selects_prompt_set(
+    submit_and_wait, dummy_html, sent, expected_set
+):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
+        rec["prompt_set"] = prompt_set
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/test-suite-review",
+        json={"baseline_id": "B", "include_edge_case_analysis": sent},
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["prompt_set"] == expected_set
+
+
+async def test_test_suite_edge_case_default_is_baseline(submit_and_wait, dummy_html):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
+        rec["prompt_set"] = prompt_set
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    # include_edge_case_analysis omitted → schema default False → baseline v3
+    resp = await submit_and_wait("/api/v1/test-suite-review", json={"baseline_id": "B"})
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["prompt_set"] == "test_suite_reviewer_v3"
+
+
+@pytest.mark.parametrize(
+    "sent,expected_set",
+    [("true", "test_suite_reviewer_v4"), ("false", "test_suite_reviewer_v3")],
+)
+async def test_hazard_edge_case_toggle_selects_prompt_set(
+    submit_and_wait, dummy_html, sent, expected_set
+):
+    rec = {}
+
+    async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
+                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
+        rec["prompt_set"] = prompt_set
+        return dummy_html
+
+    app.state.hazard_service.run_from_excel_upload = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/hazard-risk-review",
+        files={"file": ("h.xlsx", b"binary", "application/vnd.ms-excel")},
+        data={"project_name": "P", "include_edge_case_analysis": sent},
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["prompt_set"] == expected_set

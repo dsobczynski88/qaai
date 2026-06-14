@@ -145,47 +145,48 @@ class HazardReviewerRunnable:
         transform = make_transform_node_bidirectional_trace()
 
         cm = self.cache_manager
+        ps = self.prompt_config.set_name
 
         # Create all 7 evaluator nodes
         h1 = make_hazard_evaluator_node(
             "H1", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h1,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         h2 = make_hazard_evaluator_node(
             "H2", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h2,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         h3 = make_hazard_evaluator_node(
             "H3", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h3,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         h4 = make_hazard_evaluator_node(
             "H4", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h4,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         h5 = make_hazard_evaluator_node(
             "H5", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h5,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         h6 = make_h6_evaluator_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h6,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         h7 = make_hazard_evaluator_node(
             "H7", self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_h7,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         final_assessor = make_final_assessor_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_final,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         requirement_reviewer = RequirementReviewerNode(
             self.rtm,
@@ -193,18 +194,19 @@ class HazardReviewerRunnable:
             rtm_prompt_version=ReviewCacheManager.extract_prompt_version(
                 self.prompt_config.synthesizer
             ),
+            prompt_set=ps,
         )
 
         # Create summarizer nodes
         design_summarizer = make_hazard_design_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_design_summarizer,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         needs_summarizer = make_hazard_needs_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.hazard_needs_summarizer,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
 
         # Add all nodes to the graph

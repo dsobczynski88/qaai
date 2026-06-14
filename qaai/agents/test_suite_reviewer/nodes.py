@@ -214,7 +214,7 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
 
         # --- Tier 2/3: cache check ---
         if self._cache_read_allowed(state) and entity_id:
-            cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+            cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
             if cached is not None:
                 try:
                     return {"coverage_analysis": [EvaluatedSpec.model_validate(cached["result"])]}
@@ -258,6 +258,7 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
                     prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
                     completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
                     model=self.model,
+                    prompt_set=self.prompt_set,
                 )
             except Exception as e:
                 logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
@@ -328,6 +329,7 @@ def make_summarizer_node(
     model_kwargs: dict,
     prompt_template: str,
     cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
     **template_vars,
 ) -> SummaryNode:
     """
@@ -346,6 +348,7 @@ def make_summarizer_node(
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        prompt_set=prompt_set,
     )
 
 
@@ -355,6 +358,7 @@ def make_coverage_evaluator(
     model_kwargs: dict,
     prompt_template: str,
     cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
     **template_vars,
 ) -> SingleSpecEvaluatorNode:
     """
@@ -380,6 +384,7 @@ def make_coverage_evaluator(
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        prompt_set=prompt_set,
     )
 
 
@@ -389,6 +394,7 @@ def make_synthesizer_node(
     model_kwargs: dict,
     prompt_template: str,
     cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
     **template_vars,
 ) -> SynthesizerNode:
     """
@@ -417,6 +423,7 @@ def make_synthesizer_node(
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         is_final_output=True,
+        prompt_set=prompt_set,
     )
 
 
@@ -426,6 +433,7 @@ def make_design_summarizer_node(
     model_kwargs: dict,
     prompt_template: str,
     cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
     **template_vars,
 ) -> DesignSummarizerNode:
     """Create a DesignSummarizerNode with prompt loaded from Jinja2 template.
@@ -451,4 +459,5 @@ def make_design_summarizer_node(
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        prompt_set=prompt_set,
     )

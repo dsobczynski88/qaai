@@ -22,3 +22,12 @@ class BaselineRequest(BaseModel):
             "None falls back to the server default (PYJAMA_TEST_MODE)."
         ),
     )
+    include_edge_case_analysis: bool = Field(
+        default=False,
+        description=(
+            "When True, use the edge-case prompt set (test_suite_reviewer_v4, "
+            "edge-case decomposer v6) for the test-suite review; when False use "
+            "the baseline set (test_suite_reviewer_v3). Cached results are "
+            "namespaced by prompt set so the two never alias."
+        ),
+    )

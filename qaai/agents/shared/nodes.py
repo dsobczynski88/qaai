@@ -103,6 +103,7 @@ class BaseLLMNode(ABC):
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
         is_final_output: bool = False,
+        prompt_set: Optional[str] = None,
     ):
         self.client = client
         self.model = model
@@ -110,6 +111,9 @@ class BaseLLMNode(ABC):
         self.model_kwargs = model_kwargs or {}
         self.cache_manager = cache_manager
         self.prompt_version = prompt_version
+        # Name of the prompt set in use (or None for the default config). Folded
+        # into the cache key so two sets pinning the same node version never alias.
+        self.prompt_set = prompt_set
         # When True this node produces the graph's final assessment. Under the
         # "partial" cache mode such a node always re-runs (skips cache read) so
         # the user gets a fresh output while still reusing cached interim nodes.
@@ -328,10 +332,12 @@ class StandardLLMNode(BaseLLMNode, ABC):
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
         is_final_output: bool = False,
+        prompt_set: Optional[str] = None,
     ):
         super().__init__(
             client, model, system_prompt, model_kwargs,
             cache_manager, prompt_version, is_final_output,
+            prompt_set=prompt_set,
         )
         self.response_model = response_model
 
@@ -377,7 +383,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
         if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
-                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
                 if cached is not None:
                     try:
                         restored = self.response_model.model_validate(cached["result"])
@@ -426,6 +432,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         model=self.model,
+                        prompt_set=self.prompt_set,
                     )
                 except Exception as e:
                     logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
@@ -465,10 +472,12 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         cache_manager: Optional[Any] = None,
         prompt_version: str = "",
         is_final_output: bool = False,
+        prompt_set: Optional[str] = None,
     ):
         super().__init__(
             client, model, system_prompt, model_kwargs,
             cache_manager, prompt_version, is_final_output,
+            prompt_set=prompt_set,
         )
         self.response_model = response_model
 
@@ -556,7 +565,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
-                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
+                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
                 if cached is not None:
                     try:
                         restored = self._restore_from_cache(cached)
@@ -615,6 +624,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
                         prompt_tokens=total_prompt_tokens,
                         completion_tokens=total_completion_tokens,
                         model=self.model,
+                        prompt_set=self.prompt_set,
                     )
                 except Exception as exc:
                     logger.warning("%s: cache write failed — %s", self.__class__.__name__, exc)
@@ -653,6 +663,7 @@ def make_decomposer_node(
     model_kwargs: dict,
     prompt_template: str,
     cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
     **template_vars,
 ) -> DecomposerNode:
     """
@@ -668,6 +679,7 @@ def make_decomposer_node(
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        prompt_set=prompt_set,
     )
 
 

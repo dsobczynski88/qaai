@@ -108,30 +108,31 @@ class RTMReviewerRunnable:
         transform = make_transform_node_test_suite_review()
 
         cm = self.cache_manager
+        ps = self.prompt_config.set_name
         decomposer = make_decomposer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.decomposer,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         summarizer = make_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.summarizer,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         design_summarizer = make_design_summarizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.design_summarizer,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         spec_evaluator = make_coverage_evaluator(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.coverage,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
         synthesizer = make_synthesizer_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=self.prompt_config.synthesizer,
-            cache_manager=cm,
+            cache_manager=cm, prompt_set=ps,
         )
 
         # Add all nodes

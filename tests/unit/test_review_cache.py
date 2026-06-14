@@ -109,6 +109,30 @@ async def test_version_bump_is_a_miss(cache):
     assert await cache.get("REQ-1", "n", "v2.0.0") is None
 
 
+async def test_prompt_set_namespaces_cache(cache, tmp_path):
+    """Two prompt sets sharing entity/node/version never alias; each lands in its
+    own subfolder and an un-namespaced read still misses."""
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v3"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3",
+    )
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v4"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v4",
+    )
+    # Per-set subfolders under the entity, not a single clobbered file
+    assert (tmp_path / "REQ-1" / "test_suite_reviewer_v3" / "coverage_evaluator_v8.0.0.json").exists()
+    assert (tmp_path / "REQ-1" / "test_suite_reviewer_v4" / "coverage_evaluator_v8.0.0.json").exists()
+
+    v3 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v3")
+    v4 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4")
+    assert v3["result"] == {"value": "v3"}
+    assert v4["result"] == {"value": "v4"}
+
+    # An un-namespaced read does not pick up a namespaced entry
+    assert await cache.get("REQ-1", "coverage_evaluator", "v8.0.0") is None
+
+
 async def test_entity_and_node_name_sanitized(cache, tmp_path):
     await cache.set("REQ/1:x", "node spec/1", "v1.0.0", {"value": "a"}, 0, 0, "m")
     files = list(tmp_path.rglob("*.json"))

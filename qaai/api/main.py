@@ -7,14 +7,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from langgraph.checkpoint.memory import MemorySaver
 
 from qaai.api.middleware import limit_request_size, log_requests
 from qaai.api.jobs import JobManager
 from qaai.api.routes import router
 from qaai.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
 from qaai.agents.clients import RateLimitOpenAIClient
-from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import settings
 from qaai.core.telemetry import TokenUsageTracker
@@ -99,26 +97,22 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Review cache enabled (dir: %s)", settings.cache_dir)
 
-    # RTM runnable used by the standalone test-suite endpoint — cache-enabled.
-    # The hazard reviewer deliberately builds its OWN uncached embedded RTM
-    # (its subgraph result is cached as one blob per requirement instead).
-    rtm_runnable = RTMReviewerRunnable(
-        client=client,
-        model=settings.model,
-        model_kwargs=model_kwargs,
-        checkpointer=MemorySaver(),
-        cache_manager=cache_manager,
-    )
-
+    # Each reviewer service builds one compiled graph per prompt set (v3 baseline
+    # / v4 edge-case), selected per request by the "Include Edge Case Analysis"
+    # toggle. The standalone RTM graphs are cache-enabled; the hazard graphs each
+    # embed their OWN uncached RTM (its subgraph result is cached as one blob per
+    # requirement, namespaced by prompt set, instead).
     app.state.rtm_service = RTMReviewService(
         client,
         settings.model,
-        rtm_runnable=rtm_runnable,
+        model_kwargs=model_kwargs,
         pyjama_config=pyjama_config,
+        cache_manager=cache_manager,
     )
     app.state.hazard_service = HazardReviewService(
         client,
         settings.model,
+        model_kwargs=model_kwargs,
         pyjama_config=pyjama_config,
         cache_manager=cache_manager,
     )

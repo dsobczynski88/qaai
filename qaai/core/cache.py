@@ -85,15 +85,21 @@ class ReviewCacheManager:
     # ------------------------------------------------------------------
 
     async def get(
-        self, entity_id: str, node_name: str, prompt_version: str
+        self, entity_id: str, node_name: str, prompt_version: str,
+        prompt_set: Optional[str] = None,
     ) -> Optional[dict]:
         """Return cached payload or None on a total miss.
 
         Payload schema: {"result": {...model_dump...}, "meta": {prompt_tokens, ...}}
         The caller is responsible for reconstructing Pydantic models from result.
+
+        ``prompt_set`` (when supplied) namespaces the entry by the named prompt
+        set so two sets that share a node's prompt_version (e.g.
+        test_suite_reviewer_v3 and _v4 both pin coverage v8) never alias each
+        other. When None the legacy un-namespaced key/path is used.
         """
-        redis_key = self._redis_key(entity_id, node_name, prompt_version)
-        disk_path = self._file_path(entity_id, node_name, prompt_version)
+        redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set)
+        disk_path = self._file_path(entity_id, node_name, prompt_version, prompt_set)
 
         # --- Tier 2: Redis ---
         if self._redis is not None:
@@ -153,14 +159,19 @@ class ReviewCacheManager:
         prompt_tokens: int,
         completion_tokens: int,
         model: str,
+        prompt_set: Optional[str] = None,
     ) -> None:
-        """Persist the LLM result to disk and Redis (write-through)."""
+        """Persist the LLM result to disk and Redis (write-through).
+
+        ``prompt_set`` namespaces the entry by the named prompt set (see get()).
+        """
         payload = {
             "result": result_dict,
             "meta": {
                 "entity_id": entity_id,
                 "node": node_name,
                 "prompt_version": prompt_version,
+                "prompt_set": prompt_set,
                 "model": model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -171,7 +182,7 @@ class ReviewCacheManager:
         raw = json.dumps(payload, indent=2, default=str)
 
         # Write to Disk (Tier 3)
-        disk_path = self._file_path(entity_id, node_name, prompt_version)
+        disk_path = self._file_path(entity_id, node_name, prompt_version, prompt_set)
         try:
             disk_path.parent.mkdir(parents=True, exist_ok=True)
             disk_path.write_text(raw, encoding="utf-8")
@@ -181,7 +192,7 @@ class ReviewCacheManager:
 
         # Write to Redis (Tier 2)
         if self._redis is not None:
-            redis_key = self._redis_key(entity_id, node_name, prompt_version)
+            redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set)
             try:
                 await self._redis.set(redis_key, raw, ex=self._REDIS_TTL)
             except Exception as e:
@@ -222,12 +233,24 @@ class ReviewCacheManager:
             except Exception:
                 pass
 
-    def _redis_key(self, entity_id: str, node_name: str, prompt_version: str) -> str:
+    def _redis_key(
+        self, entity_id: str, node_name: str, prompt_version: str,
+        prompt_set: Optional[str] = None,
+    ) -> str:
+        if prompt_set:
+            return f"review:{entity_id}:{prompt_set}:{node_name}:{prompt_version}"
         return f"review:{entity_id}:{node_name}:{prompt_version}"
 
-    def _file_path(self, entity_id: str, node_name: str, prompt_version: str) -> Path:
+    def _file_path(
+        self, entity_id: str, node_name: str, prompt_version: str,
+        prompt_set: Optional[str] = None,
+    ) -> Path:
         # Sanitize both the folder (entity id) and the filename token (node name)
         # — per-spec node names embed a spec_id which may contain unsafe chars.
         safe_id = _sanitize(entity_id)
         filename = f"{_sanitize(node_name)}_{prompt_version}.json"
+        if prompt_set:
+            # One subfolder per prompt set under the entity — auditable evidence
+            # and collision-proof across sets that share a node's prompt_version.
+            return self.cache_dir / safe_id / _sanitize(prompt_set) / filename
         return self.cache_dir / safe_id / filename

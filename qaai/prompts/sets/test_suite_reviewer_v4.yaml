@@ -1,12 +1,13 @@
 name: test_suite_reviewer_v4
 component: test_suite_reviewer
 description: |
-  Edge-case-analysis stack with design-aware coverage evaluation. Identical to
-  test_suite_reviewer_v3 except coverage is bumped to v8.0.0, which threads the
-  summarized_designs context into per-spec coverage evaluation as supporting
-  evidence (verification_hooks, key_components) while keeping the guardrail that
-  design intent never substitutes for explicit test-case coverage.
-  Uses decomposer v6, summarizer v4, coverage v8, synthesizer v7, design_summarizer v1.
+  Edge-case-analysis stack. Selected when the "Include Edge Case Analysis"
+  toggle is ON. Identical to test_suite_reviewer_v3 except the decomposer is
+  bumped to v6.0.0, which performs detailed edge-case decomposition (boundary,
+  concurrency, temporal-collision, state/mode, degenerate-input,
+  ordering/attribution, and interface/delivery conditions) to surface
+  escaped-defect specs.
+  Uses decomposer v6, summarizer v4, coverage v8, synthesizer v8, design_summarizer v1.
 prompts:
   decomposer: v6.0.0
   summarizer: v4.0.0

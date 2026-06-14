@@ -16,7 +16,21 @@ from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
 from qaai.agents.test_case_reviewer.nodes import load_default_review_objectives
+from qaai.core.config import PromptConfig
 from qaai.core.constants import INPUT_JSONL_FILENAME, OUTPUT_JSONL_FILENAME
+
+
+# Prompt sets selected by the "Include Edge Case Analysis" toggle. v4 enables the
+# edge-case decomposer (v6); v3 is the baseline (decomposer v5). The selection is
+# applied to both the test-suite reviewer and the hazard reviewer's embedded RTM.
+PROMPT_SET_EDGE_CASE = "test_suite_reviewer_v4"
+PROMPT_SET_BASELINE = "test_suite_reviewer_v3"
+PROMPT_SETS = (PROMPT_SET_BASELINE, PROMPT_SET_EDGE_CASE)
+
+
+def resolve_prompt_set(include_edge_case_analysis: bool) -> str:
+    """Map the UI/API toggle to a prompt-set name."""
+    return PROMPT_SET_EDGE_CASE if include_edge_case_analysis else PROMPT_SET_BASELINE
 
 
 def _json_default(obj):
@@ -77,8 +91,8 @@ class RTMReviewService:
     Wraps the compiled LangGraph RTM pipeline for use by the FastAPI layer.
     Instantiated once at application startup and stored on app.state.
 
-    Accepts an optional pre-built RTMReviewerRunnable so a single compiled
-    graph can be shared with HazardReviewService at lifespan time.
+    Holds one compiled RTMReviewerRunnable per prompt set (v3 baseline / v4
+    edge-case); run_from_baseline picks the graph for the requested set.
     """
 
     _logger = logging.getLogger("qaai.api.rtm")
@@ -88,24 +102,34 @@ class RTMReviewService:
         client: RateLimitOpenAIClient,
         model: str,
         model_kwargs: dict = {},
-        rtm_runnable: Optional[RTMReviewerRunnable] = None,
+        rtm_runnables: Optional[dict] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
-        self.graph = rtm_runnable or RTMReviewerRunnable(
-            client, model, model_kwargs, checkpointer=MemorySaver(),
-            pyjama_config=pyjama_config, cache_manager=cache_manager,
-        )
+        # One cache-enabled runnable per prompt set. Callers (lifespan) can inject
+        # pre-built runnables; otherwise build the default v3/v4 pair here.
+        self.graphs = rtm_runnables or {
+            ps: RTMReviewerRunnable(
+                client, model, model_kwargs, checkpointer=MemorySaver(),
+                prompt_config=PromptConfig.from_set(ps),
+                pyjama_config=pyjama_config, cache_manager=cache_manager,
+            )
+            for ps in PROMPT_SETS
+        }
+
+    def _select(self, prompt_set: Optional[str]) -> RTMReviewerRunnable:
+        """Resolve the runnable for a prompt set, defaulting to the baseline set."""
+        return self.graphs.get(prompt_set) or self.graphs[PROMPT_SET_BASELINE]
 
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
-        test_mode: Optional[bool] = None,
+        test_mode: Optional[bool] = None, prompt_set: str = PROMPT_SET_BASELINE,
     ) -> str:
         """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
-        with no live API calls when True.
+        with no live API calls when True. prompt_set selects the v3/v4 graph.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -119,9 +143,11 @@ class RTMReviewService:
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
 
+        runnable = self._select(prompt_set)
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
-        self.graph.write_graph_png(run_dir)
+        runnable.write_graph_png(run_dir)
+        self._logger.info("RTM review using prompt set '%s'", prompt_set)
 
         self._logger.info(
             "Starting batch RTM review for baseline %s (test_mode=%s)", baseline_id, test_mode
@@ -148,7 +174,7 @@ class RTMReviewService:
             logger=self._logger,
             run_dir=run_dir,
             items=state_dicts,
-            graph=self.graph.graph,
+            graph=runnable.graph,
             thread_id_fn=lambda i, _item: f"{thread_id_prefix}-{i:03d}",
             graph_input_fn=lambda _i, state_dict: {**state_dict, "cache_mode": cache_mode},
             viewer_writer=write_viewer,
@@ -172,27 +198,33 @@ class HazardReviewService:
         client: RateLimitOpenAIClient,
         model: str,
         model_kwargs: dict = {},
-        rtm_runnable: Optional[RTMReviewerRunnable] = None,
+        hazard_runnables: Optional[dict] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
-        # NOTE: we deliberately do NOT reuse a cache-enabled RTM runnable here.
-        # The embedded test-suite subgraph must stay internally uncached — the
+        # One hazard graph per prompt set (v3/v4), each embedding its own
+        # uncached RTM subgraph built from that set's prompt_config. The
+        # embedded test-suite subgraph stays internally uncached — the
         # whole-subgraph result is cached as one blob per requirement by
-        # RequirementReviewerNode (see ReviewCacheManager / "full" subgraph
-        # caching). HazardReviewerRunnable builds its own uncached RTM when
-        # rtm_runnable is None. The shared cache_manager still caches the
-        # hazard's own H1-H7 / summarizer / req-blob nodes.
-        self.graph = HazardReviewerRunnable(
-            client,
-            model,
-            model_kwargs,
-            checkpointer=MemorySaver(),
-            rtm_runnable=rtm_runnable,
-            cache_manager=cache_manager,
-            pyjama_config=pyjama_config,
-        )
+        # RequirementReviewerNode, namespaced by prompt set. The shared
+        # cache_manager still caches the hazard's own H1-H7 / summarizer nodes.
+        self.graphs = hazard_runnables or {
+            ps: HazardReviewerRunnable(
+                client,
+                model,
+                model_kwargs,
+                checkpointer=MemorySaver(),
+                prompt_config=PromptConfig.from_set(ps),
+                cache_manager=cache_manager,
+                pyjama_config=pyjama_config,
+            )
+            for ps in PROMPT_SETS
+        }
+
+    def _select(self, prompt_set: Optional[str]) -> HazardReviewerRunnable:
+        """Resolve the hazard runnable for a prompt set, defaulting to baseline."""
+        return self.graphs.get(prompt_set) or self.graphs[PROMPT_SET_BASELINE]
 
     @staticmethod
     def _build_bidirectional_request(project_name: str, identifiers: List[str]):
@@ -266,6 +298,7 @@ class HazardReviewService:
         sheet_name: str = "SHA Table",
         cache_mode: str = "partial",
         test_mode: Optional[bool] = None,
+        prompt_set: str = PROMPT_SET_BASELINE,
     ) -> str:
         """Parse an uploaded SHA Excel file and run the hazard graph for every row.
 
@@ -275,14 +308,17 @@ class HazardReviewService:
         ``requirements_traceability``. Rows with no GIDs fall back to the
         Excel-only (empty traceability) path. ``test_mode`` (None ⇒ config
         default) runs that fetch cache-only with no live JAMA API calls.
+        ``prompt_set`` selects the v3/v4 stack for the embedded RTM subgraph.
         """
         from qaai.viewer.generator import write_viewer_hz
         from qaai.core.logging_config import start_new_run
         from qaai.agents.shared.data_integration import PYJAMA_AVAILABLE
 
+        runnable = self._select(prompt_set)
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
-        self.graph.write_graph_png(run_dir)
+        runnable.write_graph_png(run_dir)
+        self._logger.info("Hazard review using prompt set '%s'", prompt_set)
 
         self._logger.info(
             "Starting upload hazard review: %s (project=%s, test_mode=%s)",
@@ -320,7 +356,7 @@ class HazardReviewService:
             logger=self._logger,
             run_dir=run_dir,
             items=hazard_rows,
-            graph=self.graph.graph,
+            graph=runnable.graph,
             thread_id_fn=_hazard_thread_id,
             graph_input_fn=_hazard_graph_input,
             viewer_writer=write_viewer_hz,

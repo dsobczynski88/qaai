@@ -530,6 +530,14 @@
         <span class="cache-info" tabindex="0"
               title="When test mode is on, AutoQA runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
       </div>
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="rtm-edge-case">
+          <span>Include Edge Case Analysis</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When on, AutoQA uses the edge-case prompt set (test_suite_reviewer_v4) whose decomposer surfaces boundary, concurrency, state/mode and degenerate-input specs. Off uses the baseline set (v3). Cached results are namespaced per prompt set.">i</span>
+      </div>
       <button class="btn-submit" id="btn-rtm" onclick="submitBaseline('rtm')">
         <span>▶</span> Run Requirement Coverage Review
       </button>
@@ -617,6 +625,14 @@
         </label>
         <span class="cache-info" tabindex="0"
               title="When test mode is on, the bidirectional-trace JAMA lookup runs strictly from previously cached results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
+      </div>
+      <div class="cache-toggle">
+        <label class="cache-check">
+          <input type="checkbox" id="hz-edge-case">
+          <span>Include Edge Case Analysis</span>
+        </label>
+        <span class="cache-info" tabindex="0"
+              title="When on, the embedded test-suite review per requirement uses the edge-case prompt set (test_suite_reviewer_v4, edge-case decomposer). Off uses the baseline set (v3). Cached results are namespaced per prompt set.">i</span>
       </div>
       <button class="btn-submit" id="btn-hz" onclick="submitHazard()">
         <span>▶</span> Run Hazard Risk Review
@@ -792,6 +808,8 @@
     const baseline = document.getElementById(type + '-baseline').value.trim();
     const useCache = document.getElementById(type + '-cache').checked;
     const testMode = document.getElementById(type + '-test-mode').checked;
+    // Edge-case toggle only applies to the RTM (test-suite) review.
+    const edgeCase = document.getElementById(type + '-edge-case')?.checked || false;
 
     if (!baseline) { alert('Please enter a JAMA Baseline ID.'); return; }
 
@@ -806,7 +824,7 @@
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseline_id: baseline, use_cache: useCache, test_mode: testMode }),
+        body: JSON.stringify({ baseline_id: baseline, use_cache: useCache, test_mode: testMode, include_edge_case_analysis: edgeCase }),
       },
       filename,
       label,
@@ -820,6 +838,7 @@
     const sheet   = document.getElementById('hz-sheet').value.trim() || 'SHA Table';
     const useCache = document.getElementById('hz-cache').checked;
     const testMode = document.getElementById('hz-test-mode').checked;
+    const edgeCase = document.getElementById('hz-edge-case')?.checked || false;
     const fileInput = document.getElementById('hz-file');
 
     if (!project)            { alert('Please enter a project name.'); return; }
@@ -831,6 +850,7 @@
     form.append('sheet_name', sheet);
     form.append('use_cache', useCache);
     form.append('test_mode', testMode);
+    form.append('include_edge_case_analysis', edgeCase);
 
     await runJob(
       '/api/v1/hazard-risk-review',

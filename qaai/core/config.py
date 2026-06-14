@@ -23,6 +23,11 @@ class PromptConfig(BaseModel):
     
     Use PromptConfig.from_set("set_name") to load from a named prompt set manifest.
     """
+    # Name of the prompt set this config was resolved from (set by from_set()).
+    # Threaded into the cache key so results never alias across sets that pin the
+    # same node version (e.g. test_suite_reviewer_v3 and _v4 both use coverage v8).
+    set_name: Optional[str] = None
+
     # Test Suite Reviewer prompts
     decomposer: str = "decomposer/v6.0.0/template.jinja2"
     summarizer: str = "summarizer/v4.0.0/template.jinja2"
@@ -76,6 +81,7 @@ class PromptConfig(BaseModel):
         for role, prompt in resolved.prompts.items():
             kwargs[role] = prompt.template_path.relative_to(PROMPTS_DIR).as_posix()
 
+        kwargs["set_name"] = set_name
         return cls(**kwargs)
 
 class Settings(BaseSettings):
