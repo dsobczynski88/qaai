@@ -165,6 +165,7 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_hazard_revie
 <tr><td><code>sheet_name</code></td><td>No</td><td><code>SHA Table</code></td><td>Worksheet holding the hazard table</td></tr>
 <tr><td><code>use_cache</code></td><td>No</td><td><code>true</code></td><td>Partial caching vs full recompute</td></tr>
 <tr><td><code>test_mode</code></td><td>No</td><td>server default</td><td>Cache-only JAMA; omit to use <code>PYJAMA_TEST_MODE</code></td></tr>
+<tr><td><code>include_edge_case_analysis</code></td><td>No</td><td><code>false</code></td><td><code>true</code> → embedded RTM uses <code>test_suite_reviewer_v4</code> (edge-case); <code>false</code> → <code>v3</code> baseline</td></tr>
 </tbody></table>
 <p>The per-row thread ID is derived server-side from the hazard's <code>hazard_id</code>
 (falling back to the job-derived index) <span class="src">qaai/api/services.py:293-298</span>.</p>
@@ -198,11 +199,18 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_tc_review.ht
 <tr><td><code>baseline_id</code></td><td>string</td><td>required</td><td>JAMA baseline to fetch and review</td></tr>
 <tr><td><code>use_cache</code></td><td>bool</td><td><code>true</code></td><td><code>true</code> → <code>cache_mode="partial"</code>; <code>false</code> → <code>"off"</code> <span class="src">routes.py:68,91,135</span></td></tr>
 <tr><td><code>test_mode</code></td><td>bool?</td><td><code>null</code></td><td>Cache-only JAMA (no live calls); <code>null</code> → <code>PYJAMA_TEST_MODE</code></td></tr>
+<tr><td><code>include_edge_case_analysis</code></td><td>bool</td><td><code>false</code></td><td><code>true</code> → prompt set <code>test_suite_reviewer_v4</code> (edge-case decomposer v6); <code>false</code> → <code>test_suite_reviewer_v3</code> (baseline v5). Applies to the test-suite review only. <span class="src">routes.py</span></td></tr>
 </tbody></table>
 <div class="note">The HTTP API never exposes <code>cache_mode="full"</code> — the
 <code>use_cache</code> checkbox maps only to <code>partial</code>/<code>off</code>.
 <code>full</code> is used internally for the hazard reviewer's embedded RTM subgraph.
 See <a href="configuration.html#caching">Configuration → Caching</a>.</div>
+<div class="note"><strong>"Include Edge Case Analysis" toggle.</strong> The
+<code>include_edge_case_analysis</code> flag selects the prompt set per request for
+the test-suite reviewer and the hazard reviewer's embedded RTM subgraph (the
+hazard endpoint accepts it as a multipart form field). The test-case reviewer is
+unaffected. Cached results are namespaced by prompt set so v3 and v4 never alias —
+see <a href="configuration.html#caching">Configuration → Caching</a>.</div>
 
 <h2 id="outputs">Understanding the response &amp; viewers</h2>
 <p>The review endpoints return <code>202</code> + a <code>job_id</code>; the HTML report

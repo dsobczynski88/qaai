@@ -48,6 +48,7 @@
   <a href="#promptsets">Prompt sets</a>
   <a href="#create-set">Create a prompt set</a>
   <a href="#select-set">Select a prompt set</a>
+  <a href="#edge-case-toggle">Edge-case toggle</a>
   <strong style="margin-top:16px">More docs</strong>
   <a href="index.html">← Docs home</a>
   <a href="api.html">API guide</a>
@@ -136,7 +137,17 @@ calls — useful for offline/repeatable runs.</p>
 <p>Cache key: <code>review:{entity_id}:{node_name}:{prompt_version}</code>, where
 <code>entity_id</code> is a <code>REQ-*</code> (test suite), <code>TEST-*</code> (test case),
 or <code>HAZ-*</code> id. Set <code>ENABLE_CACHE=false</code> to disable the cache entirely
-(no manager is created) <span class="src">qaai/api/main.py:93-100</span>.</p>
+(no manager is created) <span class="src">qaai/api/main.py</span>.</p>
+<div class="note"><strong>Prompt-set namespacing.</strong> When a run uses a named
+prompt set, its name is folded into the cache key
+(<code>review:{entity_id}:{prompt_set}:{node_name}:{prompt_version}</code>) and the
+disk path gains a per-set subfolder
+(<code>{CACHE_DIR}/{entity_id}/{prompt_set}/{node}_{prompt_version}.json</code>).
+This is what lets the "Include Edge Case Analysis" toggle keep
+<code>test_suite_reviewer_v3</code> and <code>_v4</code> results separate even though
+the two sets share the same version for every node except the decomposer. Runs
+using the default config (e.g. the test-case reviewer) keep the legacy
+un-namespaced layout. <span class="src">qaai/core/cache.py</span></div>
 <h3>Per-run cache mode</h3>
 <p>Each run threads a <code>cache_mode</code> through graph state
 <span class="src">qaai/agents/shared/nodes.py:122-137</span>:</p>
@@ -215,7 +226,27 @@ PROMPT_SET=test_case_reviewer_v2 uv run uvicorn qaai.api.main:app</code></pre>
 sets naturally produces fresh cache entries — old results for prior versions remain on
 disk as evidence. See <a href="#caching">Caching</a>.</div>
 
-<footer class="doc">Generated from the AutoQA codebase on 2026-06-08. · <a href="index.html">Docs home</a></footer>
+<h3 id="edge-case-toggle">The "Include Edge Case Analysis" toggle</h3>
+<p>Beyond the server-wide <code>PROMPT_SET</code> env var, the test-suite and hazard
+endpoints select a prompt set <strong>per request</strong> via the
+<code>include_edge_case_analysis</code> input
+<span class="src">qaai/api/routes.py, qaai/api/services.py</span>:</p>
+<table>
+<thead><tr><th>Toggle</th><th>Prompt set</th><th>Decomposer</th></tr></thead>
+<tbody>
+<tr><td>OFF <em>(default)</em></td><td><code>test_suite_reviewer_v3</code></td><td>v5.0.0 — baseline decomposition</td></tr>
+<tr><td>ON</td><td><code>test_suite_reviewer_v4</code></td><td>v6.0.0 — edge-case decomposition (boundary, concurrency, state/mode, degenerate-input, …)</td></tr>
+</tbody></table>
+<p>Both sets pin the same version for <code>summarizer</code>, <code>coverage</code>,
+<code>synthesizer</code> and <code>design_summarizer</code> — only the decomposer
+differs. Each reviewer service pre-compiles one graph per set at startup and selects
+by toggle; the selection also flows into the hazard reviewer's embedded RTM subgraph.
+Because the two sets would otherwise share cache keys for the unchanged nodes, the
+prompt-set name is folded into the cache key (see
+<a href="#caching">Caching → Prompt-set namespacing</a>). The test-case reviewer
+does not use this toggle.</p>
+
+<footer class="doc">Generated from the AutoQA codebase on 2026-06-14. · <a href="index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

@@ -39,10 +39,19 @@ from and grounded in the current codebase.</p>
 <a class="card" href="test_guide.html"><h2>Test Guide</h2>
 <p>Set up, install, and run <code>tests/api</code> and <code>tests/integration</code>; default fixtures, and running with custom files.</p></a>
 
-<a class="card" href="design/agents.html"><h2>Design · Reviewer Agents</h2>
+<a class="card" href="design/agents.html"><h2>Design · Reviewer Agents (overview)</h2>
 <p>How each LangGraph reviewer is built — topology, the shared node engine, cache manager, logging, viewers, prompts, and design patterns.</p></a>
 
-<footer>Generated from the AutoQA codebase on 2026-06-08.</footer>
+<a class="card" href="design/test_suite_reviewer.html"><h2>Design · Test Suite Reviewer (RTM)</h2>
+<p>Detailed design: inputs, node-by-node walkthrough, graph diagram, the M1–M5 + R6 rubric, verdict logic, and the edge-case prompt-set toggle.</p></a>
+
+<a class="card" href="design/test_case_reviewer.html"><h2>Design · Test Case Reviewer</h2>
+<p>Detailed design: inputs, the three review axes (coverage / logical / prereqs), graph diagram, the 5-objective checklist, and verdict logic.</p></a>
+
+<a class="card" href="design/hazard_risk_reviewer.html"><h2>Design · Hazard Risk Reviewer</h2>
+<p>Detailed design: inputs, the staged H1–H7 graph, the embedded RTM subgraph, the rubric, and the deterministic verdict.</p></a>
+
+<footer>Generated from the AutoQA codebase on 2026-06-14.</footer>
 </main>
 </body>
 </html>
