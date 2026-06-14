@@ -57,13 +57,13 @@
 <main>
 <header class="doc">
   <h1>Configuration Guide</h1>
-  <div class="meta">AutoQA (autoqa-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">AutoQA (qaai-may23) · generated from the codebase 2026-06-08</div>
 </header>
 
 <p>All runtime configuration is centralized in the <code>Settings</code> singleton
-<span class="src">autoqa/core/config.py:81-155</span>, loaded from a repo-root
+<span class="src">qaai/core/config.py:81-155</span>, loaded from a repo-root
 <code>.env</code> and the process environment. Import it via
-<code>from autoqa.core.config import settings</code>.</p>
+<code>from qaai.core.config import settings</code>.</p>
 
 <h2 id="env">Environment variables</h2>
 <table>
@@ -111,12 +111,12 @@ CACHE_DIR=./cache
 <h2 id="models">AI model settings</h2>
 <p><code>API_KEY</code>, <code>API_BASE_URL</code>, and <code>API_MODEL</code> configure the
 <code>RateLimitOpenAIClient</code> built at app startup
-<span class="src">autoqa/api/main.py:71-77</span>. Any OpenAI-compatible endpoint works
+<span class="src">qaai/api/main.py:71-77</span>. Any OpenAI-compatible endpoint works
 (OpenAI, Ollama, vLLM, Bedrock via langchain-aws). The rate/token settings
 (<code>MAX_REQUESTS_PER_MINUTE</code>, <code>MAX_TOKENS_PER_MINUTE</code>,
 <code>MAX_OUTPUT_TOKENS</code>) feed the client's proactive RPM/TPM limiter; the
 <code>TOKEN_COST_*</code> rates drive the cost figures in
-<code>token_usage.jsonl</code> <span class="src">autoqa/core/telemetry.py</span>.</p>
+<code>token_usage.jsonl</code> <span class="src">qaai/core/telemetry.py</span>.</p>
 
 <h2 id="jama">JAMA credentials</h2>
 <p>The three <code>JAMA_*</code> variables enable live baseline fetching for the RTM and
@@ -128,7 +128,7 @@ calls — useful for offline/repeatable runs.</p>
 
 <h2 id="caching">Caching</h2>
 <p>The review cache is a 3-tier write-through store shared by all three reviewers
-<span class="src">autoqa/core/cache.py</span>:</p>
+<span class="src">qaai/core/cache.py</span>:</p>
 <ul>
 <li><strong>Tier 2 — Redis</strong> (optional, enabled by <code>REDIS_URL</code>; 24&nbsp;h TTL; degrades gracefully if the package/host is unavailable).</li>
 <li><strong>Tier 3 — Disk JSON</strong> at <code>{CACHE_DIR}/{entity_id}/{node}_{prompt_version}.json</code> — the durable regulatory evidence; survives restarts.</li>
@@ -136,10 +136,10 @@ calls — useful for offline/repeatable runs.</p>
 <p>Cache key: <code>review:{entity_id}:{node_name}:{prompt_version}</code>, where
 <code>entity_id</code> is a <code>REQ-*</code> (test suite), <code>TEST-*</code> (test case),
 or <code>HAZ-*</code> id. Set <code>ENABLE_CACHE=false</code> to disable the cache entirely
-(no manager is created) <span class="src">autoqa/api/main.py:93-100</span>.</p>
+(no manager is created) <span class="src">qaai/api/main.py:93-100</span>.</p>
 <h3>Per-run cache mode</h3>
 <p>Each run threads a <code>cache_mode</code> through graph state
-<span class="src">autoqa/components/shared/nodes.py:122-137</span>:</p>
+<span class="src">qaai/components/shared/nodes.py:122-137</span>:</p>
 <table>
 <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
 <tbody>
@@ -149,18 +149,18 @@ or <code>HAZ-*</code> id. Set <code>ENABLE_CACHE=false</code> to disable the cac
 </tbody></table>
 <div class="note">The API's <strong>"Use cached results"</strong> checkbox
 (<code>use_cache</code>) maps only to <code>partial</code> (checked) or <code>off</code>
-(unchecked) <span class="src">autoqa/api/routes.py:68,91,135</span>. <code>full</code> is not
+(unchecked) <span class="src">qaai/api/routes.py:68,91,135</span>. <code>full</code> is not
 reachable from HTTP. <strong>Cache invalidation</strong> is by prompt version: bump a
 prompt's version and its cache key changes, leaving old entries untouched.</div>
 
 <h2 id="promptsets">Prompt sets</h2>
 <p>Each LLM node renders a versioned Jinja2 template resolved by
-<code>PromptConfig</code> <span class="src">autoqa/core/config.py:17-79</span>. Templates
-live at <code>autoqa/prompts/&lt;role&gt;/&lt;version&gt;/template.jinja2</code> with a sidecar
+<code>PromptConfig</code> <span class="src">qaai/core/config.py:17-79</span>. Templates
+live at <code>qaai/prompts/&lt;role&gt;/&lt;version&gt;/template.jinja2</code> with a sidecar
 <code>meta.yaml</code>, and are rendered by <code>render_prompt(path, **vars)</code>
-<span class="src">autoqa/utils.py</span>. A <strong>prompt set</strong> is a named manifest
+<span class="src">qaai/utils.py</span>. A <strong>prompt set</strong> is a named manifest
 that pins a version per role, letting you swap a whole bundle at once.</p>
-<p>Manifests live in <code>autoqa/prompts/sets/*.yaml</code>, e.g.
+<p>Manifests live in <code>qaai/prompts/sets/*.yaml</code>, e.g.
 <code>test_suite_reviewer_v1.yaml</code>:</p>
 <pre><code>name: test_suite_reviewer_v1
 component: test_suite_reviewer
@@ -177,40 +177,40 @@ parent_set: null</code></pre>
 <p>Shipped sets include <code>test_suite_reviewer_v1..v4</code>,
 <code>test_case_reviewer_v1..v2</code>, and <code>hazard_risk_reviewer_v1</code>. List them
 programmatically with <code>list_sets(status=...)</code>
-<span class="src">autoqa/prompts/_registry.py:108-126</span>.</p>
+<span class="src">qaai/prompts/_registry.py:108-126</span>.</p>
 
 <h3 id="create-set">Create a new prompt set</h3>
 <ol>
 <li><strong>Author the templates.</strong> For each role you want to change, add a new
 version directory with both files:
-<pre><code>autoqa/prompts/&lt;role&gt;/v&lt;MAJOR.MINOR.PATCH&gt;/template.jinja2
-autoqa/prompts/&lt;role&gt;/v&lt;MAJOR.MINOR.PATCH&gt;/meta.yaml</code></pre>
+<pre><code>qaai/prompts/&lt;role&gt;/v&lt;MAJOR.MINOR.PATCH&gt;/template.jinja2
+qaai/prompts/&lt;role&gt;/v&lt;MAJOR.MINOR.PATCH&gt;/meta.yaml</code></pre>
 Copy an existing <code>meta.yaml</code> for the expected fields (role, version, component,
 status, changelog, target_models). The role's on-disk directory is derived from
 <code>PromptConfig</code>'s default path for that field
-<span class="src">autoqa/prompts/_registry.py:44-57</span> (e.g. role <code>coverage</code>
+<span class="src">qaai/prompts/_registry.py:44-57</span> (e.g. role <code>coverage</code>
 → directory <code>coverage_evaluator</code>).</li>
 <li><strong>Write the manifest.</strong> Create
-<code>autoqa/prompts/sets/&lt;set_name&gt;.yaml</code> with <code>name</code>,
+<code>qaai/prompts/sets/&lt;set_name&gt;.yaml</code> with <code>name</code>,
 <code>component</code>, a <code>prompts</code> map of role → version, and
 <code>status</code> (e.g. <code>experimental</code> or <code>production</code>).</li>
 <li><strong>Validate.</strong> <code>load_set("&lt;set_name&gt;")</code>
-<span class="src">autoqa/prompts/_registry.py:60-105</span> resolves every role/version and
+<span class="src">qaai/prompts/_registry.py:60-105</span> resolves every role/version and
 raises <code>FileNotFoundError</code> if a template or <code>meta.yaml</code> is missing.</li>
 </ol>
-<pre><code>uv run python -c "from autoqa.prompts._registry import load_set; print(load_set('my_set_v1').prompts.keys())"</code></pre>
+<pre><code>uv run python -c "from qaai.prompts._registry import load_set; print(load_set('my_set_v1').prompts.keys())"</code></pre>
 
 <h3 id="select-set">Select a prompt set at run time</h3>
 <p>Set the <code>PROMPT_SET</code> environment variable to the manifest name. The
 <code>Settings.prompt_config</code> property lazily resolves it via
 <code>PromptConfig.from_set(...)</code> and caches the result
-<span class="src">autoqa/core/config.py:133, 142-149</span>; when unset, the built-in
+<span class="src">qaai/core/config.py:133, 142-149</span>; when unset, the built-in
 default <code>PromptConfig()</code> versions are used.</p>
 <pre><code># .env
 PROMPT_SET=test_suite_reviewer_v4
 
 # or per process
-PROMPT_SET=test_case_reviewer_v2 uv run uvicorn autoqa.api.main:app</code></pre>
+PROMPT_SET=test_case_reviewer_v2 uv run uvicorn qaai.api.main:app</code></pre>
 <div class="note">Because the cache key includes each prompt's version, switching prompt
 sets naturally produces fresh cache entries — old results for prior versions remain on
 disk as evidence. See <a href="#caching">Caching</a>.</div>

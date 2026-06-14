@@ -11,16 +11,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import BaseModel
 
-from autoqa.core.cache import ReviewCacheManager, _sanitize
-from autoqa.components.shared.nodes import StandardLLMNode
-from autoqa.components.shared.core import DecomposedSpec, Requirement, TestCase
-from autoqa.components.test_suite_reviewer.core import EvaluatedSpec, TestSuite
-from autoqa.components.test_suite_reviewer.nodes import (
+from qaai.core.cache import ReviewCacheManager, _sanitize
+from qaai.components.shared.nodes import StandardLLMNode
+from qaai.components.shared.core import DecomposedSpec, Requirement, TestCase
+from qaai.components.test_suite_reviewer.core import EvaluatedSpec, TestSuite
+from qaai.components.test_suite_reviewer.nodes import (
     SingleSpecEvaluatorNode,
     dispatch_coverage as rtm_dispatch_coverage,
 )
-from autoqa.components.test_case_reviewer.core import SpecAnalysis
-from autoqa.components.test_case_reviewer.nodes import (
+from qaai.components.test_case_reviewer.core import SpecAnalysis
+from qaai.components.test_case_reviewer.nodes import (
     SingleSpecCoverageNode,
     dispatch_coverage as tc_dispatch_coverage,
 )
@@ -259,7 +259,7 @@ async def test_rtm_per_spec_off_mode_no_cache(cache, tmp_path):
 
 
 async def test_rtm_per_spec_payload_includes_summarized_designs():
-    from autoqa.components.test_suite_reviewer.core import SummarizedDesignSpec
+    from qaai.components.test_suite_reviewer.core import SummarizedDesignSpec
 
     node, client = _make_rtm_spec_node(cache=None)  # no cache → always calls LLM
     state = _rtm_spec_state("S1", cache_mode="off")
@@ -318,7 +318,7 @@ async def test_tc_per_spec_caches_under_test_id(cache, tmp_path):
 
 
 def test_rtm_dispatch_propagates_cache_mode():
-    from autoqa.components.test_suite_reviewer.core import DecomposedRequirement
+    from qaai.components.test_suite_reviewer.core import DecomposedRequirement
 
     req = Requirement(req_id="REQ-1", text="x")
     specs = [
@@ -336,7 +336,7 @@ def test_rtm_dispatch_propagates_cache_mode():
 
 
 def test_rtm_dispatch_propagates_summarized_designs():
-    from autoqa.components.test_suite_reviewer.core import (
+    from qaai.components.test_suite_reviewer.core import (
         DecomposedRequirement,
         SummarizedDesignSpec,
     )
@@ -374,7 +374,7 @@ def test_rtm_dispatch_propagates_summarized_designs():
 
 
 def test_tc_dispatch_propagates_cache_mode():
-    from autoqa.components.test_case_reviewer.core import DecomposedRequirement
+    from qaai.components.test_case_reviewer.core import DecomposedRequirement
 
     req = Requirement(req_id="REQ-1", text="x")
     specs = [DecomposedSpec(spec_id="S1", description="d", acceptance_criteria="a", rationale="r")]
@@ -393,7 +393,7 @@ def test_tc_dispatch_propagates_cache_mode():
 
 
 def test_rtm_runnable_stores_cache_manager(cache):
-    from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+    from qaai.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
 
     client = make_counting_client("{}")
     rtm = RTMReviewerRunnable(client, "m", cache_manager=cache)
@@ -404,7 +404,7 @@ def test_hazard_embedded_rtm_is_uncached(cache):
     """The hazard reviewer's own nodes share the cache, but its embedded
     test-suite subgraph must NOT self-cache — its result is cached as one
     blob per requirement by RequirementReviewerNode instead."""
-    from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
+    from qaai.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 
     client = make_counting_client("{}")
     hz = HazardReviewerRunnable(client, "m", cache_manager=cache)

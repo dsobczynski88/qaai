@@ -3,7 +3,7 @@
 ## Overview
 
 All three reviewers (Test Suite / Test Case / Hazard) share a single **3-tier write-through
-cache**, `ReviewCacheManager` (`autoqa/core/cache.py`). The goal is to eliminate redundant LLM
+cache**, `ReviewCacheManager` (`qaai/core/cache.py`). The goal is to eliminate redundant LLM
 compute when the same entity is processed more than once — across iterative re-runs, partial
 batch failures, or (for the hazard reviewer) the same requirement appearing as a risk-control
 reference in multiple hazard rows.
@@ -36,7 +36,7 @@ checkbox maps **checked → `partial`** and **unchecked → `off`**. `full` is i
 - **`off`** bypasses the cache entirely (no reads, no writes).
 
 The gating lives in `BaseLLMNode._cache_read_allowed(state)` / `_cache_write_allowed(state)`
-(`autoqa/components/shared/nodes.py`). A node is marked final by constructing it with
+(`qaai/components/shared/nodes.py`). A node is marked final by constructing it with
 `is_final_output=True` (done in the synthesizer/aggregator/final-assessor factories).
 
 The global `ENABLE_CACHE` setting is a hard master switch: when `false`, no cache manager is
@@ -168,7 +168,7 @@ key; old entries are simply never read again. No manual purge required.
 | `CACHE_DIR` | `./cache` | Root directory for disk cache files (one folder per entity id) |
 | `REDIS_URL` | `None` | Redis connection URL, e.g. `redis://localhost:6379`; unset disables Tier 2 |
 
-A single `ReviewCacheManager` is built once in the API lifespan (`autoqa/api/main.py`) and shared
+A single `ReviewCacheManager` is built once in the API lifespan (`qaai/api/main.py`) and shared
 by all three services. It reuses the `TokenUsageTracker` already wired into the
 `RateLimitOpenAIClient` so cache events land in the same `token_usage.jsonl` as LLM-call records.
 
@@ -189,7 +189,7 @@ by all three services. It reuses the `TokenUsageTracker` already wired into the
 ```
 
 A `summary` record (cache hits redis/disk, misses, tokens/cost saved) is appended by
-`log_summary()` and mirrored in the `autoqa.log` summary line.
+`log_summary()` and mirrored in the `qaai.log` summary line.
 
 ---
 

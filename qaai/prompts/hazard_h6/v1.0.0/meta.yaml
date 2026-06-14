@@ -1,0 +1,13 @@
+role: hazard_h6
+version: v1.0.0
+component: hazard_risk_reviewer
+authored: '2026-05-12'
+status: published
+parent_version: null
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: H6Finding
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Initial migration from flat structure.

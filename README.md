@@ -27,7 +27,7 @@ A review can take several minutes, so the three review endpoints run **asynchron
 
 ## Pipeline Architecture
 
-Every reviewer is a LangGraph `StateGraph` that fans out via the `Send` API for maximum parallelism, then fans back in via `operator.add` reducers before a synthesizer node aggregates findings against the rubric. Each run also writes a Mermaid graph PNG (`graph.png`, `tc_graph.png`, or `hazard_graph.png`) into the run's log folder alongside `autoqa.log`.
+Every reviewer is a LangGraph `StateGraph` that fans out via the `Send` API for maximum parallelism, then fans back in via `operator.add` reducers before a synthesizer node aggregates findings against the rubric. Each run also writes a Mermaid graph PNG (`graph.png`, `tc_graph.png`, or `hazard_graph.png`) into the run's log folder alongside `qaai.log`.
 
 ### Test Suite Reviewer (RTM coverage)
 
@@ -143,7 +143,7 @@ The `overall_verdict` aggregates deterministically: it is `Yes` only when every 
 | `aggregated_assessment.overall_verdict`                                 | `Yes` iff every **mandatory** objective is `Yes`; partial-Yes still counts as `Yes`, and the one advisory objective (`test_case_setup_clarity`) never affects the verdict                                                     |
 | `aggregated_assessment.comments` / `clarification_questions`            | Same shape as the other reviewers                                                                                                                                                                                             |
 
-The five review objectives default to `autoqa/components/test_case_reviewer/review_objectives.yaml`: `expected_result_support`, `expected_result_spec_align`, `test_case_achieves`, `test_case_logical_sequence` (all mandatory), and `test_case_setup_clarity` (advisory).
+The five review objectives default to `qaai/components/test_case_reviewer/review_objectives.yaml`: `expected_result_support`, `expected_result_spec_align`, `test_case_achieves`, `test_case_logical_sequence` (all mandatory), and `test_case_setup_clarity` (advisory).
 
 ---
 
@@ -160,7 +160,7 @@ The five review objectives default to `autoqa/components/test_case_reviewer/revi
 
 ```bash
 git clone <repo-url>
-cd autoqa
+cd qaai
 uv sync --frozen   # installs deps, including pyjama pinned to the SHA in uv.lock
 ```
 
@@ -211,7 +211,7 @@ ALLOWED_ORIGINS=*        # comma-separated list for CORS (e.g., https://app.exam
 PROMPT_SET=              # named prompt-set manifest, e.g. test_case_reviewer_v2
 ```
 
-**Environment Variable Reference** (see `autoqa/core/config.py` for the authoritative list):
+**Environment Variable Reference** (see `qaai/core/config.py` for the authoritative list):
 
 | Variable                  | Required | Default       | Description                                                          |
 | ------------------------- | -------- | ------------- | -------------------------------------------------------------------- |
@@ -240,12 +240,12 @@ PROMPT_SET=              # named prompt-set manifest, e.g. test_case_reviewer_v2
 
 ## Caching
 
-A shared, write-through **`ReviewCacheManager`** (`autoqa/core/cache.py`) backs all three reviewers so re-running a review reuses prior per-node LLM results and only pays for what changed. It is a three-tier cache:
+A shared, write-through **`ReviewCacheManager`** (`qaai/core/cache.py`) backs all three reviewers so re-running a review reuses prior per-node LLM results and only pays for what changed. It is a three-tier cache:
 
 - **Tier 2 — Redis** (optional, 24h TTL): a hot in-memory tier, enabled only when `REDIS_URL` is set. Degrades gracefully — if Redis is unreachable, reviews still run off disk.
 - **Tier 3 — Disk** (`{CACHE_DIR}/{entity_id}/{node}_{prompt_version}.json`): one folder per entity (`REQ-*`, `TEST-*`, `HAZ-*`) holding the regulatory-evidence JSON for each node. The Redis key is `review:{entity_id}:{node}:{prompt_version}`.
 
-The cache is keyed in part by **prompt version**, so bumping a template's version (under `autoqa/prompts/`) automatically invalidates the affected entries — no manual purge needed.
+The cache is keyed in part by **prompt version**, so bumping a template's version (under `qaai/prompts/`) automatically invalidates the affected entries — no manual purge needed.
 
 **Per-run cache mode** is threaded through graph state as `cache_mode ∈ {off, partial, full}`:
 
@@ -259,7 +259,7 @@ Each endpoint exposes a **`use_cache`** toggle (default `true`) that the API map
 
 ## Web Frontend
 
-When the server is running, a single-page UI is served at the root (`http://localhost:8000/`) from `autoqa/api/static/index.html`. It presents three reviewer cards — **Requirement Coverage** (RTM), **Test Case Adequacy** (TC), and **Software Hazard Analysis** (hazard) — each fading in an input form (baseline ID or Excel upload) plus a "Use cached results" checkbox that drives the `use_cache` flag. On submit the page kicks off a background job and **polls for status every few seconds** (showing elapsed time) until the report is ready, then offers it as a download. Interactive API docs are at `http://localhost:8000/docs`.
+When the server is running, a single-page UI is served at the root (`http://localhost:8000/`) from `qaai/api/static/index.html`. It presents three reviewer cards — **Requirement Coverage** (RTM), **Test Case Adequacy** (TC), and **Software Hazard Analysis** (hazard) — each fading in an input form (baseline ID or Excel upload) plus a "Use cached results" checkbox that drives the `use_cache` flag. On submit the page kicks off a background job and **polls for status every few seconds** (showing elapsed time) until the report is ready, then offers it as a download. Interactive API docs are at `http://localhost:8000/docs`.
 
 ---
 
@@ -307,13 +307,13 @@ When omitted, each test falls back to its standard fixture (`test_suite_review_a
 
 Fixture inputs live under `tests/fixtures/external/` (`test_suite_review_all_fields.jsonl`, `test_case_review_all_fields.jsonl`, `software_hazard_analysis.xlsx`, `pyjama_response_unified.jsonl`, plus `*_min_fields.jsonl` variants) and `tests/fixtures/local/` (project-specific files such as `locating_device.jsonl`), with labelled gold datasets under `tests/fixtures/gold/` and per-node mocks under `tests/fixtures/mock/`. Append a line to the relevant JSONL file to add a scenario, or drop a new file into `local/` (or `external/`) and point `--input-file` at it.
 
-The integration suite includes session-scoped `jsonl_recorders` / `jsonl_recorders_tc` / `jsonl_recorders_hz` fixtures that write `inputs.jsonl` and `outputs.jsonl` to the active `logs/run-.../` folder and, on teardown, invoke the matching `autoqa.viewer` `write_viewer*` function whenever `outputs.jsonl` has records — no manual step required.
+The integration suite includes session-scoped `jsonl_recorders` / `jsonl_recorders_tc` / `jsonl_recorders_hz` fixtures that write `inputs.jsonl` and `outputs.jsonl` to the active `logs/run-.../` folder and, on teardown, invoke the matching `qaai.viewer` `write_viewer*` function whenever `outputs.jsonl` has records — no manual step required.
 
 All run artifacts are written to a timestamped `logs/run-<datetime>/` directory:
 
 | File                                              | Contents                                                                         |
 | ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `autoqa.log`                                      | Structured application logs                                                      |
+| `qaai.log`                                      | Structured application logs                                                      |
 | `graph.png` / `tc_graph.png` / `hazard_graph.png` | Mermaid diagrams of the compiled LangGraph (one per reviewer)                    |
 | `inputs.jsonl`                                    | Input records fed to the run                                                     |
 | `outputs.jsonl`                                   | Serialized pipeline state for each record                                        |
@@ -345,13 +345,13 @@ Each batch run emits an HTML viewer alongside `outputs.jsonl` (`viewer.html` for
 
 ```bash
 # module form (RTM viewer)
-uv run python -m autoqa.viewer logs/run-<ts>/outputs.jsonl
+uv run python -m qaai.viewer logs/run-<ts>/outputs.jsonl
 ```
 
 The viewer is also importable — the package exposes one writer per reviewer:
 
 ```python
-from autoqa.viewer import write_viewer, write_viewer_tc, write_viewer_hz
+from qaai.viewer import write_viewer, write_viewer_tc, write_viewer_hz
 
 write_viewer("logs/run-2026-04-22-09-00-00/outputs.jsonl")       # RTM → viewer.html
 write_viewer_tc("logs/run-2026-04-22-09-00-00/outputs.jsonl")    # test case → viewer_tc.html
@@ -361,9 +361,9 @@ write_viewer_hz("logs/run-2026-04-22-09-00-00/outputs.jsonl")    # hazard → vi
 ### Package layout
 
 ```
-autoqa/viewer/
+qaai/viewer/
 ├── __init__.py                 # public API: build_viewer(_tc/_hz), write_viewer(_tc/_hz), *_HTML_TEMPLATE
-├── __main__.py                 # enables `python -m autoqa.viewer`
+├── __main__.py                 # enables `python -m qaai.viewer`
 ├── generator.py                # build_/write_ functions + CLI main()
 ├── template.py                 # HTML_TEMPLATE (RTM)
 ├── template_test_case.py       # TC_HTML_TEMPLATE
@@ -378,10 +378,10 @@ autoqa/viewer/
 ### Starting the Server
 
 ```bash
-uv run uvicorn autoqa.api.main:app --reload
+uv run uvicorn qaai.api.main:app --reload
 ```
 
-Interactive API documentation is available at `http://localhost:8000/docs`. At startup the lifespan handler builds a single shared `RTMReviewerRunnable` and reuses it inside the hazard pipeline's `RequirementReviewerNode`, so the RTM graph compiles and renders `graph.png` only once per process even though multiple endpoints exercise it. All three services share a single `ReviewCacheManager`, and a single in-memory `JobManager` (`autoqa/api/jobs.py`) backs the asynchronous review jobs.
+Interactive API documentation is available at `http://localhost:8000/docs`. At startup the lifespan handler builds a single shared `RTMReviewerRunnable` and reuses it inside the hazard pipeline's `RequirementReviewerNode`, so the RTM graph compiles and renders `graph.png` only once per process even though multiple endpoints exercise it. All three services share a single `ReviewCacheManager`, and a single in-memory `JobManager` (`qaai/api/jobs.py`) backs the asynchronous review jobs.
 
 ### Endpoint Reference
 
@@ -430,10 +430,10 @@ JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-suite-review \
 
 # 2. Poll — repeat until "status" is "completed" (or "failed")
 curl -s http://localhost:8000/api/v1/jobs/$JOB
-# {"job_id":"...","status":"running","filename":"autoqa_rtm_review.html","error":null}
+# {"job_id":"...","status":"running","filename":"qaai_rtm_review.html","error":null}
 
 # 3. Download the HTML report once completed
-curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_rtm_review.html
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_rtm_review.html
 ```
 
 - `GET /api/v1/jobs/{job_id}` returns `{job_id, status, filename, error}` where `status` ∈ `pending` / `running` / `completed` / `failed` (`error` is populated only on `failed`).

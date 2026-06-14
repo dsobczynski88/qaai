@@ -74,10 +74,10 @@ if [ -n "$JUPYTERHUB_USER" ]; then
     echo "   - Health: https://aihub-ohio.aws.baxter.com${ROOT_PATH}/health"
     echo ""
     
-    # --timeout-keep-alive 600 matches the local path (autoqa.api.run); reviews
+    # --timeout-keep-alive 600 matches the local path (qaai.api.run); reviews
     # run async (202 + poll) so requests are short, but keep the generous
     # keep-alive for the polling connections.
-    uv run uvicorn autoqa.api.main:app --host 0.0.0.0 --port 8000 --root-path "$ROOT_PATH" --timeout-keep-alive 600
+    uv run uvicorn qaai.api.main:app --host 0.0.0.0 --port 8000 --root-path "$ROOT_PATH" --timeout-keep-alive 600
 else
     echo "🚀 Starting server in local mode"
     echo ""
@@ -87,5 +87,5 @@ else
     echo "   - Health: http://localhost:8000/health"
     echo ""
     
-    uv run autoqa-api
+    uv run qaai-api
 fi

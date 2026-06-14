@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import status
 
-from autoqa.api.main import app
+from qaai.api.main import app
 
 
 @pytest.fixture

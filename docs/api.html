@@ -62,37 +62,37 @@
 <main>
 <header class="doc">
   <h1>API Server &amp; Frontend Guide</h1>
-  <div class="meta">AutoQA (autoqa-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">AutoQA (qaai-may23) · generated from the codebase 2026-06-08</div>
 </header>
 
 <p>AutoQA exposes three LangGraph reviewers behind a FastAPI app
-(<code>autoqa.api.main:app</code>). Every review runs as an <strong>asynchronous
+(<code>qaai.api.main:app</code>). Every review runs as an <strong>asynchronous
 background job</strong> and returns a self-contained HTML viewer once complete.</p>
 
 <h2 id="start">Starting the development server</h2>
-<pre><code>uv run uvicorn autoqa.api.main:app --reload</code></pre>
+<pre><code>uv run uvicorn qaai.api.main:app --reload</code></pre>
 <p>Expected console output:</p>
 <pre><code>INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)</code></pre>
 <p>Look for these log lines confirming services initialized in the <code>lifespan</code>
-context manager <span class="src">autoqa/api/main.py:58-145</span>:</p>
+context manager <span class="src">qaai/api/main.py:58-145</span>:</p>
 <pre><code>AutoQA services initialized successfully
 AutoQA API created (environment: development)</code></pre>
 <p>The <code>--reload</code> flag is development-only. The factory is
-<code>create_app()</code> <span class="src">autoqa/api/main.py:147-194</span>, which
+<code>create_app()</code> <span class="src">qaai/api/main.py:147-194</span>, which
 adds request-logging + body-size-limit middleware, conditional CORS, and GZip.</p>
 
 <h2 id="frontend">Opening the frontend</h2>
 <p>Navigate to <strong>http://localhost:8000</strong>. <code>index.html</code> is served
-from <code>autoqa/api/static/</code> via a StaticFiles mount at <code>/</code>
-<span class="src">autoqa/api/main.py:189-191</span>. The page shows three reviewer
+from <code>qaai/api/static/</code> via a StaticFiles mount at <code>/</code>
+<span class="src">qaai/api/main.py:189-191</span>. The page shows three reviewer
 cards (Requirement Coverage, Test Case Adequacy, Software Hazard Analysis); selecting one
 reveals its input form. Interactive API docs are at <code>/docs</code> and
 <code>/redoc</code> &mdash; both are <strong>hidden when <code>ENVIRONMENT=production</code></strong>
-<span class="src">autoqa/api/main.py:159-168</span>.</p>
+<span class="src">qaai/api/main.py:159-168</span>.</p>
 
 <h2 id="endpoints">Endpoints</h2>
-<p>All routes are mounted under <code>/api/v1</code> <span class="src">autoqa/api/routes.py</span>.</p>
+<p>All routes are mounted under <code>/api/v1</code> <span class="src">qaai/api/routes.py</span>.</p>
 <table>
 <thead><tr><th>Method &amp; path</th><th>Body / form</th><th>Success</th><th>Source</th></tr></thead>
 <tbody>
@@ -123,7 +123,7 @@ service is missing it returns <strong>503</strong> with <code>"status": "degrade
 <p>A review can take several minutes. If the report were returned synchronously, an
 upstream proxy (JupyterHub's jupyter-server-proxy, an AWS ALB, etc.) would see an idle
 upstream and return a <strong>504</strong>. So the three review endpoints run the work as
-a background job <span class="src">autoqa/api/jobs.py</span>:</p>
+a background job <span class="src">qaai/api/jobs.py</span>:</p>
 <ol>
 <li><strong>Submit</strong> — <code>POST</code> a review endpoint → <code>202 Accepted</code>
 with <code>{"job_id": "...", "status": "pending"}</code> in well under a second.</li>
@@ -155,7 +155,7 @@ JOB=$(curl -s -X POST http://localhost:8000/api/v1/hazard-risk-review \
 curl -s http://localhost:8000/api/v1/jobs/$JOB
 
 # 3. Download the completed report
-curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_hazard_review.html</code></pre>
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_hazard_review.html</code></pre>
 <p>Multipart form fields <span class="src">routes.py:101-120</span>:</p>
 <table>
 <thead><tr><th>Field</th><th>Required</th><th>Default</th><th>Notes</th></tr></thead>
@@ -167,7 +167,7 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_hazard_rev
 <tr><td><code>test_mode</code></td><td>No</td><td>server default</td><td>Cache-only JAMA; omit to use <code>PYJAMA_TEST_MODE</code></td></tr>
 </tbody></table>
 <p>The per-row thread ID is derived server-side from the hazard's <code>hazard_id</code>
-(falling back to the job-derived index) <span class="src">autoqa/api/services.py:293-298</span>.</p>
+(falling back to the job-derived index) <span class="src">qaai/api/services.py:293-298</span>.</p>
 
 <h2 id="baseline">Testing baseline reviews (RTM &amp; test case)</h2>
 <p>RTM and test-case baseline reviews require JAMA credentials in <code>.env</code>:</p>
@@ -183,15 +183,15 @@ JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-suite-review \
   -H "Content-Type: application/json" \
   -d '{"baseline_id": "BASE-12345", "use_cache": true}' | jq -r .job_id)
 curl -s http://localhost:8000/api/v1/jobs/$JOB                       # poll until completed
-curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_rtm_review.html
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_rtm_review.html
 
 # Test case review from baseline
 JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-case-review \
   -H "Content-Type: application/json" \
   -d '{"baseline_id": "BASE-67890", "use_cache": true}' | jq -r .job_id)
-curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output autoqa_tc_review.html</code></pre>
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_tc_review.html</code></pre>
 <p>Both endpoints accept a <code>BaselineRequest</code> body
-<span class="src">autoqa/api/schemas.py:6-24</span>:</p>
+<span class="src">qaai/api/schemas.py:6-24</span>:</p>
 <table>
 <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -209,7 +209,7 @@ See <a href="configuration.html#caching">Configuration → Caching</a>.</div>
 is downloaded from <code>GET /api/v1/jobs/{job_id}/result</code> once
 <code>completed</code>. The downloaded viewer opens directly in a browser and contains a
 per-item rubric summary with drill-downs. Viewer files are also written to the run
-directory <span class="src">autoqa/viewer/generator.py</span>:</p>
+directory <span class="src">qaai/viewer/generator.py</span>:</p>
 <ul>
 <li>RTM viewer: <code>logs/run-&lt;timestamp&gt;/viewer.html</code></li>
 <li>Test case viewer: <code>logs/run-&lt;timestamp&gt;/viewer_tc.html</code></li>
@@ -218,12 +218,12 @@ directory <span class="src">autoqa/viewer/generator.py</span>:</p>
 <p>The structured per-record state is also written one-per-line to
 <code>outputs.jsonl</code> (inputs to <code>inputs.jsonl</code>) in the same run
 directory by the shared <code>_run_batch_review</code> helper
-<span class="src">autoqa/api/services.py:29-72</span>.</p>
+<span class="src">qaai/api/services.py:29-72</span>.</p>
 
 <h2 id="config">Configuration</h2>
 <p>Key environment variables (full list in
 <a href="configuration.html">configuration.html</a> and
-<code>autoqa/core/config.py:81-155</code>):</p>
+<code>qaai/core/config.py:81-155</code>):</p>
 <table>
 <thead><tr><th>Variable</th><th>Required</th><th>Purpose</th></tr></thead>
 <tbody>
@@ -240,13 +240,13 @@ directory by the shared <code>_run_batch_review</code> helper
 
 <h2 id="debug">Debugging tips</h2>
 <p>Real-time logs appear in the console and at
-<code>logs/run-&lt;timestamp&gt;/autoqa.log</code>. Because reviews run as background jobs,
+<code>logs/run-&lt;timestamp&gt;/qaai.log</code>. Because reviews run as background jobs,
 the <code>POST</code> completes immediately with <code>202</code> and the review progress
 is logged under the job's run folder:</p>
 <pre><code>Request started: POST /api/v1/hazard-risk-review
 Request completed: POST /api/v1/hazard-risk-review - 202</code></pre>
 <p>Each run also writes <code>token_usage.jsonl</code> with per-call token and cost
-metrics <span class="src">autoqa/core/telemetry.py</span>.</p>
+metrics <span class="src">qaai/core/telemetry.py</span>.</p>
 
 <h2 id="prod">Production deployment</h2>
 <ol>
@@ -257,10 +257,10 @@ metrics <span class="src">autoqa/core/telemetry.py</span>.</p>
 <li>Ensure required env vars are set; keep secrets out of <code>.env</code>.</li>
 </ol>
 <div class="note warn"><strong>Run a single worker.</strong> The async job registry is
-in-memory <span class="src">autoqa/api/jobs.py</span>, so a <code>job_id</code> created on
+in-memory <span class="src">qaai/api/jobs.py</span>, so a <code>job_id</code> created on
 one worker is invisible to another. Keep <code>--workers 1</code> until the registry moves
 to a shared backend (Redis is already a dependency).</div>
-<pre><code>gunicorn autoqa.api.main:app \
+<pre><code>gunicorn qaai.api.main:app \
   --workers 1 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000</code></pre>

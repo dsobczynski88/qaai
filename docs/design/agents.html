@@ -61,7 +61,7 @@
 <main>
 <header class="doc">
   <h1>Reviewer Agent Design</h1>
-  <div class="meta">AutoQA (autoqa-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">AutoQA (qaai-may23) · generated from the codebase 2026-06-08</div>
 </header>
 
 <h2 id="overview">Overview</h2>
@@ -70,15 +70,15 @@ pipeline that emits a structured, SoP-gating rubric with a binary Yes/No verdict
 <table>
 <thead><tr><th>Reviewer</th><th>Package</th><th>Rubric</th><th>Output model</th></tr></thead>
 <tbody>
-<tr><td>Test Suite (RTM)</td><td><code>autoqa.components.test_suite_reviewer</code></td><td>M1–M5 + R6</td><td><code>SynthesizedAssessment</code></td></tr>
-<tr><td>Test Case</td><td><code>autoqa.components.test_case_reviewer</code></td><td>5 review objectives</td><td><code>TestCaseAssessment</code></td></tr>
-<tr><td>Hazard Risk</td><td><code>autoqa.components.hazard_risk_reviewer</code></td><td>H1–H7</td><td><code>HazardAssessment</code></td></tr>
+<tr><td>Test Suite (RTM)</td><td><code>qaai.components.test_suite_reviewer</code></td><td>M1–M5 + R6</td><td><code>SynthesizedAssessment</code></td></tr>
+<tr><td>Test Case</td><td><code>qaai.components.test_case_reviewer</code></td><td>5 review objectives</td><td><code>TestCaseAssessment</code></td></tr>
+<tr><td>Hazard Risk</td><td><code>qaai.components.hazard_risk_reviewer</code></td><td>H1–H7</td><td><code>HazardAssessment</code></td></tr>
 </tbody></table>
 <p>The hazard reviewer <strong>embeds the full RTM reviewer as a subgraph</strong>: each
 requirement traced from a hazard record is reviewed by invoking the RTM graph.</p>
 
 <h2 id="layout">The canonical four-file layout</h2>
-<p>Every reviewer lives under <code>autoqa/components/&lt;reviewer&gt;/</code> with the same
+<p>Every reviewer lives under <code>qaai/components/&lt;reviewer&gt;/</code> with the same
 four files:</p>
 <table>
 <thead><tr><th>File</th><th>Responsibility</th></tr></thead>
@@ -151,7 +151,7 @@ the whole-subgraph result as one <code>req_id</code>-keyed blob
 
 <h2 id="nodes">Shared node engine</h2>
 <p>All nodes derive from base classes in
-<code>autoqa/components/shared/nodes.py</code>. <code>StandardLLMNode</code> is a
+<code>qaai/components/shared/nodes.py</code>. <code>StandardLLMNode</code> is a
 <strong>Template Method</strong>: its <code>__call__</code> runs a fixed pipeline and
 subclasses fill in only the hooks
 <span class="src">shared/nodes.py:309-433</span>:</p>
@@ -172,7 +172,7 @@ response rather than raising, so a missing upstream field shows up as a node tha
 
 <h2 id="cache">Cache manager system</h2>
 <p><code>ReviewCacheManager</code> is a 3-tier write-through cache shared by all reviewers
-<span class="src">autoqa/core/cache.py</span>: Tier 2 = Redis (optional, 24&nbsp;h TTL),
+<span class="src">qaai/core/cache.py</span>: Tier 2 = Redis (optional, 24&nbsp;h TTL),
 Tier 3 = disk JSON at <code>{cache_dir}/{entity_id}/{node}_{prompt_version}.json</code>.
 Key = <code>review:{entity_id}:{node}:{prompt_version}</code>. <code>get()</code> checks
 Redis → disk (backfilling Redis on a disk hit); <code>set()</code> writes disk then Redis.</p>
@@ -187,19 +187,19 @@ Bumping a prompt version changes the key — the invalidation mechanism. See
 
 <h2 id="logging">Logging &amp; telemetry</h2>
 <p>Each run creates a timestamped folder <code>logs/run-&lt;timestamp&gt;/</code> via
-<code>start_new_run()</code> <span class="src">autoqa/core/logging_config.py</span>, holding
-<code>autoqa.log</code> (and <code>api.log</code> / <code>pyjama.log</code> for the server).
+<code>start_new_run()</code> <span class="src">qaai/core/logging_config.py</span>, holding
+<code>qaai.log</code> (and <code>api.log</code> / <code>pyjama.log</code> for the server).
 The <code>TokenUsageTracker</code> appends one record per LLM call — and cache hit/miss
 events — to <code>token_usage.jsonl</code>, with a cost computed from the
 <code>TOKEN_COST_*</code> rates, plus a summary record at teardown
-<span class="src">autoqa/core/telemetry.py</span>.</p>
+<span class="src">qaai/core/telemetry.py</span>.</p>
 
 <h2 id="viewers">Output viewer files</h2>
-<p>At the end of a run, the <code>autoqa.viewer</code> package renders a self-contained
+<p>At the end of a run, the <code>qaai.viewer</code> package renders a self-contained
 HTML report from <code>outputs.jsonl</code>: <code>write_viewer</code> →
 <code>viewer.html</code> (RTM), <code>write_viewer_tc</code> → <code>viewer_tc.html</code>,
 <code>write_viewer_hz</code> → <code>viewer_hz.html</code>
-<span class="src">autoqa/viewer/generator.py:83-135</span>. Each template is assembled
+<span class="src">qaai/viewer/generator.py:83-135</span>. Each template is assembled
 modularly from <code>viewer/common/</code> (shared <code>base.css</code>,
 <code>layout.html</code>, <code>shared.js</code>) plus the reviewer's own
 <code>style.css</code> / <code>script.js</code>, producing a single static file with no
@@ -208,10 +208,10 @@ external dependencies (reviewer ratings persist in <code>localStorage</code>).</
 <h2 id="prompts">How prompts are created</h2>
 <p>Prompts are a versioned registry, not flat files. Each node role maps (via
 <code>PromptConfig</code>) to a template at
-<code>autoqa/prompts/&lt;role&gt;/&lt;version&gt;/template.jinja2</code> with a
+<code>qaai/prompts/&lt;role&gt;/&lt;version&gt;/template.jinja2</code> with a
 <code>meta.yaml</code> sidecar; <code>make_*_node</code> factories render the template with
 <code>render_prompt(path, **vars)</code> and extract the version for the cache key. Named
-<strong>prompt sets</strong> (manifests in <code>autoqa/prompts/sets/</code>) pin a version
+<strong>prompt sets</strong> (manifests in <code>qaai/prompts/sets/</code>) pin a version
 per role so a whole bundle can be swapped via the <code>PROMPT_SET</code> env var — see
 <a href="../configuration.html#promptsets">Configuration → Prompt sets</a>.</p>
 
@@ -225,7 +225,7 @@ per role so a whole bundle can be swapped via the <code>PROMPT_SET</code> env va
 <tr><td>Soft-fail nodes</td><td><code>_validate_state</code> / dispatchers returning <code>[]</code></td><td>Missing upstream data degrades to a skip, not a crash.</td></tr>
 <tr><td>Factory functions</td><td><code>make_*_node(...)</code></td><td>Inject client/model/prompt + cache wiring consistently.</td></tr>
 <tr><td>3-tier write-through cache</td><td><code>ReviewCacheManager</code> <span class="src">core/cache.py</span></td><td>Hot Redis + durable disk evidence; graceful degradation.</td></tr>
-<tr><td>Versioned prompt registry</td><td><code>autoqa/prompts</code> + <code>_registry.py</code></td><td>Reproducible prompts; version is the cache-invalidation key.</td></tr>
+<tr><td>Versioned prompt registry</td><td><code>qaai/prompts</code> + <code>_registry.py</code></td><td>Reproducible prompts; version is the cache-invalidation key.</td></tr>
 </tbody></table>
 
 <footer class="doc">Generated from the AutoQA codebase on 2026-06-08. · <a href="../index.html">Docs home</a></footer>
