@@ -112,6 +112,9 @@ async def lifespan(app: FastAPI):
     app.state.hazard_service = HazardReviewService(
         client,
         settings.model,
+        # Intentional: pass model_kwargs (max_tokens) here too, so the hazard
+        # graphs and their embedded RTM respect max_output_tokens like the RTM/TC
+        # services do (avoids truncating large completions). Do not drop this.
         model_kwargs=model_kwargs,
         pyjama_config=pyjama_config,
         cache_manager=cache_manager,

@@ -9,6 +9,12 @@ import pytest
 from fastapi import status
 
 from qaai.api.main import app
+from qaai.api.services import (
+    PROMPT_SET_BASELINE,
+    PROMPT_SET_EDGE_CASE,
+    HazardReviewService,
+    RTMReviewService,
+)
 
 
 @pytest.fixture
@@ -222,3 +228,21 @@ async def test_hazard_edge_case_toggle_selects_prompt_set(
     )
     assert resp.status_code == status.HTTP_200_OK
     assert rec["prompt_set"] == expected_set
+
+
+# --- service _select() fallback (no graph building; sentinel runnables) --------
+
+@pytest.mark.parametrize("service_cls,kw", [
+    (RTMReviewService, "rtm_runnables"),
+    (HazardReviewService, "hazard_runnables"),
+])
+def test_select_falls_back_to_baseline_for_unknown_set(service_cls, kw):
+    v3, v4 = object(), object()
+    svc = service_cls(
+        client=None, model="m",
+        **{kw: {PROMPT_SET_BASELINE: v3, PROMPT_SET_EDGE_CASE: v4}},
+    )
+    assert svc._select(PROMPT_SET_EDGE_CASE) is v4
+    assert svc._select(PROMPT_SET_BASELINE) is v3
+    assert svc._select("nonexistent_set") is v3   # unknown → baseline
+    assert svc._select(None) is v3                 # None → baseline

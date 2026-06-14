@@ -4,7 +4,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -102,7 +102,7 @@ class RTMReviewService:
         client: RateLimitOpenAIClient,
         model: str,
         model_kwargs: dict = {},
-        rtm_runnables: Optional[dict] = None,
+        rtm_runnables: Optional[Dict[str, RTMReviewerRunnable]] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
@@ -120,7 +120,11 @@ class RTMReviewService:
 
     def _select(self, prompt_set: Optional[str]) -> RTMReviewerRunnable:
         """Resolve the runnable for a prompt set, defaulting to the baseline set."""
-        return self.graphs.get(prompt_set) or self.graphs[PROMPT_SET_BASELINE]
+        return (
+            self.graphs.get(prompt_set)
+            or self.graphs.get(PROMPT_SET_BASELINE)
+            or next(iter(self.graphs.values()))
+        )
 
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
@@ -198,7 +202,7 @@ class HazardReviewService:
         client: RateLimitOpenAIClient,
         model: str,
         model_kwargs: dict = {},
-        hazard_runnables: Optional[dict] = None,
+        hazard_runnables: Optional[Dict[str, HazardReviewerRunnable]] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
@@ -224,7 +228,11 @@ class HazardReviewService:
 
     def _select(self, prompt_set: Optional[str]) -> HazardReviewerRunnable:
         """Resolve the hazard runnable for a prompt set, defaulting to baseline."""
-        return self.graphs.get(prompt_set) or self.graphs[PROMPT_SET_BASELINE]
+        return (
+            self.graphs.get(prompt_set)
+            or self.graphs.get(PROMPT_SET_BASELINE)
+            or next(iter(self.graphs.values()))
+        )
 
     @staticmethod
     def _build_bidirectional_request(project_name: str, identifiers: List[str]):

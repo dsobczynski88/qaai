@@ -128,6 +128,9 @@ async def test_prompt_set_namespaces_cache(cache, tmp_path):
     v4 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4")
     assert v3["result"] == {"value": "v3"}
     assert v4["result"] == {"value": "v4"}
+    # The set name is recorded in the entry meta (regulatory provenance)
+    assert v3["meta"]["prompt_set"] == "test_suite_reviewer_v3"
+    assert v4["meta"]["prompt_set"] == "test_suite_reviewer_v4"
 
     # An un-namespaced read does not pick up a namespaced entry
     assert await cache.get("REQ-1", "coverage_evaluator", "v8.0.0") is None
