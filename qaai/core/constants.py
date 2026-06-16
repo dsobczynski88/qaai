@@ -1,4 +1,4 @@
-"""Application-wide constants for AutoQA.
+"""Application-wide constants for QAAI.
 
 This module centralizes magic numbers and configuration defaults to improve
 maintainability and make tuning easier. All constants are documented with

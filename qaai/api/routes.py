@@ -16,7 +16,7 @@ from qaai.core.config import settings
 
 logger = logging.getLogger("qaai.api.routes")
 
-router = APIRouter(prefix="/api/v1", tags=["AutoQA"])
+router = APIRouter(prefix="/api/v1", tags=["QAAI"])
 
 
 def _make_service_dep(attr: str, label: str):

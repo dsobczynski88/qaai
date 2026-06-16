@@ -41,23 +41,23 @@ logger = logging.getLogger("qaai.api.run")
 
 
 def main():
-    """Main entry point for the AutoQA API server.
+    """Main entry point for the QAAI API server.
     
     Launches uvicorn as a subprocess to avoid asyncio conflicts with Jupyter's
     nest-asyncio patches.
     """
     logger.info("=" * 80)
-    logger.info("AutoQA API Server Launcher")
+    logger.info("QAAI API Server Launcher")
     logger.info("=" * 80)
     logger.info("Timeout Settings:")
     logger.info("  - timeout_keep_alive: 600s (10 minutes)")
     logger.info("=" * 80)
     
     # Get configuration from environment variables with sensible defaults
-    host = os.getenv("AUTOQA_API_HOST", "0.0.0.0")
-    port = int(os.getenv("AUTOQA_API_PORT", "8000"))
-    reload = os.getenv("AUTOQA_API_RELOAD", "false").lower() == "true"
-    workers = int(os.getenv("AUTOQA_API_WORKERS", "1"))
+    host = os.getenv("QAAI_API_HOST", "0.0.0.0")
+    port = int(os.getenv("QAAI_API_PORT", "8000"))
+    reload = os.getenv("QAAI_API_RELOAD", "false").lower() == "true"
+    workers = int(os.getenv("QAAI_API_WORKERS", "1"))
     
     logger.info("Server Configuration:")
     logger.info("  - Host: %s", host)

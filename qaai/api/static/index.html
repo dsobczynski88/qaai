@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AutoQA — AI-Assisted DHF Reviewer</title>
+<title>QAAI — AI-Assisted DHF Reviewer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -493,7 +493,7 @@
     <div class="logo-mark">AQ</div>
     <div class="logo-tag">v0.2 · Medical Device DHF</div>
   </div>
-  <h1>AUTOQA</h1>
+  <h1>QAAI</h1>
   <p class="subtitle">AI-Assisted Reviewer for Quality Assurance &nbsp;·&nbsp; IEC 62304 / ISO 14971</p>
   <div class="divider"></div>
 </div>
@@ -528,7 +528,7 @@
           <span>Test mode (cached JAMA only)</span>
         </label>
         <span class="cache-info" tabindex="0"
-              title="When test mode is on, AutoQA runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
+              title="When test mode is on, QAAI runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
       </div>
       <div class="cache-toggle">
         <label class="cache-check">
@@ -536,7 +536,7 @@
           <span>Include Edge Case Analysis</span>
         </label>
         <span class="cache-info" tabindex="0"
-              title="When on, AutoQA uses the edge-case prompt set (test_suite_reviewer_v4) whose decomposer surfaces boundary, concurrency, state/mode and degenerate-input specs. Off uses the baseline set (v3). Cached results are namespaced per prompt set.">i</span>
+              title="When on, QAAI uses the edge-case prompt set (test_suite_reviewer_v4) whose decomposer surfaces boundary, concurrency, state/mode and degenerate-input specs. Off uses the baseline set (v3). Cached results are namespaced per prompt set.">i</span>
       </div>
       <button class="btn-submit" id="btn-rtm" onclick="submitBaseline('rtm')">
         <span>▶</span> Run Requirement Coverage Review
@@ -571,7 +571,7 @@
           <span>Test mode (cached JAMA only)</span>
         </label>
         <span class="cache-info" tabindex="0"
-              title="When test mode is on, AutoQA runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
+              title="When test mode is on, QAAI runs strictly from previously cached JAMA results — no live JAMA API calls are made, so invalid or mock credentials are tolerated. Turn off to fetch live from JAMA.">i</span>
       </div>
       <button class="btn-submit" id="btn-tc" onclick="submitBaseline('tc')">
         <span>▶</span> Run Test Case Adequacy Review
@@ -668,7 +668,7 @@
 </div>
 
 <div class="footer">
-  AutoQA · Anthropic LangGraph · FastAPI &nbsp;·&nbsp; <a href="/docs" style="color:var(--amber-dim);text-decoration:none">API Docs</a>
+  QAAI · Anthropic LangGraph · FastAPI &nbsp;·&nbsp; <a id="docs-link" href="guide/" style="color:var(--amber-dim);text-decoration:none">Documentation</a> &nbsp;·&nbsp; <a id="api-docs-link" href="/docs" style="color:var(--amber-dim);text-decoration:none">API Docs</a>
 </div>
 
 <script>
@@ -695,9 +695,13 @@
 
   // Global constant used by all fetch() calls
   const ROOT_PATH = detectRootPath();
-  
+
   // Log the detected path for debugging
-  console.log('AutoQA detected root path:', ROOT_PATH || '(local mode)');
+  console.log('QAAI detected root path:', ROOT_PATH || '(local mode)');
+
+  // Footer links are root-path-aware (work locally and behind the JupyterHub proxy).
+  document.getElementById('docs-link').href = ROOT_PATH + '/guide/';
+  document.getElementById('api-docs-link').href = ROOT_PATH + '/docs';
 
   let activeCard = null;
 

@@ -3,7 +3,7 @@ Centralized logging configuration for FastAPI application.
 
 Sets up three separate log files in a timestamped run directory:
 - api.log: FastAPI/Uvicorn logs (requests, middleware, health checks)
-- qaai.log: AutoQA application logs (services, reviews, cache, telemetry)
+- qaai.log: QAAI application logs (services, reviews, cache, telemetry)
 - pyjama.log: PyJama/JAMA integration logs
 """
 
@@ -54,7 +54,7 @@ def create_timestamped_run_directory(base_logs_dir: str = "./logs") -> Path:
 # Loggers this module owns. setup_logging() detaches and re-attaches handlers
 # for exactly these names so it is safe to call repeatedly (once at startup and
 # again at the start of every review request) without duplicating handlers.
-# "projectlog.pyjama_api" is the pyjama package's real logger name — AutoQA owns
+# "projectlog.pyjama_api" is the pyjama package's real logger name — QAAI owns
 # its single pyjama.log FileHandler (the data_integration boundary shim stops
 # pyjama from attaching its own / creating a second run folder).
 _MANAGED_LOGGERS = ("qaai.api", "qaai", "projectlog.pyjama_api", "uvicorn", "uvicorn.access")
@@ -156,7 +156,7 @@ def setup_logging(run_dir: Path) -> None:
     api_logger.addHandler(api_console_handler)
     
     # =========================================================================
-    # AutoQA Logger: qaai.* (except qaai.api.*)
+    # QAAI Logger: qaai.* (except qaai.api.*)
     # =========================================================================
     qaai_logger = logging.getLogger("qaai")
     qaai_logger.setLevel(logging.DEBUG)
@@ -177,7 +177,7 @@ def setup_logging(run_dir: Path) -> None:
     
     # =========================================================================
     # PyJama Logger: projectlog.pyjama_api (the pyjama package's real logger)
-    # AutoQA owns this single FileHandler; the data_integration boundary shim
+    # QAAI owns this single FileHandler; the data_integration boundary shim
     # neutralizes pyjama's own ProjectLogger so lines aren't duplicated.
     # =========================================================================
     pyjama_logger = logging.getLogger("projectlog.pyjama_api")
@@ -240,12 +240,12 @@ def setup_logging(run_dir: Path) -> None:
     # =========================================================================
     startup_logger = logging.getLogger("qaai.api.main")
     startup_logger.info("=" * 80)
-    startup_logger.info("AutoQA API Startup - Logging Initialized")
+    startup_logger.info("QAAI API Startup - Logging Initialized")
     startup_logger.info("=" * 80)
     startup_logger.info("Run directory: %s", run_dir)
     startup_logger.info("Log files:")
     startup_logger.info("  - API logs: %s/api.log", run_dir)
-    startup_logger.info("  - AutoQA logs: %s/qaai.log", run_dir)
+    startup_logger.info("  - QAAI logs: %s/qaai.log", run_dir)
     startup_logger.info("  - PyJama logs: %s/pyjama.log", run_dir)
     startup_logger.info("=" * 80)
 

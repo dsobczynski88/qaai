@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
     # max_tokens handles large outputs (100+ test cases) without truncation.
     model_kwargs = {"max_tokens": settings.max_output_tokens}
 
-    logger.info("Initializing AutoQA services...")
+    logger.info("Initializing QAAI services...")
     logger.info("Model: %s", settings.model)
     logger.info("API Base URL: %s", settings.url or "default (OpenAI)")
     logger.info("Max requests per minute: %s", settings.max_requests_per_minute)
@@ -134,10 +134,10 @@ async def lifespan(app: FastAPI):
     # never sees a multi-minute idle request and can't return a 504.
     app.state.job_manager = JobManager()
 
-    logger.info("AutoQA services initialized successfully")
+    logger.info("QAAI services initialized successfully")
     yield
 
-    logger.info("Shutting down AutoQA services...")
+    logger.info("Shutting down QAAI services...")
     telemetry_tracker.log_summary()
 
 
@@ -157,8 +157,8 @@ def create_app() -> FastAPI:
     is_production = environment == "production"
 
     app = FastAPI(
-        title="AutoQA Reviewer API",
-        version="0.2.0",
+        title="QAAI Reviewer API",
+        version="0.1.0",
         lifespan=lifespan,
         docs_url="/docs" if not is_production else None,
         redoc_url="/redoc" if not is_production else None,
@@ -182,12 +182,18 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
 
+    # Serve the repo-root docs/ HTML guide at /guide (before the "/" catch-all so it
+    # wins). Guarded: an installed deploy without docs/ simply skips the mount.
+    docs_dir = Path(__file__).resolve().parents[2] / "docs"
+    if docs_dir.is_dir():
+        app.mount("/guide", StaticFiles(directory=str(docs_dir), html=True), name="guide")
+
     # Must be mounted AFTER the API router so API routes take precedence.
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     os.makedirs(static_dir, exist_ok=True)
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
-    logger.info("AutoQA API created (environment: %s)", environment)
+    logger.info("QAAI API created (environment: %s)", environment)
     return app
 
 

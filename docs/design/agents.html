@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AutoQA · Reviewer Agent Design</title>
+<title>QAAI · Reviewer Agent Design</title>
 <style>
   :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
     --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--maxw:880px}
@@ -65,11 +65,11 @@
 <main>
 <header class="doc">
   <h1>Reviewer Agent Design</h1>
-  <div class="meta">AutoQA (qaai-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-08</div>
 </header>
 
 <h2 id="overview">Overview</h2>
-<p>AutoQA implements three independent LangGraph reviewers, each a compiled async
+<p>QAAI implements three independent LangGraph reviewers, each a compiled async
 pipeline that emits a structured, SoP-gating rubric with a binary Yes/No verdict:</p>
 <table>
 <thead><tr><th>Reviewer</th><th>Package</th><th>Rubric</th><th>Output model</th></tr></thead>
@@ -175,11 +175,11 @@ response rather than raising, so a missing upstream field shows up as a node tha
 "skips" in the logs, not a crash.</p>
 
 <h2 id="cache">Cache manager system</h2>
-<p><code>ReviewCacheManager</code> is a 3-tier write-through cache shared by all reviewers
-<span class="src">qaai/core/cache.py</span>: Tier 2 = Redis (optional, 24&nbsp;h TTL),
-Tier 3 = disk JSON at <code>{cache_dir}/{entity_id}/{node}_{prompt_version}.json</code>.
-Key = <code>review:{entity_id}:{node}:{prompt_version}</code>. <code>get()</code> checks
-Redis → disk (backfilling Redis on a disk hit); <code>set()</code> writes disk then Redis.</p>
+<p><code>ReviewCacheManager</code> is a write-through cache on disk, shared by all reviewers
+<span class="src">qaai/core/cache.py</span>: each per-node result is persisted as JSON at
+<code>{cache_dir}/{entity_id}/{node}_{prompt_version}.json</code>, keyed
+<code>review:{entity_id}:{node}:{prompt_version}</code>. See the
+<a href="caching.html">Caching design doc</a> for the full layout and payload schema.</p>
 <p>Caching is governed per node by <code>cache_mode</code> threaded through state
 <span class="src">shared/nodes.py:122-137</span>: <code>off</code> disables reads+writes;
 <code>partial</code> (default) caches interim nodes but always re-runs nodes flagged
@@ -228,11 +228,11 @@ per role so a whole bundle can be swapped via the <code>PROMPT_SET</code> env va
 <tr><td>Subgraph embedding</td><td><code>RequirementReviewerNode</code> <span class="src">hazard_risk_reviewer/nodes.py:241-360</span></td><td>Reuse the entire RTM pipeline per traced requirement.</td></tr>
 <tr><td>Soft-fail nodes</td><td><code>_validate_state</code> / dispatchers returning <code>[]</code></td><td>Missing upstream data degrades to a skip, not a crash.</td></tr>
 <tr><td>Factory functions</td><td><code>make_*_node(...)</code></td><td>Inject client/model/prompt + cache wiring consistently.</td></tr>
-<tr><td>3-tier write-through cache</td><td><code>ReviewCacheManager</code> <span class="src">core/cache.py</span></td><td>Hot Redis + durable disk evidence; graceful degradation.</td></tr>
+<tr><td>Write-through cache</td><td><code>ReviewCacheManager</code> <span class="src">core/cache.py</span></td><td>Durable disk JSON as regulatory evidence; prompt-version-keyed invalidation.</td></tr>
 <tr><td>Versioned prompt registry</td><td><code>qaai/prompts</code> + <code>_registry.py</code></td><td>Reproducible prompts; version is the cache-invalidation key.</td></tr>
 </tbody></table>
 
-<footer class="doc">Generated from the AutoQA codebase on 2026-06-08. · <a href="../index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-06-08. · <a href="../index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

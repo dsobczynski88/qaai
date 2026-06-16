@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AutoQA · Test Suite Reviewer (RTM) Design</title>
+<title>QAAI · Test Suite Reviewer (RTM) Design</title>
 <style>
   :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
     --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--maxw:880px}
@@ -63,7 +63,7 @@
 <main>
 <header class="doc">
   <h1>Test Suite Reviewer (RTM)</h1>
-  <div class="meta">AutoQA (qaai) · <code>qaai.agents.test_suite_reviewer</code> · endpoint <code>POST /api/v1/test-suite-review</code> · generated from the codebase 2026-06-14</div>
+  <div class="meta">QAAI (qaai) · <code>qaai.agents.test_suite_reviewer</code> · endpoint <code>POST /api/v1/test-suite-review</code> · generated from the codebase 2026-06-14</div>
 </header>
 
 <h2 id="purpose">What it checks &amp; how</h2>
@@ -155,8 +155,8 @@ The assessment also carries up-to-two-sentence <code>comments</code> and targete
 <code>clarification_questions</code>. <span class="src">test_suite_reviewer/core.py</span></p>
 
 <h2 id="cache">Caching &amp; prompt sets</h2>
-<p>Every interim node opts into the shared 3-tier <code>ReviewCacheManager</code>
-(Redis + disk), partitioned by <code>req_id</code>. Under <code>partial</code> (the
+<p>Every interim node opts into the shared write-through <code>ReviewCacheManager</code>
+(on disk), partitioned by <code>req_id</code>. Under <code>partial</code> (the
 default), interim nodes are cached but the final synthesizer always re-runs for a
 fresh assessment.</p>
 <div class="note"><strong>Prompt sets &amp; the edge-case toggle.</strong> The API
@@ -175,7 +175,7 @@ per request.</div>
 rendered from <code>outputs.jsonl</code>, one record per requirement, showing the
 M1–M5 + R6 rubric, the decomposed specs, and the inlined test cases.</p>
 
-<footer class="doc">Generated from the AutoQA (qaai) codebase on 2026-06-14.</footer>
+<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-06-14.</footer>
 </main>
 </div>
 </body>

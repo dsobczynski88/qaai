@@ -11,9 +11,9 @@ import pytest
 
 from qaai.agents.shared import data_integration as di
 from qaai.agents.shared.core import (
-    DesignDocument as AutoqaDesignDocument,
-    Requirement as AutoqaRequirement,
-    TestCase as AutoqaTestCase,
+    DesignDocument as QaaiDesignDocument,
+    Requirement as QaaiRequirement,
+    TestCase as QaaiTestCase,
 )
 from qaai.agents.test_suite_reviewer.core import TestSuite
 
@@ -65,17 +65,17 @@ def test_test_suite_transform_returns_qaai_models():
     assert len(states) == 1
     entry = states[0]
 
-    assert isinstance(entry["requirement"], AutoqaRequirement)
+    assert isinstance(entry["requirement"], QaaiRequirement)
     assert entry["requirement"].req_id == "REQ-PUMP-101"
 
     tcs = entry["test_cases"]
-    assert tcs and all(isinstance(tc, AutoqaTestCase) for tc in tcs)
+    assert tcs and all(isinstance(tc, QaaiTestCase) for tc in tcs)
     # pyjama's in_review_baseline=False must map onto qaai's in_baseline.
     assert tcs[0].in_baseline is False
     assert tcs[0].test_id == "TC-PUMP-201"
 
     dds = entry["design_docs"]
-    assert dds and all(isinstance(dd, AutoqaDesignDocument) for dd in dds)
+    assert dds and all(isinstance(dd, QaaiDesignDocument) for dd in dds)
 
     # The crux: TestSuite (qaai) must accept these without a model_type error
     # (summary is unrelated to the bug; an empty list satisfies the field).
@@ -89,18 +89,18 @@ def test_test_case_transform_returns_qaai_models():
     assert len(states) == 1
     entry = states[0]
 
-    assert isinstance(entry["test_case"], AutoqaTestCase)
+    assert isinstance(entry["test_case"], QaaiTestCase)
     assert entry["test_case"].in_baseline is True
-    assert all(isinstance(r, AutoqaRequirement) for r in entry["requirements"])
+    assert all(isinstance(r, QaaiRequirement) for r in entry["requirements"])
     assert entry["requirements"][0].req_id == "REQ-PUMP-101"
 
 
 def test_coerce_helper_is_idempotent_on_qaai_entry():
     entry = {
-        "requirement": AutoqaRequirement(req_id="REQ-1", text="t"),
-        "test_cases": [AutoqaTestCase(test_id="TC-1", description="d", in_baseline=True)],
+        "requirement": QaaiRequirement(req_id="REQ-1", text="t"),
+        "test_cases": [QaaiTestCase(test_id="TC-1", description="d", in_baseline=True)],
         "design_docs": [],
     }
     out = di._coerce_state_models_to_qaai(entry)
-    assert isinstance(out["requirement"], AutoqaRequirement)
+    assert isinstance(out["requirement"], QaaiRequirement)
     assert out["test_cases"][0].in_baseline is True

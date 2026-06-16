@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AutoQA · Documentation</title>
+<title>QAAI · Documentation</title>
 <style>
   :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;--code-bg:#f6f8fa;--maxw:760px}
   @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;--line:#222a33;--accent:#6ea8ff;--code-bg:#161b22}}
@@ -23,10 +23,10 @@
 </head>
 <body>
 <main>
-<h1>AutoQA Documentation</h1>
+<h1>QAAI Documentation</h1>
 <div class="meta">AI-assisted Design History File reviewer (FDA / IEC 62304 / ISO 14971) · generated from the codebase 2026-06-08</div>
 
-<p>AutoQA exposes three LangGraph reviewer pipelines — Test Suite (RTM), Test Case, and
+<p>QAAI exposes three LangGraph reviewer pipelines — Test Suite (RTM), Test Case, and
 Hazard Risk — behind a FastAPI app. These documents are self-contained HTML, generated
 from and grounded in the current codebase.</p>
 
@@ -42,6 +42,9 @@ from and grounded in the current codebase.</p>
 <a class="card" href="design/agents.html"><h2>Design · Reviewer Agents (overview)</h2>
 <p>How each LangGraph reviewer is built — topology, the shared node engine, cache manager, logging, viewers, prompts, and design patterns.</p></a>
 
+<a class="card" href="design/caching.html"><h2>Design · Caching</h2>
+<p>The shared review cache: disk layout, cache keys, per-run cache modes, prompt-set namespacing, and version-driven invalidation.</p></a>
+
 <a class="card" href="design/test_suite_reviewer.html"><h2>Design · Test Suite Reviewer (RTM)</h2>
 <p>Detailed design: inputs, node-by-node walkthrough, graph diagram, the M1–M5 + R6 rubric, verdict logic, and the edge-case prompt-set toggle.</p></a>
 
@@ -51,7 +54,7 @@ from and grounded in the current codebase.</p>
 <a class="card" href="design/hazard_risk_reviewer.html"><h2>Design · Hazard Risk Reviewer</h2>
 <p>Detailed design: inputs, the staged H1–H7 graph, the embedded RTM subgraph, the rubric, and the deterministic verdict.</p></a>
 
-<footer>Generated from the AutoQA codebase on 2026-06-14.</footer>
+<footer>Generated from the QAAI codebase on 2026-06-14.</footer>
 </main>
 </body>
 </html>

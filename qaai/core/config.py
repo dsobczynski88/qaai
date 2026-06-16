@@ -165,7 +165,7 @@ settings = Settings()
 
 # Debug logging
 logger.info("=" * 60)
-logger.info("AutoQA Configuration Loaded")
+logger.info("QAAI Configuration Loaded")
 logger.info("=" * 60)
 logger.info("OpenAI API Key: %s", settings.openai_api_key[:20] + "..." if settings.openai_api_key else "NOT SET")
 logger.info("Model: %s", settings.model)

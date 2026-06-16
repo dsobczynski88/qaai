@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AutoQA · API Server &amp; Frontend Guide</title>
+<title>QAAI · API Server &amp; Frontend Guide</title>
 <style>
   :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
     --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--bad:#b22;--maxw:860px}
@@ -62,10 +62,10 @@
 <main>
 <header class="doc">
   <h1>API Server &amp; Frontend Guide</h1>
-  <div class="meta">AutoQA (qaai-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-08</div>
 </header>
 
-<p>AutoQA exposes three LangGraph reviewers behind a FastAPI app
+<p>QAAI exposes three LangGraph reviewers behind a FastAPI app
 (<code>qaai.api.main:app</code>). Every review runs as an <strong>asynchronous
 background job</strong> and returns a self-contained HTML viewer once complete.</p>
 
@@ -76,8 +76,8 @@ background job</strong> and returns a self-contained HTML viewer once complete.<
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)</code></pre>
 <p>Look for these log lines confirming services initialized in the <code>lifespan</code>
 context manager <span class="src">qaai/api/main.py:58-145</span>:</p>
-<pre><code>AutoQA services initialized successfully
-AutoQA API created (environment: development)</code></pre>
+<pre><code>QAAI services initialized successfully
+QAAI API created (environment: development)</code></pre>
 <p>The <code>--reload</code> flag is development-only. The factory is
 <code>create_app()</code> <span class="src">qaai/api/main.py:147-194</span>, which
 adds request-logging + body-size-limit middleware, conditional CORS, and GZip.</p>
@@ -240,7 +240,7 @@ directory by the shared <code>_run_batch_review</code> helper
 <tr><td><code>API_MODEL</code></td><td>Yes</td><td>Model name (e.g. <code>gpt-4o-mini</code>)</td></tr>
 <tr><td><code>JAMA_HOST_ADDRESS</code> / <code>JAMA_CLIENT_ID</code> / <code>JAMA_CLIENT_SECRET</code></td><td>No</td><td>JAMA OAuth (needed only for baseline reviews)</td></tr>
 <tr><td><code>PYJAMA_TEST_MODE</code></td><td>No</td><td>Cache-only JAMA (default <code>false</code>)</td></tr>
-<tr><td><code>ENABLE_CACHE</code> / <code>CACHE_DIR</code> / <code>REDIS_URL</code></td><td>No</td><td>Review cache (see configuration.html)</td></tr>
+<tr><td><code>ENABLE_CACHE</code> / <code>CACHE_DIR</code></td><td>No</td><td>Review cache (see configuration.html)</td></tr>
 <tr><td><code>PROMPT_SET</code></td><td>No</td><td>Named prompt set to load</td></tr>
 <tr><td><code>ALLOWED_ORIGINS</code></td><td>No</td><td>CORS origins (default <code>*</code>)</td></tr>
 <tr><td><code>ENVIRONMENT</code></td><td>No</td><td><code>development</code>/<code>production</code> (prod hides API docs)</td></tr>
@@ -267,13 +267,13 @@ metrics <span class="src">qaai/core/telemetry.py</span>.</p>
 <div class="note warn"><strong>Run a single worker.</strong> The async job registry is
 in-memory <span class="src">qaai/api/jobs.py</span>, so a <code>job_id</code> created on
 one worker is invisible to another. Keep <code>--workers 1</code> until the registry moves
-to a shared backend (Redis is already a dependency).</div>
+to a shared backend.</div>
 <pre><code>gunicorn qaai.api.main:app \
   --workers 1 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000</code></pre>
 
-<footer class="doc">Generated from the AutoQA codebase on 2026-06-08. Code examples that
+<footer class="doc">Generated from the QAAI codebase on 2026-06-08. Code examples that
 reference <code>http://localhost:8000</code> are sample commands, not external resources.
 · <a href="index.html">Docs home</a></footer>
 </main>
