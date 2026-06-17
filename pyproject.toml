@@ -1,6 +1,6 @@
 [project]
 name = "qaai"
-version = "0.1.0"
+version = "1.0.0"
 description = "Design Quality AI-Assisted DHF Reviewer - AI system for enhancing software quality review processes"
 authors = [
     {name = "Daniel Sobczynski", email = "daniel_sobczynski@baxter.com"},
