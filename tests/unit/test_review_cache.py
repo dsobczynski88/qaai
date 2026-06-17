@@ -11,16 +11,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import BaseModel
 
-from autoqa.core.cache import ReviewCacheManager, _sanitize
-from autoqa.components.shared.nodes import StandardLLMNode
-from autoqa.components.shared.core import DecomposedSpec, Requirement, TestCase
-from autoqa.components.test_suite_reviewer.core import EvaluatedSpec, TestSuite
-from autoqa.components.test_suite_reviewer.nodes import (
+from qaai.core.cache import ReviewCacheManager, _sanitize
+from qaai.agents.shared.nodes import StandardLLMNode
+from qaai.agents.shared.core import DecomposedSpec, Requirement, TestCase
+from qaai.agents.test_suite_reviewer.core import EvaluatedSpec, TestSuite
+from qaai.agents.test_suite_reviewer.nodes import (
     SingleSpecEvaluatorNode,
     dispatch_coverage as rtm_dispatch_coverage,
 )
-from autoqa.components.test_case_reviewer.core import SpecAnalysis
-from autoqa.components.test_case_reviewer.nodes import (
+from qaai.agents.test_case_reviewer.core import SpecAnalysis
+from qaai.agents.test_case_reviewer.nodes import (
     SingleSpecCoverageNode,
     dispatch_coverage as tc_dispatch_coverage,
 )
@@ -107,6 +107,78 @@ async def test_version_bump_is_a_miss(cache):
     await cache.set("REQ-1", "n", "v1.0.0", {"value": "hi"}, 0, 0, "m")
     assert await cache.get("REQ-1", "n", "v1.0.0") is not None
     assert await cache.get("REQ-1", "n", "v2.0.0") is None
+
+
+async def test_prompt_set_namespaces_cache(cache, tmp_path):
+    """Two prompt sets sharing entity/node/version never alias; each lands in its
+    own subfolder and an un-namespaced read still misses."""
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v3"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3",
+    )
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v4"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v4",
+    )
+    # Per-set subfolders under the entity, not a single clobbered file
+    assert (tmp_path / "REQ-1" / "test_suite_reviewer_v3" / "coverage_evaluator_v8.0.0.json").exists()
+    assert (tmp_path / "REQ-1" / "test_suite_reviewer_v4" / "coverage_evaluator_v8.0.0.json").exists()
+
+    v3 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v3")
+    v4 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4")
+    assert v3["result"] == {"value": "v3"}
+    assert v4["result"] == {"value": "v4"}
+    # The set name is recorded in the entry meta (regulatory provenance)
+    assert v3["meta"]["prompt_set"] == "test_suite_reviewer_v3"
+    assert v4["meta"]["prompt_set"] == "test_suite_reviewer_v4"
+
+    # An un-namespaced read does not pick up a namespaced entry
+    assert await cache.get("REQ-1", "coverage_evaluator", "v8.0.0") is None
+
+
+async def test_purge_entity_removes_only_that_entity(cache, tmp_path):
+    await cache.set("REQ-1", "decomposernode", "v1.0.0", {"value": "a"}, 0, 0, "m")
+    await cache.set("REQ-1", "synthesizer", "v8.0.0", {"value": "b"}, 0, 0, "m")
+    await cache.set("REQ-2", "decomposernode", "v1.0.0", {"value": "c"}, 0, 0, "m")
+
+    await cache.purge_entity("REQ-1")
+
+    assert not (tmp_path / "REQ-1").exists()
+    assert await cache.get("REQ-1", "decomposernode", "v1.0.0") is None
+    assert await cache.get("REQ-1", "synthesizer", "v8.0.0") is None
+    # The other entity is untouched
+    assert await cache.get("REQ-2", "decomposernode", "v1.0.0") is not None
+
+
+async def test_purge_entity_scoped_to_prompt_set(cache, tmp_path):
+    """purge_entity(prompt_set=...) drops only that set's namespace, leaving the
+    other set and the legacy un-namespaced entry intact."""
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v3"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3",
+    )
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v4"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v4",
+    )
+    await cache.set("REQ-1", "decomposernode", "v1.0.0", {"value": "base"}, 0, 0, "m")
+
+    await cache.purge_entity("REQ-1", "test_suite_reviewer_v3")
+
+    assert not (tmp_path / "REQ-1" / "test_suite_reviewer_v3").exists()
+    assert await cache.get(
+        "REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v3"
+    ) is None
+    # The other set and the un-namespaced entry survive
+    assert await cache.get(
+        "REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4"
+    ) is not None
+    assert await cache.get("REQ-1", "decomposernode", "v1.0.0") is not None
+
+
+async def test_purge_missing_entity_is_noop(cache):
+    # Purging an entity that was never cached must not raise.
+    await cache.purge_entity("REQ-DOES-NOT-EXIST")
 
 
 async def test_entity_and_node_name_sanitized(cache, tmp_path):
@@ -259,7 +331,7 @@ async def test_rtm_per_spec_off_mode_no_cache(cache, tmp_path):
 
 
 async def test_rtm_per_spec_payload_includes_summarized_designs():
-    from autoqa.components.test_suite_reviewer.core import SummarizedDesignSpec
+    from qaai.agents.test_suite_reviewer.core import SummarizedDesignSpec
 
     node, client = _make_rtm_spec_node(cache=None)  # no cache → always calls LLM
     state = _rtm_spec_state("S1", cache_mode="off")
@@ -318,7 +390,7 @@ async def test_tc_per_spec_caches_under_test_id(cache, tmp_path):
 
 
 def test_rtm_dispatch_propagates_cache_mode():
-    from autoqa.components.test_suite_reviewer.core import DecomposedRequirement
+    from qaai.agents.test_suite_reviewer.core import DecomposedRequirement
 
     req = Requirement(req_id="REQ-1", text="x")
     specs = [
@@ -336,7 +408,7 @@ def test_rtm_dispatch_propagates_cache_mode():
 
 
 def test_rtm_dispatch_propagates_summarized_designs():
-    from autoqa.components.test_suite_reviewer.core import (
+    from qaai.agents.test_suite_reviewer.core import (
         DecomposedRequirement,
         SummarizedDesignSpec,
     )
@@ -374,7 +446,7 @@ def test_rtm_dispatch_propagates_summarized_designs():
 
 
 def test_tc_dispatch_propagates_cache_mode():
-    from autoqa.components.test_case_reviewer.core import DecomposedRequirement
+    from qaai.agents.test_case_reviewer.core import DecomposedRequirement
 
     req = Requirement(req_id="REQ-1", text="x")
     specs = [DecomposedSpec(spec_id="S1", description="d", acceptance_criteria="a", rationale="r")]
@@ -393,7 +465,7 @@ def test_tc_dispatch_propagates_cache_mode():
 
 
 def test_rtm_runnable_stores_cache_manager(cache):
-    from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
+    from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 
     client = make_counting_client("{}")
     rtm = RTMReviewerRunnable(client, "m", cache_manager=cache)
@@ -404,7 +476,7 @@ def test_hazard_embedded_rtm_is_uncached(cache):
     """The hazard reviewer's own nodes share the cache, but its embedded
     test-suite subgraph must NOT self-cache — its result is cached as one
     blob per requirement by RequirementReviewerNode instead."""
-    from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
+    from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 
     client = make_counting_client("{}")
     hz = HazardReviewerRunnable(client, "m", cache_manager=cache)

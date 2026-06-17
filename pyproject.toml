@@ -1,6 +1,6 @@
 [project]
-name = "autoqa"
-version = "0.1.0"
+name = "qaai"
+version = "1.0.0"
 description = "Design Quality AI-Assisted DHF Reviewer - AI system for enhancing software quality review processes"
 authors = [
     {name = "Daniel Sobczynski", email = "daniel_sobczynski@baxter.com"},
@@ -56,7 +56,7 @@ python_classes = []
 pyjama = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git", branch = "main" }
 
 [project.scripts]
-autoqa-api = "autoqa.api.run:main"
+qaai-api = "qaai.api.run:main"
 
 # Declaring a build system allows uv to install your project editably during sync.
 # This does not publish anything by itself; it just makes local imports work cleanly.

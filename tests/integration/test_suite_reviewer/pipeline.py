@@ -6,9 +6,9 @@ rows can be re-run with -k <req_id>.
 """
 import pytest
 
-from autoqa.core.config import settings
-from autoqa.components.test_suite_reviewer.pipeline import RTMReviewerRunnable
-from autoqa.components.test_suite_reviewer.core import (
+from qaai.core.config import settings
+from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
+from qaai.agents.test_suite_reviewer.core import (
     Requirement, TestCase, DesignDocument, DecomposedRequirement,
     TestSuite, EvaluatedSpec, SynthesizedAssessment,
 )

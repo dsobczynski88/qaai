@@ -18,7 +18,7 @@ import pytest
 
 def test_hazard_review_state_has_pyjama_request():
     """Verify HazardReviewState includes pyjama_request field."""
-    from autoqa.components.hazard_risk_reviewer.core import HazardReviewState
+    from qaai.agents.hazard_risk_reviewer.core import HazardReviewState
     
     # Check that HazardReviewState TypedDict has pyjama_request
     annotations = HazardReviewState.__annotations__
@@ -34,7 +34,7 @@ def test_hazard_review_state_has_pyjama_request():
 
 def test_data_integration_node_factory():
     """Verify DataIntegrationNode can be instantiated directly."""
-    from autoqa.components.shared.data_integration import DataIntegrationNode
+    from qaai.agents.shared.data_integration import DataIntegrationNode
 
     node = DataIntegrationNode(pyjama_config=None)
     assert isinstance(node, DataIntegrationNode), \
@@ -45,8 +45,8 @@ def test_data_integration_node_factory():
 
 def test_hazard_reviewer_runnable_has_data_integration():
     """Verify HazardReviewerRunnable graph includes data_integration node."""
-    from autoqa.components.clients import RateLimitOpenAIClient
-    from autoqa.components.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
+    from qaai.agents.clients import RateLimitOpenAIClient
+    from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
     import os
     
     # Create minimal client
@@ -68,13 +68,13 @@ def test_hazard_reviewer_runnable_has_data_integration():
 @pytest.mark.asyncio
 async def test_data_integration_node_local_mode():
     """Verify DataIntegrationNode passes through local mode (no pyjama_request)."""
-    from autoqa.components.shared.data_integration import DataIntegrationNode
-    from autoqa.components.hazard_risk_reviewer.core import HazardReviewState, HazardRecord
-    
+    from qaai.agents.shared.data_integration import DataIntegrationNode
+    from qaai.agents.hazard_risk_reviewer.core import HazardReviewState, HazardRowFromExcel
+
     node = DataIntegrationNode(pyjama_config=None)
-    
+
     # Create test state with no pyjama_request (local mode)
-    hazard = HazardRecord(
+    hazard = HazardRowFromExcel(
         hazard_id="H001",
         hazardous_situation_id="HS001",
         hazard="Test hazard",
@@ -118,7 +118,7 @@ async def test_data_integration_node_local_mode():
 
 def test_transform_hazard_record_to_state_signature():
     """Verify transform_hazard_record_to_state has correct signature."""
-    from autoqa.components.shared.data_integration import transform_hazard_record_to_state
+    from qaai.agents.shared.data_integration import transform_hazard_record_to_state
     import inspect
     
     sig = inspect.signature(transform_hazard_record_to_state)
@@ -127,7 +127,7 @@ def test_transform_hazard_record_to_state_signature():
     assert "excel_file_path" in params
     assert "pyjama_response_file_path" in params
     assert "output_jsonl_path" in params
-    assert "graph_runnable" in params
+    assert "sheet_name" in params
     
     print("✓ transform_hazard_record_to_state has correct signature")
 
@@ -179,11 +179,12 @@ def test_excel_fixture_format():
     except Exception as e:
         pytest.fail(f"Failed to read Excel fixture: {e}")
     
-    # Check for key columns
+    # Check for key columns (headers as stored in the SHA fixture; the loader
+    # strips header whitespace and maps these via HazardRowFromExcel aliases)
     columns_to_check = [
-        "SHA \nID Number",
-        "Hazard ",
-        "Risk Control Measures:\n\nInherent Safety by Design and Manufacture:\nProtective Measures:\nInformation for Safety:",
+        "SHA ID Number",
+        "Hazard",
+        "Risk Control Measures",
     ]
     
     for col in columns_to_check:

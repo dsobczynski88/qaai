@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 from unittest.mock import MagicMock, AsyncMock
 from pydantic import BaseModel
-from autoqa.components.clients import RateLimitOpenAIClient
+from qaai.agents.clients import RateLimitOpenAIClient
 
 def resolve_fixture_path(fixture_name: str) -> Path:
     """Resolve a fixture filename to a concrete path under tests/fixtures/.

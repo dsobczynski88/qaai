@@ -11,24 +11,24 @@ load_dotenv()
 
 from httpx import AsyncClient, ASGITransport
 
-from autoqa.core.config import settings
-from autoqa.core.telemetry import TokenUsageTracker
+from qaai.core.config import settings
+from qaai.core.telemetry import TokenUsageTracker
 
 # All test-run artifacts (logs, JSONL records, telemetry, viewers, graph pngs) go
 # under logs/tests/ to keep them separate from production/API-server runs under
-# logs/. Setting this BEFORE importing autoqa.api.main (below) ensures both the
+# logs/. Setting this BEFORE importing qaai.api.main (below) ensures both the
 # import-time create_app() and every start_new_run() resolve to logs/tests.
 settings.log_base_dir = "./logs/tests"
 
-from autoqa.components.clients import (
+from qaai.agents.clients import (
     RateLimitOpenAIClient
 )
 
-from autoqa.components.hazard_risk_reviewer.core import (
+from qaai.agents.hazard_risk_reviewer.core import (
     HazardRowWithTraceMatrix
 )
 
-from autoqa.components.test_suite_reviewer.core import (
+from qaai.agents.test_suite_reviewer.core import (
     Requirement,
     TestCase,
     DecomposedSpec,
@@ -39,7 +39,7 @@ from autoqa.components.test_suite_reviewer.core import (
     DesignDocument,
 )
 
-from autoqa.api.main import app, lifespan
+from qaai.api.main import app, lifespan
 
 from tests.helpers import load_jsonl, resolve_fixture_path
 
@@ -121,12 +121,12 @@ def test_run_dir():
 
     Calls start_new_run() (base resolves to settings.log_base_dir = ./logs/tests),
     which also wires setup_logging() so node/app logs land in this folder's
-    autoqa.log — mirroring how the API produces one folder per review batch. Only
+    qaai.log — mirroring how the API produces one folder per review batch. Only
     integration tests depend on this (via token_tracker / jsonl_recorders), so API
     tests don't get an extra session folder — they get the per-request folder that
     the service's own start_new_run() creates.
     """
-    from autoqa.core.logging_config import start_new_run
+    from qaai.core.logging_config import start_new_run
 
     return start_new_run()
 
@@ -137,7 +137,7 @@ def token_tracker(test_run_dir):
 
     Accumulates prompt/completion tokens and simulated cost across all
     integration tests in the session. Calls log_summary() at teardown so
-    the totals appear in autoqa.log and are written to token_usage.jsonl.
+    the totals appear in qaai.log and are written to token_usage.jsonl.
 
     file_path=None ⇒ the tracker resolves its target from settings.telemetry_file_path
     (re-pointed into test_run_dir by start_new_run). Cost rates are read from
@@ -310,11 +310,11 @@ def _load_hazard_fixture(
     excel_file / pyjama_file are fixture filenames resolved across
     tests/fixtures/{local,external,...} via resolve_fixture_path.
     """
-    from autoqa.components.hazard_risk_reviewer.loader import (
+    from qaai.agents.hazard_risk_reviewer.loader import (
         parse_sha_excel,
         merge_hazard_with_pyjama_traceability,
     )
-    from autoqa.components.hazard_risk_reviewer.core import HazardTraceMatrix
+    from qaai.agents.hazard_risk_reviewer.core import HazardTraceMatrix
 
     excel_results = parse_sha_excel(
         file_path=str(resolve_fixture_path(excel_file)),
@@ -398,7 +398,7 @@ def _recorder_fixture(viewer_fn: str, label: str):
         yield record_input, record_output
 
         try:
-            mod = importlib.import_module("autoqa.viewer.generator")
+            mod = importlib.import_module("qaai.viewer.generator")
             out = getattr(mod, viewer_fn)(outputs_path)
         except Exception as exc:
             print(f"\n[{label}] skipped: {exc}")

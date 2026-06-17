@@ -28,10 +28,8 @@ tests/fixtures/generated/*
 !tests/fixtures/generated/.gitkeep
 
 # mlflow
-tests/fixtures/mlflow_eval/*
-!tests/fixtures/mlflow_eval/.gitkeep
-tests/fixtures/mlflow_eval_quick/*
-!tests/fixtures/mlflow_eval_quick/.gitkeep
+tests/fixtures/mlflow/*
+!tests/fixtures/mlflow/.gitkeep
 mlflow.db
 mlruns/
 

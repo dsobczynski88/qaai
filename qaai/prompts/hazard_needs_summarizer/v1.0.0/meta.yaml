@@ -1,0 +1,18 @@
+role: hazard_needs_summarizer
+version: v1.0.0
+component: hazard_risk_reviewer
+authored: '2025-01-15'
+status: published
+parent_version: null
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: HazardSummarizedUserNeedList
+target_models:
+- gpt-4o-mini
+- gpt-4o
+- claude-3-5-haiku-20241022
+- claude-3-5-sonnet-20241022
+changelog: |
+  Initial release. Summarizes user needs for hazard objective evaluation in 
+  hazard_risk_reviewer. Focuses on user goals, safety context, and hazard 
+  traceability per IEC 62366-1.

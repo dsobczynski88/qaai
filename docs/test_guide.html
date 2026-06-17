@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AutoQA · Test Guide</title>
+<title>QAAI · Test Guide</title>
 <style>
   :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
     --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--maxw:860px}
@@ -57,7 +57,7 @@
 <main>
 <header class="doc">
   <h1>Test Guide</h1>
-  <div class="meta">AutoQA (autoqa-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-08</div>
 </header>
 
 <p>This guide covers how to set up, install, and run the test suites under
@@ -65,7 +65,7 @@
 test uses, and how to run the tests against your own custom input files.</p>
 
 <h2 id="setup">Setup &amp; install</h2>
-<p>AutoQA uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>
+<p>QAAI uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>
 <span class="src">pyproject.toml:9</span>.</p>
 <pre><code>uv sync --frozen        # install locked dependencies (incl. pyjama-fastapi from git)</code></pre>
 <p>pytest configuration <span class="src">pyproject.toml:44-48</span>:
@@ -82,7 +82,7 @@ PYTEST_MODEL=gpt-4o-mini</code></pre>
 rejects any <code>PYTEST_BASE_URL</code> containing the string <code>"prod"</code> to prevent
 accidental production charges <span class="src">tests/conftest.py:167-172</span>.</div>
 <p>Test runs are isolated from server runs: logs are written under <code>logs/tests/</code>
-(set via <code>settings.log_base_dir</code> before <code>autoqa.api.main</code> is imported)
+(set via <code>settings.log_base_dir</code> before <code>qaai.api.main</code> is imported)
 <span class="src">tests/conftest.py:21</span>.</p>
 
 <h2 id="running">Running the suites</h2>
@@ -209,11 +209,11 @@ Per session, under <code>logs/tests/run-&lt;timestamp&gt;/</code>:</p>
 <ul>
 <li><code>inputs.jsonl</code> / <code>outputs.jsonl</code> — recorded records</li>
 <li><code>viewer.html</code> / <code>viewer_tc.html</code> / <code>viewer_hz.html</code> — generated viewer</li>
-<li><code>autoqa.log</code> — node/app logs for the run</li>
+<li><code>qaai.log</code> — node/app logs for the run</li>
 <li><code>hazard_pipeline_state.json</code> — full hazard graph state (hazard test only)</li>
 </ul>
 
-<footer class="doc">Generated from the AutoQA codebase on 2026-06-08. · <a href="index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-06-08. · <a href="index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

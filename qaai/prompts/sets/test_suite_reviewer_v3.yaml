@@ -1,0 +1,17 @@
+name: test_suite_reviewer_v3
+component: test_suite_reviewer
+description: |
+  Baseline stack (no edge-case analysis). Selected when the "Include Edge Case
+  Analysis" toggle is OFF. Uses the baseline decomposer v5.0.0 (no dedicated
+  edge-case decomposition); the edge-case stack lives in test_suite_reviewer_v4
+  (decomposer v6.0.0).
+  Uses decomposer v5, summarizer v4, coverage v8, synthesizer v8, design_summarizer v1.
+prompts:
+  decomposer: v5.0.0
+  summarizer: v4.0.0
+  coverage: v8.0.0
+  synthesizer: v8.0.0
+  design_summarizer: v1.0.0
+status: experimental
+authored: "2026-06-06"
+parent_set: test_suite_reviewer_v2

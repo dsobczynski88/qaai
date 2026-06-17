@@ -1,0 +1,21 @@
+role: hazard_final_assessor
+version: v1.0.0
+component: hazard_risk_reviewer
+authored: '2026-05-12'
+status: published
+parent_version: null
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: HazardAssessment
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Initial migration from flat structure.
+rubric:
+- H1
+- H2
+- H3
+- H4
+- H5
+- H6
+- H7

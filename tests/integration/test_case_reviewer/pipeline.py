@@ -6,14 +6,14 @@ rows can be re-run with -k <test_id>.
 """
 import pytest
 
-from autoqa.components.test_case_reviewer.pipeline import TCReviewerRunnable
-from autoqa.components.test_case_reviewer.core import (
+from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
+from qaai.agents.test_case_reviewer.core import (
     Requirement,
     TestCase,
     DesignDocument,
     TestCaseAssessment,
 )
-from autoqa.components.test_case_reviewer.nodes import load_default_review_objectives
+from qaai.agents.test_case_reviewer.nodes import load_default_review_objectives
 from tests.helpers import serialize_state
 
 
