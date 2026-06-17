@@ -221,24 +221,27 @@ curl -X POST http://localhost:8000/api/v1/test-case-review \
 
 ### Hazard Risk Reviewer — `POST /api/v1/hazard-risk-review`
 
-Accepts a **multipart upload** of an SHA Excel file and submits the H1-H7 review job for every hazard row. Runs with Excel-derived data only (no JAMA traceability). A sample SHA workbook lives at `tests/fixtures/external/software_hazard_analysis.xlsx`. Retrieve the report via the [Asynchronous job flow](#asynchronous-job-flow).
+Accepts a **multipart upload** of an SHA Excel file and submits the H1-H7 review job for every hazard row. For each row, the identifiers found in the *Risk Control Measures* column (matched against `identifier_pattern`) drive a JAMA `bidirectional_trace` fetch that merges the per-requirement traceability (requirements, test cases, design docs, user needs) onto the hazard; rows with no matching identifiers fall back to an Excel-only (empty traceability) review. With `test_mode=true` that fetch is served strictly from `./cache/source/identifiers/`, so no live JAMA call is made. A sample SHA workbook lives at `tests/fixtures/external/software_hazard_analysis.xlsx` — its RCM column references requirements as `REQ-PUMP-101 … REQ-PUMP-112`, so pass `identifier_pattern=REQ-PUMP-\d+`. Retrieve the report via the [Asynchronous job flow](#asynchronous-job-flow).
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
-  -F "project_name=Infusion Pump" \
+  -F "project_name=Patient Safety Platform" \
   -F "file=@tests/fixtures/external/software_hazard_analysis.xlsx" \
   -F "sheet_name=SHA Table" \
+  -F "identifier_pattern=REQ-PUMP-\d+" \
+  -F "test_mode=true" \
   -F "use_cache=true"
 # → 202 {"job_id": "...", "status": "pending"}
 ```
 
-| Form field     | Type   | Required | Default     | Description                                            |
-| -------------- | ------ | -------- | ----------- | ------------------------------------------------------ |
-| `project_name` | string | Yes      | —           | Project or product name                                |
-| `file`         | file   | Yes      | —           | SHA Excel file (`.xlsx`/`.xls`) containing the hazard table |
-| `sheet_name`   | string | No       | `SHA Table` | Worksheet holding the hazard table                     |
-| `use_cache`    | bool   | No       | `true`      | Partial caching (`true`) vs recompute from scratch (`false`) |
-| `test_mode`    | bool   | No       | `null`      | Cache-only JAMA (no live calls); `null` uses the server's `PYJAMA_TEST_MODE` |
+| Form field          | Type   | Required | Default     | Description                                            |
+| ------------------- | ------ | -------- | ----------- | ------------------------------------------------------ |
+| `project_name`      | string | Yes      | —           | Jama project name (only validated non-empty in `test_mode`; the sample data lives under `Patient Safety Platform`) |
+| `file`              | file   | Yes      | —           | SHA Excel file (`.xlsx`/`.xls`) containing the hazard table |
+| `sheet_name`        | string | No       | `SHA Table` | Worksheet holding the hazard table                     |
+| `identifier_pattern`| string | No       | `GID-\d+`   | Regex for identifiers in the Risk Control Measures column; use `REQ-PUMP-\d+` for the sample workbook |
+| `use_cache`         | bool   | No       | `true`      | Partial caching (`true`) vs recompute from scratch (`false`) |
+| `test_mode`         | bool   | No       | `null`      | Cache-only JAMA (no live calls); `null` uses the server's `PYJAMA_TEST_MODE` |
 
 H5 (Verification Depth and Hazard-Path Effectiveness) is the only finding that may be `N-A` — it applies when `software_related_causes` indicates no software cause. H1-H4, H6, and H7 always resolve to `Yes` or `No`.
 

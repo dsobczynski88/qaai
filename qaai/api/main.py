@@ -74,8 +74,12 @@ async def lifespan(app: FastAPI):
         telemetry_tracker=telemetry_tracker,
     )
 
+
     # max_tokens handles large outputs (100+ test cases) without truncation.
-    model_kwargs = {"max_tokens": settings.max_output_tokens}
+    if settings.model in ["gpt-5.4-mini"]:
+        settings.model_kwargs.update({"max_completion_tokens": settings.max_output_tokens})
+    else:
+        settings.model_kwargs.update({"max_tokens": settings.max_output_tokens})
 
     logger.info("Initializing QAAI services...")
     logger.info("Model: %s", settings.model)
@@ -105,7 +109,7 @@ async def lifespan(app: FastAPI):
     app.state.rtm_service = RTMReviewService(
         client,
         settings.model,
-        model_kwargs=model_kwargs,
+        model_kwargs=settings.model_kwargs,
         pyjama_config=pyjama_config,
         cache_manager=cache_manager,
     )
@@ -115,14 +119,14 @@ async def lifespan(app: FastAPI):
         # Intentional: pass model_kwargs (max_tokens) here too, so the hazard
         # graphs and their embedded RTM respect max_output_tokens like the RTM/TC
         # services do (avoids truncating large completions). Do not drop this.
-        model_kwargs=model_kwargs,
+        model_kwargs=settings.model_kwargs,
         pyjama_config=pyjama_config,
         cache_manager=cache_manager,
     )
     app.state.test_case_service = TestCaseReviewService(
         client=client,
         model=settings.model,
-        model_kwargs=model_kwargs,
+        model_kwargs=settings.model_kwargs,
         pyjama_config=pyjama_config,
         cache_manager=cache_manager,
     )

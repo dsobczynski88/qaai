@@ -236,18 +236,19 @@ class HazardReviewService:
 
     @staticmethod
     def _build_bidirectional_request(project_name: str, identifiers: List[str]):
-        """Build a forward-looking bidirectional_trace PyJamaRequest.
+        """Build a bidirectional_trace PyJamaRequest from a hazard row's controls.
 
-        Aligns the hazard reviewer with the pyjama bidirectional_trace example:
-        the hazard row's control references become the JAMA identifiers, and the
-        graph's data_integration + transform nodes fetch and merge the
-        per-requirement traceability onto the hazard.
+        The hazard row's control references (extracted from the Risk Control
+        Measures column via the identifier_pattern / extract_gids_format knob)
+        become the JAMA identifiers, and the graph's data_integration + transform
+        nodes fetch and merge the per-requirement traceability onto the hazard.
 
-        The installed pyjama 1.0.0 does NOT expose request_type
-        "bidirectional_trace" (its PyJamaRequest Literal only allows
-        test_suite_review / test_case_review / hierarchical_trace), so this is
-        capability-gated: it raises a clear error until pyjama is upgraded. It is
-        never reached from the default Excel flow (run_from_excel_upload).
+        Reached from run_from_excel_upload for every row that yields at least one
+        identifier. The installed pyjama exposes request_type "bidirectional_trace"
+        (its PyJamaRequest Literal includes it); the try/except below still guards
+        older pyjama builds whose Literal lacks it. In test_mode the fetch is
+        served strictly from ./cache/source/identifiers/ keyed by identifier, so
+        project_name only needs to be non-empty there.
         """
         from qaai.agents.shared.data_integration import PyJamaRequest, PYJAMA_AVAILABLE
 
@@ -259,7 +260,7 @@ class HazardReviewService:
                 project_name=project_name,
                 identifiers=identifiers,
             )
-        except Exception as e:  # ValidationError on installed pyjama 1.0.0
+        except Exception as e:  # ValidationError on older pyjama builds without bidirectional_trace
             raise ValueError(
                 "request_type='bidirectional_trace' is not supported by the installed "
                 "pyjama version. Upgrade pyjama-fastapi to a release that exposes "
@@ -267,7 +268,11 @@ class HazardReviewService:
             ) from e
 
     def _parse_uploaded_excel(
-        self, file_bytes: bytes, filename: str, sheet_name: str
+        self,
+        file_bytes: bytes,
+        filename: str,
+        sheet_name: str,
+        extract_gids_format: str = "GID-\\d+",
     ) -> List[HazardRowWithTraceMatrix]:
         from qaai.agents.hazard_risk_reviewer.loader import parse_sha_excel
         from qaai.agents.hazard_risk_reviewer.core import HazardTraceMatrix
@@ -277,7 +282,9 @@ class HazardReviewService:
             tmp_path = tmp.name
 
         try:
-            rows = parse_sha_excel(tmp_path, sheet_name=sheet_name).rows
+            rows = parse_sha_excel(
+                tmp_path, sheet_name=sheet_name, extract_gids_format=extract_gids_format
+            ).rows
             if not rows:
                 raise ValueError(f"No hazard rows found in sheet '{sheet_name}' of '{filename}'")
             self._logger.info("Found %d hazard rows in %s", len(rows), filename)
@@ -307,16 +314,20 @@ class HazardReviewService:
         cache_mode: str = "partial",
         test_mode: Optional[bool] = None,
         prompt_set: str = PROMPT_SET_BASELINE,
+        extract_gids_format: str = "GID-\\d+",
     ) -> str:
         """Parse an uploaded SHA Excel file and run the hazard graph for every row.
 
-        Per row, the GIDs extracted into ``row_specific_controls_references`` plus
-        the project name drive a JAMA ``bidirectional_trace`` fetch, which the
-        graph's data_integration + transform nodes merge onto the hazard's
-        ``requirements_traceability``. Rows with no GIDs fall back to the
-        Excel-only (empty traceability) path. ``test_mode`` (None ⇒ config
-        default) runs that fetch cache-only with no live JAMA API calls.
-        ``prompt_set`` selects the v3/v4 stack for the embedded RTM subgraph.
+        Per row, the identifiers extracted into ``row_specific_controls_references``
+        (matched against ``extract_gids_format`` in the Risk Control Measures
+        column) plus the project name drive a JAMA ``bidirectional_trace`` fetch,
+        which the graph's data_integration + transform nodes merge onto the
+        hazard's ``requirements_traceability``. Rows with no matching identifiers
+        fall back to the Excel-only (empty traceability) path. ``test_mode``
+        (None ⇒ config default) runs that fetch cache-only with no live JAMA API
+        calls. ``prompt_set`` selects the v3/v4 stack for the embedded RTM
+        subgraph. ``extract_gids_format`` defaults to the production ``GID-\\d+``
+        scheme; pass e.g. ``REQ-PUMP-\\d+`` for the sample SHA workbook.
         """
         from qaai.viewer.generator import write_viewer_hz
         from qaai.core.logging_config import start_new_run
@@ -332,7 +343,9 @@ class HazardReviewService:
             "Starting upload hazard review: %s (project=%s, test_mode=%s)",
             filename, project_name, test_mode,
         )
-        hazard_rows = self._parse_uploaded_excel(file_bytes, filename, sheet_name)
+        hazard_rows = self._parse_uploaded_excel(
+            file_bytes, filename, sheet_name, extract_gids_format=extract_gids_format
+        )
 
         def _hazard_thread_id(i, hazard_row):
             return (

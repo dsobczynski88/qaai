@@ -112,6 +112,7 @@ async def hazard_risk_review(
     project_name: str = Form(..., description="Project or product name"),
     file: UploadFile = File(..., description="SHA Excel file (.xlsx) containing the hazard table"),
     sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
+    identifier_pattern: str = Form(default="GID-\\d+", description="Regex for control/requirement identifiers in the Risk Control Measures column; use 'REQ-PUMP-\\d+' for the sample workbook"),
     use_cache: bool = Form(default=True, description="Reuse cached intermediate results (partial caching); disable to recompute from scratch"),
     test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
     include_edge_case_analysis: bool = Form(default=False, description="Use the edge-case prompt set (test_suite_reviewer_v4) for the embedded RTM subgraph; default uses the baseline set (v3)"),
@@ -146,6 +147,7 @@ async def hazard_risk_review(
             cache_mode="partial" if use_cache else "off",
             test_mode=effective_test_mode,
             prompt_set=prompt_set,
+            extract_gids_format=identifier_pattern,
         ),
         "qaai_hazard_review.html",
     )

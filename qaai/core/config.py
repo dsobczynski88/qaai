@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(..., alias='API_KEY')
     url: Union[str, None] = Field(default=None, alias='API_BASE_URL')
     model: str = Field(..., alias='API_MODEL')
+    model_kwargs: dict = {}
     max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
