@@ -2,9 +2,10 @@ role: hazard_h6
 version: v1.0.0
 component: hazard_risk_reviewer
 authored: '2026-05-12'
+content_sha256: 2fe940c0f07788b3
 status: published
 parent_version: null
-author: qaai-team
+author: autoqa-team
 required_template_vars: []
 output_pydantic_model: H6Finding
 target_models:

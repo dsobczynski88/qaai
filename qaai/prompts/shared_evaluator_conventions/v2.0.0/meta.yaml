@@ -1,0 +1,13 @@
+role: shared_evaluator_conventions
+version: v2.0.0
+component: hazard_risk_reviewer
+authored: '2026-06-17'
+status: published
+parent_version: null
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: null
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Revised to be less stringent.
