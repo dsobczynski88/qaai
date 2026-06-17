@@ -17,6 +17,7 @@ Disk path:  {cache_dir}/{entity_id}/{node_name}_{prompt_version}.json
 import json
 import logging
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -197,6 +198,40 @@ class ReviewCacheManager:
                 await self._redis.set(redis_key, raw, ex=self._REDIS_TTL)
             except Exception as e:
                 logger.warning("ReviewCacheManager: Redis write failed — %s", e)
+
+    async def purge_entity(
+        self, entity_id: str, prompt_set: Optional[str] = None
+    ) -> None:
+        """Remove an entity's cached entries so a failed/incomplete run is never reused.
+
+        When ``prompt_set`` is supplied only that set's namespace is dropped
+        (``{cache_dir}/{entity_id}/{prompt_set}/`` and ``review:{entity_id}:{prompt_set}:*``),
+        leaving other sets and the legacy un-namespaced entries intact. When it is
+        None the whole ``{cache_dir}/{entity_id}/`` folder (and ``review:{entity_id}:*``)
+        is removed. Best-effort on both tiers — errors are logged, never raised.
+        """
+        safe_id = _sanitize(entity_id)
+
+        # --- Tier 3: Disk ---
+        target = self.cache_dir / safe_id
+        if prompt_set:
+            target = target / _sanitize(prompt_set)
+        try:
+            shutil.rmtree(target, ignore_errors=True)
+            logger.info("Cache PURGE (disk): %s", target)
+        except Exception as e:  # pragma: no cover - rmtree already swallows most
+            logger.warning("ReviewCacheManager: disk purge failed for %s — %s", target, e)
+
+        # --- Tier 2: Redis (delete keys by prefix) ---
+        if self._redis is not None:
+            prefix = (
+                f"review:{entity_id}:{prompt_set}:" if prompt_set else f"review:{entity_id}:"
+            )
+            try:
+                async for key in self._redis.scan_iter(match=f"{prefix}*"):
+                    await self._redis.delete(key)
+            except Exception as e:
+                logger.warning("ReviewCacheManager: Redis purge failed — %s", e)
 
     # ------------------------------------------------------------------
     # Static helpers (usable without an instance)

@@ -559,6 +559,24 @@
         height: 14px;
         cursor: pointer;
       }
+      /* Cache-mode radio group: a vertical stack of options with a heading row. */
+      .cache-radio {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+      .cache-radio-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .cache-radio-title {
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      .cache-radio .cache-check {
+        padding-left: 2px;
+      }
       .cache-info {
         display: inline-flex;
         align-items: center;
@@ -614,17 +632,28 @@
               autocomplete="off"
             />
           </div>
-          <div class="cache-toggle">
+          <div class="cache-toggle cache-radio">
+            <div class="cache-radio-head">
+              <span class="cache-radio-title">Cache mode</span>
+              <span
+                class="cache-info"
+                tabindex="0"
+                title="'Use results to update cache' (default): reuse cached interim analysis, regenerate the final assessment fresh, and save all results to the cache. 'Use cached results': reuse everything in the cache including the final assessment. 'Off': recompute everything and save nothing. Results from a run that errors or comes out incomplete are purged, never reused."
+                >i</span
+              >
+            </div>
             <label class="cache-check">
-              <input type="checkbox" id="rtm-cache" checked />
+              <input type="radio" name="rtm-cache" value="partial" checked />
+              <span>Use results to update cache</span>
+            </label>
+            <label class="cache-check">
+              <input type="radio" name="rtm-cache" value="full" />
               <span>Use cached results</span>
             </label>
-            <span
-              class="cache-info"
-              tabindex="0"
-              title="When enabled, all intermediate analysis is reused from cache and only the final assessment is regenerated (partial caching). Inside a hazard analysis the embedded test-suite review is fully cached. Disable to recompute everything from scratch."
-              >i</span
-            >
+            <label class="cache-check">
+              <input type="radio" name="rtm-cache" value="off" />
+              <span>Off (recompute, don't cache)</span>
+            </label>
           </div>
           <div class="cache-toggle">
             <label class="cache-check">
@@ -678,17 +707,28 @@
               autocomplete="off"
             />
           </div>
-          <div class="cache-toggle">
+          <div class="cache-toggle cache-radio">
+            <div class="cache-radio-head">
+              <span class="cache-radio-title">Cache mode</span>
+              <span
+                class="cache-info"
+                tabindex="0"
+                title="'Use results to update cache' (default): reuse cached interim analysis, regenerate the final assessment fresh, and save all results to the cache. 'Use cached results': reuse everything in the cache including the final assessment. 'Off': recompute everything and save nothing. Results from a run that errors or comes out incomplete are purged, never reused."
+                >i</span
+              >
+            </div>
             <label class="cache-check">
-              <input type="checkbox" id="tc-cache" checked />
+              <input type="radio" name="tc-cache" value="partial" checked />
+              <span>Use results to update cache</span>
+            </label>
+            <label class="cache-check">
+              <input type="radio" name="tc-cache" value="full" />
               <span>Use cached results</span>
             </label>
-            <span
-              class="cache-info"
-              tabindex="0"
-              title="When enabled, all intermediate analysis is reused from cache and only the final assessment is regenerated (partial caching). Disable to recompute everything from scratch."
-              >i</span
-            >
+            <label class="cache-check">
+              <input type="radio" name="tc-cache" value="off" />
+              <span>Off (recompute, don't cache)</span>
+            </label>
           </div>
           <div class="cache-toggle">
             <label class="cache-check">
@@ -759,17 +799,28 @@
               autocomplete="off"
             />
           </div>
-          <div class="cache-toggle">
+          <div class="cache-toggle cache-radio">
+            <div class="cache-radio-head">
+              <span class="cache-radio-title">Cache mode</span>
+              <span
+                class="cache-info"
+                tabindex="0"
+                title="'Use results to update cache' (default): reuse cached interim analysis (H1–H7, summarizers, embedded per-requirement test-suite review), regenerate the final hazard assessment fresh, and save all results to the cache. 'Use cached results': reuse everything in the cache including the final hazard assessment. 'Off': recompute everything and save nothing. Results from a hazard row that errors or comes out incomplete are purged, never reused."
+                >i</span
+              >
+            </div>
             <label class="cache-check">
-              <input type="checkbox" id="hz-cache" checked />
+              <input type="radio" name="hz-cache" value="partial" checked />
+              <span>Use results to update cache</span>
+            </label>
+            <label class="cache-check">
+              <input type="radio" name="hz-cache" value="full" />
               <span>Use cached results</span>
             </label>
-            <span
-              class="cache-info"
-              tabindex="0"
-              title="When enabled, all intermediate analysis (H1–H7, summarizers, and the embedded test-suite review per requirement) is reused from cache and only the final hazard assessment is regenerated (partial caching). The embedded test-suite review is fully cached. Disable to recompute everything from scratch."
-              >i</span
-            >
+            <label class="cache-check">
+              <input type="radio" name="hz-cache" value="off" />
+              <span>Off (recompute, don't cache)</span>
+            </label>
           </div>
           <div class="cache-toggle">
             <label class="cache-check">
@@ -1010,7 +1061,9 @@
         const baseline = document
           .getElementById(type + "-baseline")
           .value.trim();
-        const useCache = document.getElementById(type + "-cache").checked;
+        const cacheMode = document.querySelector(
+          'input[name="' + type + '-cache"]:checked',
+        ).value;
         const testMode = document.getElementById(type + "-test-mode").checked;
         // Edge-case toggle only applies to the RTM (test-suite) review.
         const edgeCase =
@@ -1036,7 +1089,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               baseline_id: baseline,
-              use_cache: useCache,
+              cache_mode: cacheMode,
               test_mode: testMode,
               include_edge_case_analysis: edgeCase,
             }),
@@ -1052,7 +1105,9 @@
         const project = document.getElementById("hz-project").value.trim();
         const sheet =
           document.getElementById("hz-sheet").value.trim() || "SHA Table";
-        const useCache = document.getElementById("hz-cache").checked;
+        const cacheMode = document.querySelector(
+          'input[name="hz-cache"]:checked',
+        ).value;
         const testMode = document.getElementById("hz-test-mode").checked;
         const edgeCase =
           document.getElementById("hz-edge-case")?.checked || false;
@@ -1071,7 +1126,7 @@
         form.append("project_name", project);
         form.append("file", fileInput.files[0]);
         form.append("sheet_name", sheet);
-        form.append("use_cache", useCache);
+        form.append("cache_mode", cacheMode);
         form.append("test_mode", testMode);
         form.append("include_edge_case_analysis", edgeCase);
 

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -6,12 +6,21 @@ from pydantic import BaseModel, Field
 class BaselineRequest(BaseModel):
     """Request body for baseline-driven review endpoints."""
     baseline_id: str = Field(..., description="JAMA baseline ID, e.g. 'BASE-84429'")
+    cache_mode: Optional[Literal["off", "partial", "full"]] = Field(
+        default=None,
+        description=(
+            "Explicit cache mode (the UI radio toggle). 'off' = no cache read or "
+            "write; 'partial' = reuse cached interim analysis but regenerate the "
+            "final assessment fresh (Use results to update cache); 'full' = reuse "
+            "everything including the final assessment (Use cached results). When "
+            "omitted, falls back to the legacy 'use_cache' boolean."
+        ),
+    )
     use_cache: bool = Field(
         default=True,
         description=(
-            "Reuse cached intermediate results. When enabled the final "
-            "assessment is still regenerated fresh (partial caching). Disable "
-            "to recompute everything from scratch."
+            "Deprecated, kept for backward compatibility. Ignored when 'cache_mode' "
+            "is set. True maps to 'partial', False to 'off'."
         ),
     )
     test_mode: Optional[bool] = Field(

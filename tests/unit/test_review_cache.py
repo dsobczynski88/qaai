@@ -136,6 +136,51 @@ async def test_prompt_set_namespaces_cache(cache, tmp_path):
     assert await cache.get("REQ-1", "coverage_evaluator", "v8.0.0") is None
 
 
+async def test_purge_entity_removes_only_that_entity(cache, tmp_path):
+    await cache.set("REQ-1", "decomposernode", "v1.0.0", {"value": "a"}, 0, 0, "m")
+    await cache.set("REQ-1", "synthesizer", "v8.0.0", {"value": "b"}, 0, 0, "m")
+    await cache.set("REQ-2", "decomposernode", "v1.0.0", {"value": "c"}, 0, 0, "m")
+
+    await cache.purge_entity("REQ-1")
+
+    assert not (tmp_path / "REQ-1").exists()
+    assert await cache.get("REQ-1", "decomposernode", "v1.0.0") is None
+    assert await cache.get("REQ-1", "synthesizer", "v8.0.0") is None
+    # The other entity is untouched
+    assert await cache.get("REQ-2", "decomposernode", "v1.0.0") is not None
+
+
+async def test_purge_entity_scoped_to_prompt_set(cache, tmp_path):
+    """purge_entity(prompt_set=...) drops only that set's namespace, leaving the
+    other set and the legacy un-namespaced entry intact."""
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v3"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3",
+    )
+    await cache.set(
+        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v4"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v4",
+    )
+    await cache.set("REQ-1", "decomposernode", "v1.0.0", {"value": "base"}, 0, 0, "m")
+
+    await cache.purge_entity("REQ-1", "test_suite_reviewer_v3")
+
+    assert not (tmp_path / "REQ-1" / "test_suite_reviewer_v3").exists()
+    assert await cache.get(
+        "REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v3"
+    ) is None
+    # The other set and the un-namespaced entry survive
+    assert await cache.get(
+        "REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4"
+    ) is not None
+    assert await cache.get("REQ-1", "decomposernode", "v1.0.0") is not None
+
+
+async def test_purge_missing_entity_is_noop(cache):
+    # Purging an entity that was never cached must not raise.
+    await cache.purge_entity("REQ-DOES-NOT-EXIST")
+
+
 async def test_entity_and_node_name_sanitized(cache, tmp_path):
     await cache.set("REQ/1:x", "node spec/1", "v1.0.0", {"value": "a"}, 0, 0, "m")
     files = list(tmp_path.rglob("*.json"))

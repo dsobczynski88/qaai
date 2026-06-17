@@ -122,6 +122,84 @@ async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
     assert rec["cache_mode"] == "partial"
 
 
+# --- explicit cache_mode (the UI radio) → forwarded verbatim -----------------
+
+@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+async def test_test_suite_explicit_cache_mode_forwarded(submit_and_wait, dummy_html, mode):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
+        rec["cache_mode"] = cache_mode
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/test-suite-review", json={"baseline_id": "B", "cache_mode": mode}
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["cache_mode"] == mode
+
+
+@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+async def test_test_case_explicit_cache_mode_forwarded(submit_and_wait, dummy_html, mode):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
+        rec["cache_mode"] = cache_mode
+        return dummy_html
+
+    app.state.test_case_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/test-case-review", json={"baseline_id": "B", "cache_mode": mode}
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["cache_mode"] == mode
+
+
+@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+async def test_hazard_explicit_cache_mode_forwarded(submit_and_wait, dummy_html, mode):
+    rec = {}
+
+    async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
+                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+"):
+        rec["cache_mode"] = cache_mode
+        return dummy_html
+
+    app.state.hazard_service.run_from_excel_upload = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/hazard-risk-review",
+        files={"file": ("h.xlsx", b"binary", "application/vnd.ms-excel")},
+        data={"project_name": "P", "cache_mode": mode},
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["cache_mode"] == mode
+
+
+async def test_explicit_cache_mode_overrides_use_cache(submit_and_wait, dummy_html):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3"):
+        rec["cache_mode"] = cache_mode
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    # use_cache=False alone would map to "off", but an explicit cache_mode wins.
+    resp = await submit_and_wait(
+        "/api/v1/test-suite-review",
+        json={"baseline_id": "B", "use_cache": False, "cache_mode": "full"},
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["cache_mode"] == "full"
+
+
 @pytest.mark.parametrize("sent,expected", [(True, True), (False, False)])
 async def test_test_suite_test_mode_propagates(submit_and_wait, dummy_html, sent, expected):
     rec = {}

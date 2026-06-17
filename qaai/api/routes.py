@@ -35,6 +35,14 @@ get_test_case_service = _make_service_dep("test_case_service", "test case servic
 get_job_manager = _make_service_dep("job_manager", "job manager")
 
 
+def _resolve_cache_mode(cache_mode: str | None, use_cache: bool) -> str:
+    """Prefer the explicit cache_mode (UI radio); fall back to the legacy boolean.
+
+    use_cache True → "partial", False → "off"; ignored once cache_mode is set.
+    """
+    return cache_mode or ("partial" if use_cache else "off")
+
+
 @router.get("/health", tags=["System"])
 async def health_check(request: Request) -> dict[str, Any]:
     """Health check endpoint. Returns 200 when all services are initialized, 503 otherwise."""
@@ -70,7 +78,7 @@ async def test_suite_review(
     viewer.html with M1-M5 rubric results) when status is "completed". Requires
     JAMA credentials configured in the server's .env.
     """
-    cache_mode = "partial" if body.use_cache else "off"
+    cache_mode = _resolve_cache_mode(body.cache_mode, body.use_cache)
     test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
     prompt_set = resolve_prompt_set(body.include_edge_case_analysis)
 
@@ -96,7 +104,7 @@ async def test_case_review(
     download GET /jobs/{job_id}/result (viewer_tc.html, 5-objective checklist)
     when completed. Requires JAMA credentials configured in the server's .env.
     """
-    cache_mode = "partial" if body.use_cache else "off"
+    cache_mode = _resolve_cache_mode(body.cache_mode, body.use_cache)
     test_mode = body.test_mode if body.test_mode is not None else settings.pyjama_test_mode
 
     return _submit_with_job_id(
@@ -113,7 +121,8 @@ async def hazard_risk_review(
     file: UploadFile = File(..., description="SHA Excel file (.xlsx) containing the hazard table"),
     sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
     identifier_pattern: str = Form(default="GID-\\d+", description="Regex for control/requirement identifiers in the Risk Control Measures column; use 'REQ-PUMP-\\d+' for the sample workbook"),
-    use_cache: bool = Form(default=True, description="Reuse cached intermediate results (partial caching); disable to recompute from scratch"),
+    cache_mode: str | None = Form(default=None, description="Explicit cache mode (UI radio): 'off' | 'partial' (update cache, fresh final) | 'full' (reuse cached final). Omit to fall back to the legacy use_cache boolean."),
+    use_cache: bool = Form(default=True, description="Deprecated; ignored when cache_mode is set. True maps to 'partial', False to 'off'"),
     test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
     include_edge_case_analysis: bool = Form(default=False, description="Use the edge-case prompt set (test_suite_reviewer_v4) for the embedded RTM subgraph; default uses the baseline set (v3)"),
     service: HazardReviewService = Depends(get_hazard_service),
@@ -130,6 +139,7 @@ async def hazard_risk_review(
         raise HTTPException(status_code=400, detail="Uploaded file must be an Excel file (.xlsx or .xls)")
 
     effective_test_mode = test_mode if test_mode is not None else settings.pyjama_test_mode
+    resolved_cache_mode = _resolve_cache_mode(cache_mode, use_cache)
     # Read the upload now — the request/UploadFile is gone by the time the job runs.
     file_bytes = await file.read()
     filename = file.filename
@@ -144,7 +154,7 @@ async def hazard_risk_review(
             project_name=project_name,
             thread_id_prefix=job_id,
             sheet_name=sheet_name,
-            cache_mode="partial" if use_cache else "off",
+            cache_mode=resolved_cache_mode,
             test_mode=effective_test_mode,
             prompt_set=prompt_set,
             extract_gids_format=identifier_pattern,

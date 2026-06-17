@@ -199,10 +199,13 @@ curl -X POST http://localhost:8000/api/v1/test-suite-review \
 | Body field   | Type   | Required | Default | Description                                                              |
 | ------------ | ------ | -------- | ------- | ------------------------------------------------------------------------ |
 | `baseline_id`| string | Yes      | —       | JAMA baseline ID, e.g. `BASE-84429`                                      |
-| `use_cache`  | bool   | No       | `true`  | Reuse cached intermediate results (`partial`); set `false` to recompute (`off`) |
+| `cache_mode` | string | No       | `null`  | The UI cache-mode radio: `partial` ("Use results to update cache" — reuse interim analysis, regenerate the final assessment fresh, write all results), `full` ("Use cached results" — reuse everything incl. the final assessment), `off` (recompute, write nothing). `null` falls back to `use_cache` |
+| `use_cache`  | bool   | No       | `true`  | Deprecated; ignored when `cache_mode` is set. `true` → `partial`, `false` → `off` |
 | `test_mode`  | bool   | No       | `null`  | Cache-only JAMA — fetch the baseline from the disk cache only, no live JAMA calls. `null` falls back to the server's `PYJAMA_TEST_MODE` |
 
 Once the job completes, open the downloaded `viewer.html` in a browser to page through the M1-M5 + R6 rubric for every requirement.
+
+**Success-gated caching:** results are only kept in (and later reused from) the cache when the item's run finishes without error and produces a complete rubric. If a requirement/test-case/hazard row raises or comes out incomplete, its cache entries (scoped to the run's prompt set) are purged so a failed run is never reused, and one bad item no longer aborts the whole batch.
 
 ---
 
@@ -240,7 +243,8 @@ curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
 | `file`              | file   | Yes      | —           | SHA Excel file (`.xlsx`/`.xls`) containing the hazard table |
 | `sheet_name`        | string | No       | `SHA Table` | Worksheet holding the hazard table                     |
 | `identifier_pattern`| string | No       | `GID-\d+`   | Regex for identifiers in the Risk Control Measures column; use `REQ-PUMP-\d+` for the sample workbook |
-| `use_cache`         | bool   | No       | `true`      | Partial caching (`true`) vs recompute from scratch (`false`) |
+| `cache_mode`        | string | No       | `null`      | Cache-mode radio: `partial` (update cache, fresh final), `full` (reuse cached final), `off`. `null` falls back to `use_cache` |
+| `use_cache`         | bool   | No       | `true`      | Deprecated; ignored when `cache_mode` is set. `true` → `partial`, `false` → `off` |
 | `test_mode`         | bool   | No       | `null`      | Cache-only JAMA (no live calls); `null` uses the server's `PYJAMA_TEST_MODE` |
 
 H5 (Verification Depth and Hazard-Path Effectiveness) is the only finding that may be `N-A` — it applies when `software_related_causes` indicates no software cause. H1-H4, H6, and H7 always resolve to `Yes` or `No`.

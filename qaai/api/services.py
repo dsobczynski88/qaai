@@ -40,6 +40,48 @@ def _json_default(obj):
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def _field(obj, name):
+    """Read ``name`` from a Pydantic model or a plain dict (final states hold both)."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def rtm_is_complete(state: dict) -> bool:
+    """An RTM item is complete iff the synthesizer produced the full M1-M5+R6 rubric
+    on top of non-empty per-spec coverage (a soft-failed decomposer leaves coverage empty)."""
+    assessment = state.get("synthesized_assessment")
+    findings = _field(assessment, "mandatory_findings")
+    return (
+        assessment is not None
+        and isinstance(findings, list) and len(findings) == 6
+        and bool(state.get("coverage_analysis"))
+    )
+
+
+def tc_is_complete(state: dict) -> bool:
+    """A test-case item is complete iff the aggregator produced a non-empty checklist
+    over non-empty per-spec coverage."""
+    assessment = state.get("aggregated_assessment")
+    checklist = _field(assessment, "evaluated_checklist")
+    return (
+        assessment is not None
+        and isinstance(checklist, list) and len(checklist) > 0
+        and bool(state.get("coverage_analysis"))
+    )
+
+
+def hazard_is_complete(state: dict) -> bool:
+    """A hazard item is complete iff the final assessor produced the full H1-H7 rubric.
+    (requirement_reviews may legitimately be empty for non-software hazards, so it is
+    not required here.)"""
+    assessment = state.get("hazard_assessment")
+    findings = _field(assessment, "mandatory_findings")
+    return assessment is not None and isinstance(findings, list) and len(findings) == 7
+
+
 async def _run_batch_review(
     *,
     logger: logging.Logger,
@@ -50,6 +92,10 @@ async def _run_batch_review(
     graph_input_fn,
     viewer_writer,
     item_noun: str,
+    entity_id_fn=None,
+    is_complete_fn=None,
+    cache_manager=None,
+    prompt_set: Optional[str] = None,
 ) -> str:
     """Shared batch loop for the three reviewer services.
 
@@ -57,6 +103,13 @@ async def _run_batch_review(
     appending each final state to ``outputs.jsonl``, renders the viewer, and
     returns its path. The per-reviewer differences — thread-id source, graph
     input shape, and which ``write_viewer*`` to call — are injected as callables.
+
+    Success-gating (the "only cache results from clean runs" toggle): when
+    ``cache_manager`` + ``entity_id_fn`` are supplied, an item whose graph run
+    raises, or whose final state fails ``is_complete_fn``, has its cache entries
+    purged (scoped to ``prompt_set``) so a failed/incomplete run is never reused.
+    A hard error no longer aborts the whole batch — the item is skipped and the
+    remaining items still run; the job only fails if *nothing* produced output.
     """
     inputs_path = run_dir / INPUT_JSONL_FILENAME
     with inputs_path.open("w", encoding="utf-8") as f:
@@ -66,11 +119,48 @@ async def _run_batch_review(
     outputs_path = run_dir / OUTPUT_JSONL_FILENAME
     outputs_path.write_text("", encoding="utf-8")
 
+    async def _purge(i: int, item, reason: str) -> None:
+        if cache_manager is None or entity_id_fn is None:
+            return
+        entity_id = entity_id_fn(i, item)
+        if not entity_id:
+            return
+        logger.warning(
+            "Purging cache for %s %s (%s) — not reusable", item_noun, entity_id, reason
+        )
+        try:
+            await cache_manager.purge_entity(entity_id, prompt_set)
+        except Exception as exc:  # purge is best-effort
+            logger.warning("Cache purge failed for %s — %s", entity_id, exc)
+
     start = time.perf_counter()
+    succeeded = 0
+    failed = 0
     for i, item in enumerate(items):
         config = {"configurable": {"thread_id": thread_id_fn(i, item)}}
-        final_state = await graph.ainvoke(graph_input_fn(i, item), config)
-        logger.info("[%d/%d] Completed %s review", i + 1, len(items), item_noun)
+        try:
+            final_state = await graph.ainvoke(graph_input_fn(i, item), config)
+        except Exception as exc:
+            failed += 1
+            logger.error(
+                "[%d/%d] %s review errored, skipping item: %s",
+                i + 1, len(items), item_noun, exc, exc_info=True,
+            )
+            await _purge(i, item, "run errored")
+            continue
+
+        if is_complete_fn is not None and not is_complete_fn(final_state):
+            # Surface the (incomplete) result in the viewer, but never reuse it.
+            failed += 1
+            logger.warning(
+                "[%d/%d] %s review incomplete — recording output but purging cache",
+                i + 1, len(items), item_noun,
+            )
+            await _purge(i, item, "incomplete output")
+        else:
+            succeeded += 1
+            logger.info("[%d/%d] Completed %s review", i + 1, len(items), item_noun)
+
         with outputs_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(final_state, default=_json_default) + "\n")
 
@@ -80,8 +170,8 @@ async def _run_batch_review(
 
     elapsed = time.perf_counter() - start
     logger.info(
-        "Batch %s review complete: %d items in %.1fs, viewer at %s",
-        item_noun, len(items), elapsed, viewer_path,
+        "Batch %s review complete: %d items in %.1fs (%d clean, %d failed/incomplete), viewer at %s",
+        item_noun, len(items), elapsed, succeeded, failed, viewer_path,
     )
     return str(viewer_path)
 
@@ -107,6 +197,7 @@ class RTMReviewService:
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
+        self.cache_manager = cache_manager
         # One cache-enabled runnable per prompt set. Callers (lifespan) can inject
         # pre-built runnables; otherwise build the default v3/v4 pair here.
         self.graphs = rtm_runnables or {
@@ -183,6 +274,10 @@ class RTMReviewService:
             graph_input_fn=lambda _i, state_dict: {**state_dict, "cache_mode": cache_mode},
             viewer_writer=write_viewer,
             item_noun="requirement",
+            entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("requirement"), "req_id", None),
+            is_complete_fn=rtm_is_complete,
+            cache_manager=self.cache_manager,
+            prompt_set=prompt_set,
         )
 
 
@@ -207,6 +302,7 @@ class HazardReviewService:
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
+        self.cache_manager = cache_manager
         # One hazard graph per prompt set (v3/v4), each embedding its own
         # uncached RTM subgraph built from that set's prompt_config. The
         # embedded test-suite subgraph stays internally uncached — the
@@ -382,6 +478,10 @@ class HazardReviewService:
             graph_input_fn=_hazard_graph_input,
             viewer_writer=write_viewer_hz,
             item_noun="hazard",
+            entity_id_fn=lambda _i, hazard_row: getattr(hazard_row, "hazard_id", None),
+            is_complete_fn=hazard_is_complete,
+            cache_manager=self.cache_manager,
+            prompt_set=prompt_set,
         )
 
 
@@ -402,6 +502,7 @@ class TestCaseReviewService:
         cache_manager: Optional["ReviewCacheManager"] = None,
     ):
         self.pyjama_config = pyjama_config
+        self.cache_manager = cache_manager
         self.graph = TCReviewerRunnable(
             client, model, model_kwargs, checkpointer=MemorySaver(),
             pyjama_config=pyjama_config, cache_manager=cache_manager,
@@ -469,4 +570,8 @@ class TestCaseReviewService:
             },
             viewer_writer=write_viewer_tc,
             item_noun="test case",
+            entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("test_case"), "test_id", None),
+            is_complete_fn=tc_is_complete,
+            cache_manager=self.cache_manager,
+            prompt_set=None,  # test-case reviewer uses the default un-namespaced cache
         )
