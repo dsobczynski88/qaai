@@ -51,3 +51,17 @@ def test_log_script_close_tag_is_escaped():
     html = build_viewer(RECORDS, "src", "run", log_entries=log)
     assert "</script> text" not in html  # raw close tag escaped
     assert "<\\/script> text" in html
+
+
+def test_export_filename_embeds_review_type_and_run_key():
+    """Each viewer's Export builds feedback_{review_type}_{run_key}.json; the
+    {{REVIEW_TYPE}} placeholder must be substituted with the per-viewer label."""
+    cases = (
+        (build_viewer, "test_suite"),
+        (build_viewer_tc, "test_case"),
+        (build_viewer_hz, "hazard"),
+    )
+    for build, review_type in cases:
+        html = build(RECORDS, "src.jsonl", "run-2026-06-18_14-30-45")
+        assert "{{REVIEW_TYPE}}" not in html  # placeholder substituted
+        assert f"feedback_{review_type}_run-2026-06-18_14-30-45.json" in html

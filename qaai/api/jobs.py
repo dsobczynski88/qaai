@@ -35,6 +35,7 @@ PENDING = "pending"
 RUNNING = "running"
 COMPLETED = "completed"
 FAILED = "failed"
+CANCELLED = "cancelled"
 
 # Bound memory: keep at most this many jobs, evicting the oldest finished ones.
 _MAX_JOBS = 200
@@ -151,6 +152,17 @@ class JobManager:
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)
 
+    def cancel(self, job_id: str) -> bool:
+        """Request cancellation of a running/pending job. Returns True if a live
+        task was cancelled. The task surfaces asyncio.CancelledError in _run,
+        which marks the job CANCELLED."""
+        task = self._tasks.get(job_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        logger.info("Job %s cancellation requested", job_id)
+        return True
+
     async def _run(self, job: Job, coro_factory: CoroFactory) -> None:
         # The lock makes reviews run one at a time, preserving the per-run-folder
         # logging invariant. While queued, the job stays in PENDING.
@@ -159,6 +171,13 @@ class JobManager:
             logger.info("Job %s running", job.job_id)
             try:
                 result_path = await coro_factory(job)
+            except asyncio.CancelledError:
+                # User asked to stop the run (cancel & discard). Record a terminal
+                # state and swallow — no partial report is kept.
+                self._fail(job, "Run stopped by user.", 499)
+                self._set(job, CANCELLED)
+                logger.info("Job %s cancelled", job.job_id)
+                return
             except ValueError as exc:
                 # Bad input (e.g. unknown baseline) — surface the detail as a 400.
                 self._fail(job, str(exc), 400)

@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -193,6 +195,23 @@ async def get_job_status(
     return job.to_status_dict()
 
 
+@router.post("/jobs/{job_id}/cancel", tags=["Jobs"])
+async def cancel_job(
+    job_id: str,
+    job_manager: JobManager = Depends(get_job_manager),
+) -> dict[str, Any]:
+    """Request cancellation of a running/pending review job (Stop Run).
+
+    Cancels the background task; the run is discarded (no partial report).
+    404 if the job is unknown. Returns the job's current status.
+    """
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Unknown job_id: {job_id}")
+    cancelled = job_manager.cancel(job_id)
+    return {"job_id": job_id, "status": job.status, "cancelled": cancelled}
+
+
 @router.get("/jobs/{job_id}/result", tags=["Jobs"])
 async def get_job_result(
     job_id: str,
@@ -211,3 +230,36 @@ async def get_job_result(
     if job.status == FAILED:
         raise HTTPException(status_code=job.error_status, detail=job.error)
     raise HTTPException(status_code=425, detail="Job is still running")
+
+
+# Repo root: qaai/api/routes.py -> parents[2]. Mirrors ReviewCacheManager's anchor.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+@router.post("/feedback-upload", tags=["Feedback"])
+async def feedback_upload(
+    file: UploadFile = File(..., description="Exported reviewer feedback JSON file"),
+) -> dict[str, Any]:
+    """Save an exported reviewer feedback JSON file under ./shared/feedback/.
+
+    The viewers export ``feedback_{review_type}_{run_folder_id}.json``; this
+    endpoint stores it (creating ./shared/feedback if needed) so feedback
+    collected in the offline HTML viewer can be brought back to the server.
+    """
+    if not file.filename or not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a JSON file (.json)")
+
+    file_bytes = await file.read()
+    try:
+        json.loads(file_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"File is not valid JSON: {exc}")
+
+    feedback_dir = _PROJECT_ROOT / "shared" / "feedback"
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    # Strip any path components to guard against traversal in the upload name.
+    safe_name = Path(file.filename).name
+    dest = feedback_dir / safe_name
+    dest.write_bytes(file_bytes)
+    logger.info("Saved feedback upload -> %s", dest)
+    return {"saved": safe_name, "status": "ok"}

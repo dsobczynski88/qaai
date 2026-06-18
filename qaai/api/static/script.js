@@ -38,6 +38,10 @@ let activeCard = null;
 // superseded and stops instead of running on in the background.
 let pollToken = 0;
 
+// The job_id of the run currently being polled, so the "Stop Run" button can
+// cancel it on the server. Null when no run is in flight.
+let currentJobId = null;
+
 function selectCard(id) {
   if (activeCard === id) return;
   pollToken++; // cancel any in-flight poll loop when switching reviewers
@@ -268,6 +272,8 @@ async function runJob(endpoint, fetchOpts, filename, label, baseSub) {
     if (!submit.ok) throw new Error(await parseErr(submit));
     const { job_id } = await submit.json();
     if (!job_id) throw new Error("Server did not return a job_id.");
+    currentJobId = job_id;
+    document.getElementById("btn-stop").hidden = false; // allow Stop Run
 
     // Poll status until the job reaches a terminal state.
     while (true) {
@@ -303,9 +309,37 @@ async function runJob(endpoint, fetchOpts, filename, label, baseSub) {
     // Don't clobber the UI if this loop was already superseded.
     if (myToken === pollToken) showError(e.message);
   } finally {
-    if (myToken === pollToken) setButtons(false);
+    if (myToken === pollToken) {
+      setButtons(false);
+      currentJobId = null;
+      document.getElementById("btn-stop").hidden = true;
+    }
   }
 }
+
+// ── Stop Run ──
+// Cancel the in-flight job on the server (cancel & discard) and stop polling.
+document.getElementById("btn-stop").addEventListener("click", async () => {
+  const jobId = currentJobId;
+  if (!jobId) return;
+  pollToken++; // supersede the poll loop so it exits quietly (no error/result)
+  currentJobId = null;
+  const stopBtn = document.getElementById("btn-stop");
+  stopBtn.disabled = true;
+  try {
+    const resp = await fetch(ROOT_PATH + "/api/v1/jobs/" + jobId + "/cancel", {
+      method: "POST",
+    });
+    if (!resp.ok) throw new Error(await parseErr(resp));
+    showError("Run stopped.");
+  } catch (e) {
+    showError("Failed to stop run — " + e.message);
+  } finally {
+    stopBtn.disabled = false;
+    stopBtn.hidden = true;
+    setButtons(false);
+  }
+});
 
 // ── Baseline submit (RTM + TC) ──
 async function submitBaseline(type) {
@@ -418,3 +452,39 @@ dz.addEventListener("drop", (e) => {
     handleFileSelect(document.getElementById("hz-file"));
   }
 });
+
+// ── Feedback upload (footer) ──
+// Send an exported reviewer feedback JSON file back to the server, where it is
+// saved under ./shared/feedback/.
+const feedbackFileInput = document.getElementById("feedback-file");
+document
+  .getElementById("btn-choose-feedback")
+  .addEventListener("click", () => feedbackFileInput.click());
+feedbackFileInput.addEventListener("change", () => {
+  const fn = feedbackFileInput.files[0] ? feedbackFileInput.files[0].name : "";
+  document.getElementById("feedback-chosen").textContent = fn ? "✓ " + fn : "";
+});
+document
+  .getElementById("btn-upload-feedback")
+  .addEventListener("click", async () => {
+    const status = document.getElementById("feedback-status");
+    const file = feedbackFileInput.files[0];
+    if (!file) {
+      alert("Please choose a feedback JSON file first.");
+      return;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    status.textContent = "Uploading…";
+    try {
+      const resp = await fetch(ROOT_PATH + "/api/v1/feedback-upload", {
+        method: "POST",
+        body: form,
+      });
+      if (!resp.ok) throw new Error(await parseErr(resp));
+      const { saved } = await resp.json();
+      status.textContent = "Uploaded ✓ " + (saved || file.name);
+    } catch (e) {
+      status.textContent = "Upload failed — " + e.message;
+    }
+  });

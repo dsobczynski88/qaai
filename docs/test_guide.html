@@ -32,6 +32,7 @@
   .src{color:var(--mute);font:12px ui-monospace,monospace}
   .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
   .warn{border-left-color:var(--warn)}
+  .pill{display:inline-block;font:11px/1.4 ui-monospace,monospace;background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:0 8px;color:var(--mute)}
   footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
   @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}th,td{overflow-wrap:anywhere}}
   @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
@@ -42,7 +43,9 @@
 <nav class="toc" aria-label="Table of contents">
   <strong>Test Guide</strong>
   <a href="#setup">Setup &amp; install</a>
+  <a href="#layout">Suite layout</a>
   <a href="#running">Running the suites</a>
+  <a href="#unit">tests/unit</a>
   <a href="#api">tests/api</a>
   <a href="#integration">tests/integration</a>
   <a href="#fixtures">Default fixtures</a>
@@ -57,96 +60,227 @@
 <main>
 <header class="doc">
   <h1>Test Guide</h1>
-  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-18</div>
 </header>
 
 <p>This guide covers how to set up, install, and run the test suites under
-<code>tests/api</code> and <code>tests/integration</code>, the default fixture files each
-test uses, and how to run the tests against your own custom input files.</p>
+<code>tests/unit</code>, <code>tests/api</code>, and <code>tests/integration</code>, the default
+fixture files each test uses, and how to run the tests against your own custom input files.</p>
+
+<div class="note"><strong>Recently restructured.</strong> The pytest architecture was reorganized
+into three layers — a new <code>tests/unit/</code> suite (fast, no live LLM), the
+<code>tests/api/</code> contract suite, and the <code>tests/integration/</code> pipeline suite. A
+second pytest marker (<code>unit</code>) was added alongside <code>integration</code>, a
+call-counting stub client and CLI knobs (<code>--cache-mode</code> / <code>--test-mode</code> /
+<code>--include-edge-case-analysis</code>) were threaded through <code>conftest.py</code>, and the
+API review endpoints became <strong>asynchronous background jobs</strong> (submit → poll →
+result). The sections below reflect that layout.</div>
 
 <h2 id="setup">Setup &amp; install</h2>
 <p>QAAI uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>
 <span class="src">pyproject.toml:9</span>.</p>
 <pre><code>uv sync --frozen        # install locked dependencies (incl. pyjama, vendored locally at libs/pyjama)</code></pre>
-<p>pytest configuration <span class="src">pyproject.toml:44-48</span>:
-<code>asyncio_mode = "auto"</code>, test path <code>tests/</code>, and a single marker —
-<code>integration</code> (<em>"marks tests that make real LLM API calls"</em>).</p>
+<p>pytest configuration <span class="src">pyproject.toml:48-55</span>:
+<code>asyncio_mode = "auto"</code>, test path <code>tests/</code>, and <strong>two markers</strong> —
+<code>integration</code> (<em>"marks tests that make real LLM API calls"</em>) and
+<code>unit</code> (<em>"marks fast unit tests with no live LLM calls"</em>).</p>
 
 <h3>Environment variables for tests</h3>
-<p>Integration tests read their <strong>own</strong> live-LLM credentials from a repo-root
-<code>.env</code> <span class="src">tests/conftest.py:155-183</span>:</p>
+<p><code>conftest.py</code> calls <code>load_dotenv()</code> at import time
+<span class="src">tests/conftest.py:10</span>. Integration tests read their <strong>own</strong>
+live-LLM credentials from <code>PYTEST_*</code> variables in a repo-root <code>.env</code>
+<span class="src">tests/conftest.py:201-222</span>:</p>
 <pre><code>PYTEST_API_KEY=&lt;your-key&gt;
 PYTEST_BASE_URL=&lt;your-api-url&gt;
 PYTEST_MODEL=gpt-4o-mini</code></pre>
 <div class="note warn"><strong>Production guard.</strong> The <code>real_client</code> fixture
-rejects any <code>PYTEST_BASE_URL</code> containing the string <code>"prod"</code> to prevent
-accidental production charges <span class="src">tests/conftest.py:167-172</span>.</div>
-<p>Test runs are isolated from server runs: logs are written under <code>logs/tests/</code>
-(set via <code>settings.log_base_dir</code> before <code>qaai.api.main</code> is imported)
-<span class="src">tests/conftest.py:21</span>.</p>
+fails the test if <code>PYTEST_BASE_URL</code> contains the string <code>"prod"</code>, to prevent
+accidental production charges <span class="src">tests/conftest.py:206-211</span>. If
+<code>PYTEST_API_KEY</code> is unset, integration tests <em>skip</em> rather than fail
+<span class="src">tests/conftest.py:203-204</span>.</div>
+<p>Test runs are isolated from server runs: all artifacts are written under
+<code>logs/tests/</code> (set via <code>settings.log_base_dir</code> <strong>before</strong>
+<code>qaai.api.main</code> is imported) <span class="src">tests/conftest.py:21</span>.</p>
+<p>The unit suite needs no <code>.env</code> — it uses a call-counting stub client and mocks
+(boto3, the LLM client). <code>tests/unit/test_env_retriever.py</code> exercises the
+<code>APP_ENV</code>-driven secret hydration (DEV dotenv / PROD prefixed-mimic / AWS Secrets
+Manager) entirely with <code>monkeypatch</code> + a mocked boto3 client
+<span class="src">tests/unit/test_env_retriever.py:1-9</span>.</p>
+
+<h2 id="layout">Suite layout</h2>
+<table>
+<thead><tr><th>Path</th><th>Layer</th><th>Live LLM?</th></tr></thead>
+<tbody>
+<tr><td><code>tests/unit/</code></td><td>Fast unit tests — cache, transforms, input gates, viewer rendering, secrets</td><td>No (stub client / mocks)</td></tr>
+<tr><td><code>tests/api/v1/</code></td><td>FastAPI contract + async-job happy paths</td><td>Only the <code>@integration</code> happy-path tests</td></tr>
+<tr><td><code>tests/integration/</code></td><td>End-to-end compiled-graph pipeline runs + wiring/system checks</td><td>Pipeline tests yes; gating/wiring tests no</td></tr>
+<tr><td><code>tests/conftest.py</code></td><td>Shared fixtures: clients, CLI options, recorders, input-gate data</td><td>—</td></tr>
+<tr><td><code>tests/helpers.py</code></td><td>Fixture-path resolution, JSONL loading, state serialization, mock client</td><td>—</td></tr>
+</tbody></table>
 
 <h2 id="running">Running the suites</h2>
 <table>
 <thead><tr><th>Command</th><th>What runs</th></tr></thead>
 <tbody>
-<tr><td><code>uv run pytest -m "not integration"</code></td><td>Fast unit/contract tests — no live LLM calls</td></tr>
-<tr><td><code>uv run pytest -m integration</code></td><td>Integration + API happy-path tests (real LLM; needs <code>.env</code>)</td></tr>
+<tr><td><code>uv run pytest -m "not integration"</code></td><td>Everything except live-LLM tests — the whole unit suite plus the API contract tests</td></tr>
+<tr><td><code>uv run pytest tests/unit -v</code></td><td>The entire unit suite (recommended for the fast loop)</td></tr>
+<tr><td><code>uv run pytest -m unit</code></td><td>Only the <strong>explicitly marked</strong> unit tests — the three input-gate files + the no-decomposition file (see note below)</td></tr>
+<tr><td><code>uv run pytest -m integration -s</code></td><td>Integration + API happy-path tests (real LLM; needs <code>.env</code>)</td></tr>
 <tr><td><code>uv run pytest tests/api -v</code></td><td>API contract + happy-path tests only</td></tr>
-<tr><td><code>uv run pytest tests/integration -v</code></td><td>End-to-end pipeline tests only</td></tr>
+<tr><td><code>uv run pytest tests/integration -v</code></td><td>End-to-end pipeline + wiring tests only</td></tr>
 <tr><td><code>uv run pytest path::test_name</code></td><td>A single test</td></tr>
+</tbody></table>
+<div class="note warn"><strong><code>-m unit</code> ≠ the whole <code>tests/unit</code> tree.</strong> Only four
+files carry <code>pytestmark = pytest.mark.unit</code> (the three <code>test_input_gating.py</code>
+files and <code>test_case_reviewer/test_no_decomposition.py</code>). The cache, transform,
+viewer-log, and secrets tests are unmarked, so they are <em>not</em> selected by
+<code>-m unit</code> — but they <em>are</em> picked up by <code>-m "not integration"</code> and by
+<code>tests/unit</code>. Use <code>tests/unit</code> (a path) to run the full fast suite.</div>
+
+<h2 id="unit">tests/unit — fast tests, no live LLM</h2>
+<p>These make <strong>no network calls</strong>. LLM clients are replaced by a call-counting
+stub (<code>stub_llm_client</code> / <code>_StubLLMClient</code> in conftest
+<span class="src">tests/conftest.py:482-510</span>) or by per-test mocks, so a test can assert
+exactly how many times inference would have run (e.g. <code>stub_llm_client.call_count == 0</code>
+proves a graph short-circuited before any LLM call). Reviewer-graph knobs come from the
+<code>review_settings</code> fixture (a <code>SimpleNamespace</code> of <code>cache_mode</code> /
+<code>test_mode</code> / <code>include_edge_case_analysis</code>, defaulted from CLI options)
+<span class="src">tests/conftest.py:462-479</span>.</p>
+
+<h3>Input-gate &amp; topology tests <span class="pill">@pytest.mark.unit</span></h3>
+<p>Each reviewer graph short-circuits on bad input — performing <strong>zero inference
+calls</strong> and returning <code>review_status == "skipped"</code> with the offending
+<code>missing_fields</code> listed — so the viewer can render an empty rubric with a warning
+instead of crashing. Bad-input data fixtures live in conftest
+<span class="src">tests/conftest.py:591-674</span>.</p>
+<table>
+<thead><tr><th>File</th><th>What it asserts</th></tr></thead>
+<tbody>
+<tr><td><code>test_suite_reviewer/test_input_gating.py</code></td>
+<td>RTM graph skips on no traced test cases or blank requirement text; missing design docs do <em>not</em> skip (<code>validate_rtm_inputs(...) == []</code>, graph proceeds) <span class="src">tests/unit/test_suite_reviewer/test_input_gating.py:24-68</span></td></tr>
+<tr><td><code>test_case_reviewer/test_input_gating.py</code></td>
+<td>TC graph skips on no upstream requirements (<code>missing_fields</code> ⊇ <code>requirements</code>) or empty step text (<code>test_case_steps</code>); <code>aggregated_assessment is None</code> <span class="src">tests/unit/test_case_reviewer/test_input_gating.py:20-45</span></td></tr>
+<tr><td><code>hazard_risk_reviewer/test_input_gating.py</code></td>
+<td>Hazard graph skips with no traced risk-control requirements, or when any field in <code>HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS</code> is blank (the missing names are reported) <span class="src">tests/unit/hazard_risk_reviewer/test_input_gating.py:24-51</span></td></tr>
+<tr><td><code>test_case_reviewer/test_no_decomposition.py</code></td>
+<td>"Include decomposition analysis" OFF drops the <code>decomposer</code> node and fans coverage out <em>per requirement</em> (cache key suffixed <code>_REQ-1</code>, no <code>decomposed_spec</code> in the payload); the aggregator stays None-safe when <code>decomposed_requirements</code> is absent <span class="src">tests/unit/test_case_reviewer/test_no_decomposition.py:38-113</span></td></tr>
+</tbody></table>
+
+<h3>Cache &amp; <code>cache_mode</code> gating</h3>
+<p><code>test_review_cache.py</code> is the largest unit file. A counting mock client lets each
+test assert hit/miss by inspecting <code>chat_completion.call_count</code>
+<span class="src">tests/unit/test_review_cache.py:34-46</span>. It covers, in five groups:</p>
+<ul>
+<li><strong>ReviewCacheManager</strong> — one-folder-per-entity disk layout
+(<code>{cache_dir}/{entity_id}/{node}_{version}.json</code>), version-bump-is-a-miss,
+prompt-set namespacing (per-set subfolders that never alias), scoped/whole-entity
+<code>purge_entity</code>, entity/node-name sanitization, Redis-absent disk-only mode, a
+relative <code>CACHE_DIR</code> anchored to <code>PROJECT_ROOT</code> (the phantom-MISS regression
+guard), legacy meta-less files still reading as a HIT, and
+<code>extract_prompt_version</code> <span class="src">tests/unit/test_review_cache.py:93-257</span></li>
+<li><strong>Base-node gating</strong> — <code>partial</code> caches interim nodes but always
+re-runs a <code>is_final_output</code> node; <code>full</code> caches the final node too;
+<code>off</code> neither reads nor writes; missing <code>cache_mode</code> defaults to
+<code>partial</code>; <code>cache_manager=None</code> disables caching
+<span class="src">tests/unit/test_review_cache.py:265-329</span></li>
+<li><strong>Per-spec evaluators</strong> — RTM/TC single-spec nodes write distinct files per
+<code>spec_id</code>, hit cache on rerun, and the RTM payload carries
+<code>summarized_designs</code> (or null) <span class="src">tests/unit/test_review_cache.py:354-436</span></li>
+<li><strong>Send-dispatcher propagation</strong> — <code>dispatch_coverage</code> copies
+<code>cache_mode</code> (and <code>summarized_designs</code>) into every fan-out payload
+<span class="src">tests/unit/test_review_cache.py:444-511</span></li>
+<li><strong>Pipeline wiring</strong> — the hazard reviewer shares the cache for its own nodes
+but its embedded RTM subgraph is <code>cache_manager is None</code> (cached instead as one
+blob per requirement) <span class="src">tests/unit/test_review_cache.py:519-537</span></li>
+</ul>
+
+<h3>Data transforms, viewer, secrets</h3>
+<table>
+<thead><tr><th>File</th><th>What it covers</th></tr></thead>
+<tbody>
+<tr><td><code>test_jama_transform_coercion.py</code></td>
+<td>The pyjama → qaai model coercion in JAMA transforms: pyjama's <code>in_review_baseline</code> maps onto qaai's <code>in_baseline</code>, the transform wrappers return qaai-class instances, and a <code>TestSuite</code> builds without a Pydantic <code>model_type</code> error. <em>Skips if pyjama is not installed</em> <span class="src">tests/unit/test_jama_transform_coercion.py:20-22</span></td></tr>
+<tr><td><code>test_hazard_bidirectional_transform.py</code></td>
+<td>The hazard reviewer's <code>bidirectional_trace</code> data-integration transform: per-requirement entries aggregate + dedup into one <code>HazardTraceMatrix</code>, nested user-needs flatten, malformed entries are skipped (not raised), and <code>make_transform_node_bidirectional_trace</code> is a no-op in Excel/local mode <span class="src">tests/unit/test_hazard_bidirectional_transform.py:30-99</span></td></tr>
+<tr><td><code>test_viewer_log.py</code></td>
+<td>The "View log" feature: per-run problem notes embed into all three viewers (<code>build_viewer</code> / <code>_tc</code> / <code>_hz</code>) as a self-contained JSON block; an empty log renders <code>[]</code> with the button shipped hidden; a note containing <code>&lt;/script&gt;</code> is escaped so it can't break out of the embedded JSON <span class="src">tests/unit/test_viewer_log.py:15-54</span></td></tr>
+<tr><td><code>test_env_retriever.py</code></td>
+<td><code>EnvVariableRetriever</code> + <code>Settings.__init__</code> secret hydration: dotenv (plain + prefixed-mimic), <code>hydrate_environment</code> override semantics, the boto3-mocked Secrets Manager path, the <code>for_environment</code> factory, and end-to-end <code>APP_ENV=TEST</code> hydration from prefixed env vars <span class="src">tests/unit/test_env_retriever.py:23-144</span></td></tr>
 </tbody></table>
 
 <h2 id="api">tests/api — FastAPI contract &amp; happy-path tests</h2>
 <p>These spin up the FastAPI app via an in-process <code>AsyncClient</code> (wrapped in the
-app's lifespan so services initialize) <span class="src">tests/conftest.py:186-197</span>.
-Files live under <code>tests/api/v1/</code>:</p>
+app's <code>lifespan</code> so services initialize) <span class="src">tests/conftest.py:226-236</span>.</p>
+<div class="note"><strong>Reviews are asynchronous background jobs.</strong> A review
+<code>POST</code> now returns <code>202</code> with a <code>job_id</code>; the result is fetched after
+the job finishes. The <code>submit_and_wait</code> fixture drives
+<strong>POST → 202 → poll <code>GET /api/v1/jobs/{id}</code> → <code>GET /api/v1/jobs/{id}/result</code></strong>,
+returning the result response (or the original 4xx if submission was rejected)
+<span class="src">tests/conftest.py:240-265</span>. So the "200 / <code>text/html</code>" assertion
+describes the <em>result download</em>, not the initial <code>POST</code>.</div>
+<p>Files live under <code>tests/api/v1/</code>:</p>
 <table>
 <thead><tr><th>File</th><th>Tests</th><th>Checks</th></tr></thead>
 <tbody>
-<tr><td><code>test_health.py</code></td><td><code>test_health_check</code></td><td><code>GET /health</code> → 200 with <code>status</code>/<code>version</code>/<code>services</code></td></tr>
-<tr><td><code>test_general.py</code></td><td>invalid JSON, missing <code>baseline_id</code>, request-id header</td><td>422 validation; <code>X-Request-ID</code> present</td></tr>
-<tr><td><code>test_test_suite_reviewer.py</code></td><td><code>test_test_suite_review_happy_path</code> (+ 422 cases)</td><td><span class="src">@integration</span> submit → poll → result is 200 <code>text/html</code></td></tr>
-<tr><td><code>test_test_case_reviewer.py</code></td><td><code>test_tc_review_happy_path</code> (+ 422 cases)</td><td>same async flow for the TC endpoint</td></tr>
-<tr><td><code>test_hazard_risk_reviewer.py</code></td><td><code>test_hazard_risk_review_happy_path</code> (+ missing file/project, 400 bad type)</td><td>multipart upload; non-Excel → 400</td></tr>
-<tr><td><code>test_cache_toggle.py</code></td><td><code>use_cache</code> / <code>test_mode</code> mapping</td><td><code>use_cache=false</code> → <code>cache_mode="off"</code>; default → <code>"partial"</code></td></tr>
+<tr><td><code>test_health.py</code></td><td><code>test_health_check</code></td><td><code>GET /health</code> → 200 with <code>status</code> ∈ {healthy, degraded}, <code>version</code>, and a <code>services</code> map (rtm / hazard / test_case)</td></tr>
+<tr><td><code>test_general.py</code></td><td>invalid JSON, missing <code>baseline_id</code>, request-id header (+ 3 skipped placeholders for service-unavailable / rate-limit / auth)</td><td>422 validation; <code>X-Request-ID</code> present</td></tr>
+<tr><td><code>test_test_suite_reviewer.py</code></td><td><code>test_test_suite_review_happy_path</code> <span class="pill">@integration</span> + 422 cases (missing / null / invalid JSON)</td><td>submit → poll → result is 200 <code>text/html</code></td></tr>
+<tr><td><code>test_test_case_reviewer.py</code></td><td><code>test_tc_review_happy_path</code> <span class="pill">@integration</span> + 422 cases</td><td>same async flow for the TC endpoint</td></tr>
+<tr><td><code>test_hazard_risk_reviewer.py</code></td><td>happy path <span class="pill">@integration, skipped</span>; missing file / missing project → 422; non-Excel upload → 400</td><td>multipart upload validation</td></tr>
+<tr><td><code>test_cache_toggle.py</code></td><td><code>use_cache</code> / explicit <code>cache_mode</code> / <code>test_mode</code> / <code>include_edge_case_analysis</code> mapping (services stubbed)</td><td><code>use_cache=false</code>→<code>off</code>, default→<code>partial</code>; explicit <code>cache_mode</code> forwarded verbatim and wins over <code>use_cache</code>; edge-case toggle → <code>v4</code> else <code>v3</code>; <code>_select()</code> falls back to baseline for unknown sets</td></tr>
+<tr><td><code>test_batch_review_gating.py</code></td><td>success-gating &amp; live-progress in <code>_run_batch_review</code> (stub graph + fake cache)</td><td>clean item kept; errored / incomplete entities purged (scoped to the run's prompt set); one bad item no longer aborts the batch (all-failing → <code>ValueError</code>); <code>Job</code> progress counters + problems-only run log shared with the viewer</td></tr>
 </tbody></table>
-<div class="note"><strong>Reviews are asynchronous.</strong> The happy-path tests drive
-submit → poll → result through the <code>submit_and_wait</code> fixture
-<span class="src">tests/conftest.py:200-226</span>, so the "200 / <code>text/html</code>"
-assertion describes the <em>result download</em>, not the initial <code>POST</code>
-(which returns <code>202</code>).</div>
-<pre><code>uv run pytest tests/api/v1/test_test_suite_reviewer.py::test_test_suite_review_happy_path</code></pre>
+<pre><code>uv run pytest tests/api/v1/test_cache_toggle.py -v
+uv run pytest -m integration tests/api/v1/test_test_suite_reviewer.py::test_test_suite_review_happy_path</code></pre>
 
-<h2 id="integration">tests/integration — end-to-end pipeline tests</h2>
+<h2 id="integration">tests/integration — pipeline &amp; wiring tests</h2>
+<p>This suite mixes <strong>live-LLM pipeline runs</strong> (marked <code>@integration</code>,
+need <code>.env</code>) with <strong>stub/assertion wiring tests</strong> that run offline.</p>
+
+<h3>End-to-end pipeline runs <span class="pill">@integration</span></h3>
 <p>These run the full compiled LangGraph pipeline against fixture files. For the RTM and
 test-case reviewers, every row of the selected JSONL fixture is expanded into its own
 parametrized item (id = <code>req_id</code> / <code>test_id</code>) by the
-<code>pytest_generate_tests</code> hook <span class="src">tests/conftest.py:101-115</span>.</p>
+<code>pytest_generate_tests</code> hook <span class="src">tests/conftest.py:140-154</span>.</p>
 <table>
 <thead><tr><th>Test</th><th>Validates</th><th>Outputs</th></tr></thead>
 <tbody>
 <tr><td><code>test_suite_reviewer/pipeline.py::test_test_suite_reviewer</code></td>
-<td>One <code>SynthesizedAssessment</code> per requirement; all 6 findings (M1–M5 + R6); <code>overall_verdict=Yes</code> iff M1–M5 ∈ {Yes, N-A}</td>
+<td>One <code>SynthesizedAssessment</code> per requirement; all M1–M5 present; partial-verdict invariants (<code>partial</code> implies <code>verdict=="Yes"</code>); <code>overall_verdict=Yes</code> iff M1–M5 ∈ {Yes, N-A}, with R6 excluded from the rollup <span class="src">tests/integration/test_suite_reviewer/pipeline.py:23-115</span></td>
 <td><code>inputs.jsonl</code>, <code>outputs.jsonl</code>, <code>viewer.html</code></td></tr>
 <tr><td><code>test_case_reviewer/pipeline.py::test_test_case_reviewer</code></td>
 <td>One <code>TestCaseAssessment</code> per test case; 5-item <code>evaluated_checklist</code>; spec-align verdict derived from coverage count</td>
 <td><code>inputs.jsonl</code>, <code>outputs.jsonl</code>, <code>viewer_tc.html</code></td></tr>
 <tr><td><code>hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer</code></td>
 <td>One <code>RequirementReview</code> per traced requirement (each embeds a <code>SynthesizedAssessment</code>); <code>HazardAssessment</code> with 7 findings (H1–H7); only H5 may be <code>N-A</code></td>
-<td>+ <code>hazard_pipeline_state.json</code> <span class="src">pipeline.py:192</span></td></tr>
+<td>+ <code>hazard_pipeline_state.json</code></td></tr>
+<tr><td><code>test_data_integration_backward_compat.py</code></td>
+<td>RTM &amp; TC graphs still run on local data input (no <code>pyjama_request</code>): full state is produced and the JAMA fields stay <code>None</code> <span class="src">tests/integration/test_data_integration_backward_compat.py:14-107</span></td>
+<td>—</td></tr>
+</tbody></table>
+
+<h3>Wiring &amp; system tests <span class="pill">offline</span></h3>
+<p>These are tagged <code>@integration</code> (or unmarked) but make no live LLM call — they use
+the stub client or plain assertions, so they run without <code>.env</code>.</p>
+<table>
+<thead><tr><th>Test</th><th>What it asserts</th></tr></thead>
+<tbody>
+<tr><td><code>{test_suite,test_case,hazard_risk}_reviewer/test_input_gating_system.py</code></td>
+<td>System-level skip path: drive a bad-input record through the real compiled graph, write <code>outputs.jsonl</code> as the service would, render the viewer, and assert the missing-fields warning banner (<code>id="missing-warning"</code>) is present and the rubric renders empty — with <code>call_count == 0</code> <span class="src">tests/integration/test_suite_reviewer/test_input_gating_system.py:19-43</span></td></tr>
+<tr><td><code>test_integration_verification.py</code></td>
+<td>Hazard <code>DataIntegrationNode</code> wiring: <code>HazardReviewState</code> exposes <code>pyjama_request</code>/<code>jama_data</code>/<code>jama_metadata</code>; the graph includes a <code>data_integration</code> node; local mode (no <code>pyjama_request</code>) returns an empty dict; <code>transform_hazard_record_to_state</code> signature; and the Excel/pyjama fixture files exist and parse <span class="src">tests/integration/test_integration_verification.py:19-198</span></td></tr>
 </tbody></table>
 <pre><code>uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer
-uv run pytest tests/integration/test_case_reviewer/pipeline.py::test_test_case_reviewer
-uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer</code></pre>
+uv run pytest tests/integration/test_integration_verification.py -v   # offline wiring checks</code></pre>
 
 <h2 id="fixtures">Default fixtures</h2>
 <p>Fixtures are resolved by <code>resolve_fixture_path</code> / <code>load_jsonl</code>
-<span class="src">tests/helpers.py:7-47</span> using the search order
+<span class="src">tests/helpers.py:7-67</span> using the search order
 <code>mock/ → gold/ → local/ → external/ → root</code>, so a test's
 <code>--input-file</code> takes a <strong>bare filename</strong> and finds it wherever it
 lives under <code>tests/fixtures/</code>.</p>
-<p><strong>Default fixture each integration test falls back to</strong> when
-<code>--input-file</code> is omitted <span class="src">tests/conftest.py:49-52, 355-371</span>:</p>
+<p><strong>Default fixture each parametrized integration test falls back to</strong> when
+<code>--input-file</code> is omitted <span class="src">tests/conftest.py:53-56, 394-410</span>:</p>
 <table>
 <thead><tr><th>Reviewer</th><th>Default fixture(s)</th></tr></thead>
 <tbody>
@@ -158,20 +292,28 @@ lives under <code>tests/fixtures/</code>.</p>
 <table>
 <thead><tr><th>Directory</th><th>Files</th></tr></thead>
 <tbody>
-<tr><td><code>external/</code></td><td><code>test_suite_review_all_fields.jsonl</code>, <code>test_suite_review_min_fields.jsonl</code>, <code>test_case_review_all_fields.jsonl</code>, <code>test_case_review_min_fields.jsonl</code>, <code>software_hazard_analysis.xlsx</code>, <code>pyjama_response_unified.jsonl</code></td></tr>
+<tr><td><code>mock/</code></td><td><code>decomposer_cases.jsonl</code>, <code>summarizer_cases.jsonl</code>, <code>generator_cases.jsonl</code>, <code>coverage_evaluator_cases.jsonl</code>, <code>synthesizer_cases.jsonl</code>, <code>tc_aggregator_cases.jsonl</code></td></tr>
 <tr><td><code>gold/</code></td><td><code>gold_dataset.jsonl</code>, <code>gold_dataset_labeled.jsonl</code>, <code>gold_dataset-tc.jsonl</code>, <code>api_test_inputs.jsonl</code></td></tr>
 <tr><td><code>local/</code></td><td><code>locating_device.jsonl</code></td></tr>
-<tr><td><code>mock/</code></td><td><code>decomposer_cases.jsonl</code>, <code>summarizer_cases.jsonl</code>, <code>generator_cases.jsonl</code>, <code>coverage_evaluator_cases.jsonl</code>, <code>synthesizer_cases.jsonl</code>, <code>tc_aggregator_cases.jsonl</code></td></tr>
+<tr><td><code>external/</code></td><td><code>test_suite_review_all_fields.jsonl</code>, <code>test_suite_review_min_fields.jsonl</code>, <code>test_case_review_all_fields.jsonl</code>, <code>test_case_review_min_fields.jsonl</code>, <code>software_hazard_analysis.xlsx</code>, <code>pyjama_response_unified.jsonl</code></td></tr>
 </tbody></table>
 <p>JSONL fixtures are newline-delimited; each line is a self-contained graph-input object.
 The hazard test assembles its <code>HazardRowWithTraceMatrix</code> input
 <strong>programmatically</strong> from the Excel + PyJama fixtures (there is no single
-<code>hazard_full_traceability.jsonl</code>).</p>
+<code>hazard_full_traceability.jsonl</code>) <span class="src">tests/conftest.py:341-410</span>.</p>
 
 <h2 id="custom">Running with custom files</h2>
-<p>Each integration test accepts CLI options <span class="src">tests/conftest.py:55-81</span>:
-<code>--input-file</code> (a bare fixture filename — JSONL for RTM/TC, <code>.xlsx</code> for
-hazard) and <code>--pyjama-file</code> (hazard traceability JSONL).</p>
+<p>The reviewer tests accept these CLI options, all registered in
+<code>pytest_addoption</code> <span class="src">tests/conftest.py:59-113</span>:</p>
+<table>
+<thead><tr><th>Option</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>--input-file</code></td><td>per-reviewer (above)</td><td>Bare fixture filename — JSONL for RTM/TC, the <code>.xlsx</code> SHA workbook for hazard</td></tr>
+<tr><td><code>--pyjama-file</code></td><td><code>pyjama_response_unified.jsonl</code></td><td>Hazard only: traceability JSONL</td></tr>
+<tr><td><code>--cache-mode</code></td><td><code>off</code></td><td><code>cache_mode</code> threaded into graph state (<code>off</code>/<code>partial</code>/<code>full</code>), surfaced by <code>review_settings</code></td></tr>
+<tr><td><code>--test-mode</code></td><td><code>true</code></td><td>When true, tests use the call-counting stub client instead of a real LLM client</td></tr>
+<tr><td><code>--include-edge-case-analysis</code></td><td><code>false</code></td><td>Selects the edge-case prompt set for the test-suite / hazard reviewers</td></tr>
+</tbody></table>
 <pre><code># RTM / test-case: --input-file is the JSONL of input rows
 uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
   --input-file=locating_device.jsonl
@@ -186,7 +328,10 @@ uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite
 
 # Hazard: --input-file is the SHA .xlsx; --pyjama-file overrides the traceability JSONL
 uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer \
-  --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl</code></pre>
+  --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl
+
+# Override the graph knobs (e.g. run the unit input-gates under partial caching)
+uv run pytest -m unit --cache-mode partial</code></pre>
 <h3>Adding your own fixture</h3>
 <ol>
 <li>Drop the file into a fixtures subdir — <code>tests/fixtures/local/</code> is recommended
@@ -203,17 +348,20 @@ for project-specific data, e.g. <code>tests/fixtures/local/my_requirements.jsonl
 
 <h2 id="artifacts">Run artifacts</h2>
 <p>Session-scoped recorder fixtures (<code>jsonl_recorders</code> / <code>_tc</code> /
-<code>_hz</code>) append each input/output and generate the HTML viewer from
-<code>outputs.jsonl</code> at session teardown <span class="src">tests/conftest.py:373-415</span>.
-Per session, under <code>logs/tests/run-&lt;timestamp&gt;/</code>:</p>
+<code>_hz</code>) clear and append each input/output, then generate the HTML viewer from
+<code>outputs.jsonl</code> at session teardown <span class="src">tests/conftest.py:413-454</span>.
+Per session, under <code>logs/tests/run-&lt;timestamp&gt;/</code>
+<span class="src">tests/conftest.py:157-170</span>:</p>
 <ul>
 <li><code>inputs.jsonl</code> / <code>outputs.jsonl</code> — recorded records</li>
 <li><code>viewer.html</code> / <code>viewer_tc.html</code> / <code>viewer_hz.html</code> — generated viewer</li>
+<li><code>token_usage.jsonl</code> — per-call token/cost records + a session summary (<code>token_tracker</code> teardown) <span class="src">tests/conftest.py:173-191</span></li>
 <li><code>qaai.log</code> — node/app logs for the run</li>
+<li><code>graph.png</code> — graph diagram (RTM pipeline test writes it via <code>write_graph_png</code>) <span class="src">tests/integration/test_suite_reviewer/pipeline.py:89</span></li>
 <li><code>hazard_pipeline_state.json</code> — full hazard graph state (hazard test only)</li>
 </ul>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-06-08. · <a href="index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-06-18. · <a href="index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

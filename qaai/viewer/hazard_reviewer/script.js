@@ -266,7 +266,7 @@ document.getElementById("export-btn").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify(feedback, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "feedback.json";
+  a.download = `feedback_{{REVIEW_TYPE}}_{{RUN_KEY}}.json`;
   a.click();
 });
 document.getElementById("modal").addEventListener("click", e => {

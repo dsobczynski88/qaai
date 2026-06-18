@@ -21,6 +21,7 @@ def _render(
     run_key: str,
     template: str,
     title_prefix: str,
+    review_type: str,
     log_entries: Optional[list] = None,
 ) -> str:
     data_json = json.dumps(list(records), ensure_ascii=False)
@@ -34,6 +35,9 @@ def _render(
         .replace("{{SOURCE}}", _escape_html(source_label))
         .replace("{{TITLE}}", _escape_html(f"{title_prefix} — {source_label}"))
         .replace("{{RUN_KEY}}", _escape_html(run_key))
+        # review_type labels the exported feedback file:
+        # feedback_{review_type}_{run_key}.json
+        .replace("{{REVIEW_TYPE}}", review_type)
     )
 
 
@@ -48,7 +52,7 @@ def build_viewer(
     so the same run's ratings persist across re-opens of the same viewer.
     ``log_entries`` (problem notes from the run) populate the "View log" button.
     """
-    return _render(records, source_label, run_key, HTML_TEMPLATE, "Batch output viewer", log_entries)
+    return _render(records, source_label, run_key, HTML_TEMPLATE, "Batch output viewer", "test_suite", log_entries)
 
 
 def build_viewer_tc(
@@ -61,7 +65,7 @@ def build_viewer_tc(
     using the test-case template. The localStorage key namespace is distinct
     so RTM feedback and test-case feedback never collide for the same run.
     """
-    return _render(records, source_label, run_key, TC_HTML_TEMPLATE, "Test case output viewer", log_entries)
+    return _render(records, source_label, run_key, TC_HTML_TEMPLATE, "Test case output viewer", "test_case", log_entries)
 
 
 def build_viewer_hz(
@@ -75,7 +79,7 @@ def build_viewer_hz(
     distinct so RTM, test-case, and hazard feedback never collide for the
     same run.
     """
-    return _render(records, source_label, run_key, HZ_HTML_TEMPLATE, "Hazard reviewer output viewer", log_entries)
+    return _render(records, source_label, run_key, HZ_HTML_TEMPLATE, "Hazard reviewer output viewer", "hazard", log_entries)
 
 
 def _read_records(jsonl_path: PathLike) -> tuple[pathlib.Path, list[dict]]:

@@ -579,6 +579,37 @@ h1 {
   word-break: break-word;
 }
 
+/* ─── Stop Run button ─── */
+.btn-stop {
+  margin-left: auto;
+  flex-shrink: 0;
+  align-self: center;
+  padding: 8px 18px;
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    opacity 0.2s;
+}
+
+.btn-stop:hover {
+  background: var(--red);
+  color: #0a0600;
+}
+
+.btn-stop:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ─── Footer ─── */
 .footer {
   margin-top: auto;
@@ -587,6 +618,41 @@ h1 {
   color: var(--muted);
   letter-spacing: 0.08em;
   text-align: center;
+}
+
+/* Compact feedback-upload control above the footer links. */
+.footer-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.feedback-chosen {
+  color: var(--green, #4caf50);
+}
+
+.feedback-status {
+  color: var(--muted);
 }
 
 /* ─── Animations ─── */

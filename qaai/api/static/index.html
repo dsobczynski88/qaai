@@ -319,6 +319,9 @@
             <ul class="progress-log" id="progress-log"></ul>
           </div>
         </div>
+        <button type="button" class="btn-stop" id="btn-stop" hidden>
+          ⏹ Stop Run
+        </button>
       </div>
 
       <div class="result-box" id="result-box">
@@ -344,10 +347,23 @@
     </div>
 
     <div class="footer">
+      <div class="footer-feedback">
+        <input type="file" id="feedback-file" accept=".json" hidden />
+        <button type="button" class="btn-link" id="btn-choose-feedback">
+          Choose feedback file…
+        </button>
+        <span class="feedback-chosen" id="feedback-chosen"></span>
+        <button type="button" class="btn-link" id="btn-upload-feedback">
+          ⬆ Upload feedback
+        </button>
+        <span class="feedback-status" id="feedback-status" aria-live="polite"></span>
+      </div>
       QAAI · Anthropic LangGraph · FastAPI &nbsp;·&nbsp;
       <a
         id="docs-link"
         href="guide/"
+        target="_blank"
+        rel="noopener noreferrer"
         style="color: var(--amber-dim); text-decoration: none"
         >Documentation</a
       >
@@ -356,7 +372,7 @@
         id="api-docs-link"
         href="/docs"
         style="color: var(--amber-dim); text-decoration: none"
-        >API Docs</a
+        >Swagger</a
       >
     </div>
 
