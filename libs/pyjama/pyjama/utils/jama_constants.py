@@ -11,7 +11,7 @@ PYJAMA_LOGGERNAME = "pyjama"
 # ----------------------------
 # Tier-3 (local disk) caching
 # ----------------------------
-CACHE_SOURCE_ROOT = "./cache/source"
+CACHE_SOURCE_ROOT = "./shared/source"
 CACHE_TIMESTAMP_FORMAT = "%Y_%m_%d_%H_%M_%S_%f"  # e.g. 2026_05_26_22_11_45_006721
 
 CACHE_PROJECTS_SUBDIR = "projects"
