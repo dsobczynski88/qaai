@@ -40,3 +40,13 @@ class BaselineRequest(BaseModel):
             "namespaced by prompt set so the two never alias."
         ),
     )
+    include_decomposition_analysis: bool = Field(
+        default=True,
+        description=(
+            "Test-case reviewer only. When True (default), decompose each "
+            "requirement into specs and review coverage per spec "
+            "(test_case_reviewer_v2). When False, skip decomposition and review "
+            "the test case directly against the original requirement text "
+            "(test_case_reviewer_v3) — faster, coarser. Ignored by other endpoints."
+        ),
+    )

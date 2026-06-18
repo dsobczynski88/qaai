@@ -10,6 +10,7 @@ Pipeline shape (v3 prompts onwards — only the coverage axis fans out per spec)
             -> (direct edge)        -> prereqs_evaluator    x 1 (test-case-level)
                 -> aggregator
 """
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -111,9 +112,16 @@ class TCDecomposerNode:
             return {"decomposed_requirements": None}
 
         cache_mode = state.get("cache_mode", "partial")
+        reqs = state["requirements"]
+        # Decompose all requirements concurrently (was a serial await-loop, the
+        # main latency bottleneck on this path). Order is preserved by gather.
+        inner_updates = await asyncio.gather(*(
+            self._inner({"requirement": req, "cache_mode": cache_mode})
+            for req in reqs
+        ))
+
         results: List[DecomposedRequirement] = []
-        for req in state["requirements"]:
-            inner_update = await self._inner({"requirement": req, "cache_mode": cache_mode})
+        for req, inner_update in zip(reqs, inner_updates):
             decomposed = inner_update.get("decomposed_requirement")
             if decomposed is not None:
                 results.append(decomposed)
@@ -186,6 +194,15 @@ class _SingleSpecAxisNode(BaseLLMNode):
         spec_id = getattr(spec, "spec_id", "") if spec else ""
         return f"{self.__class__.__name__.lower()}_{spec_id}"
 
+    def _build_axis_payload(self, state: Any) -> dict:
+        """Payload sent to the LLM. Per-spec by default; the no-decomposition
+        variant overrides this to judge the requirement directly (no spec)."""
+        return {
+            "test_case": state["test_case"].model_dump(),
+            "requirement": state["requirement"].model_dump(),
+            "decomposed_spec": state["decomposed_spec"].model_dump(),
+        }
+
     async def __call__(self, state: Any) -> dict:
         if not self.OUTPUT_KEY:
             raise RuntimeError(f"{self.__class__.__name__}: OUTPUT_KEY must be set")
@@ -205,11 +222,7 @@ class _SingleSpecAxisNode(BaseLLMNode):
                 except Exception as e:
                     logger.warning("%s: cache restore failed, re-running — %s", self.__class__.__name__, e)
 
-        payload = {
-            "test_case": state["test_case"].model_dump(),
-            "requirement": state["requirement"].model_dump(),
-            "decomposed_spec": state["decomposed_spec"].model_dump(),
-        }
+        payload = self._build_axis_payload(state)
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": json.dumps(payload)},
@@ -246,6 +259,32 @@ class _SingleSpecAxisNode(BaseLLMNode):
 class SingleSpecCoverageNode(_SingleSpecAxisNode):
     """Coverage axis evaluator — fan-out target, one Send per decomposed spec."""
     OUTPUT_KEY = "coverage_analysis"
+
+
+class SingleReqCoverageNode(_SingleSpecAxisNode):
+    """No-decomposition coverage evaluator — fan-out target, one Send per
+    requirement. Judges the test case directly against the original requirement
+    text (no decomposed_spec). Emits one SpecAnalysis per requirement with
+    spec_id == req_id, so the downstream aggregator's count logic is unchanged."""
+    OUTPUT_KEY = "coverage_analysis"
+
+    def _validate_state(self, state: Any) -> bool:
+        return all([
+            state.get("test_case") is not None,
+            state.get("requirement") is not None,
+        ])
+
+    def _cache_node_name(self, state: Any) -> str:
+        # One file per requirement under the test case's folder.
+        req = state.get("requirement")
+        req_id = getattr(req, "req_id", "") if req else ""
+        return f"{self.__class__.__name__.lower()}_{req_id}"
+
+    def _build_axis_payload(self, state: Any) -> dict:
+        return {
+            "test_case": state["test_case"].model_dump(),
+            "requirement": state["requirement"].model_dump(),
+        }
 
 
 def _make_axis_node(
@@ -333,18 +372,24 @@ def make_coverage_single_node(
     model_kwargs: dict,
     prompt_template: Optional[str] = None,
     cache_manager: Optional[Any] = None,
+    include_decomposition: bool = True,
     **template_vars,
-) -> SingleSpecCoverageNode:
+) -> _SingleSpecAxisNode:
     """Build the coverage evaluator node.
 
     Args:
         prompt_template: Optional override. If None, uses settings.prompt_config.single_test_coverage_eval
+        include_decomposition: when True (default) the coverage axis fans out per
+            decomposed spec (SingleSpecCoverageNode); when False it fans out per
+            requirement and judges the original requirement text directly
+            (SingleReqCoverageNode, no decomposed_spec input).
     """
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_coverage_eval
 
+    node_cls = SingleSpecCoverageNode if include_decomposition else SingleReqCoverageNode
     return _make_axis_node(
-        SingleSpecCoverageNode, client, model, model_kwargs, prompt_template,
+        node_cls, client, model, model_kwargs, prompt_template,
         cache_manager=cache_manager, **template_vars,
     )
 
@@ -433,6 +478,27 @@ def dispatch_coverage(state: TCReviewState) -> List[Send]:
     ]
 
 
+def dispatch_coverage_by_requirement(state: TCReviewState) -> List[Send]:
+    """No-decomposition fan-out: emit one Send per requirement to the
+    coverage_evaluator, judging the test case against the original requirement
+    text (no decomposed_spec). Mirrors dispatch_coverage's safe-no-op contract."""
+    test_case = state.get("test_case")
+    requirements = state.get("requirements")
+    if not test_case or not requirements:
+        logger.warning("dispatch_coverage_by_requirement: incomplete state, skipping fan-out")
+        return []
+
+    cache_mode = state.get("cache_mode", "partial")
+    return [
+        Send("coverage_evaluator", {
+            "test_case": test_case,
+            "requirement": requirement,
+            "cache_mode": cache_mode,
+        })
+        for requirement in requirements
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Aggregator (synthesis across the three axis lists)
 # ---------------------------------------------------------------------------
@@ -442,10 +508,11 @@ class AggregatorNode(StandardLLMNode):
     """Synthesizes the three per-axis SpecAnalysis lists into a TestCaseAssessment."""
 
     def _validate_state(self, state: TCReviewState) -> bool:
+        # decomposed_requirements is intentionally NOT required: the
+        # no-decomposition mode (test_case_reviewer_v3) never produces it.
         return all([
             state.get("test_case") is not None,
             state.get("requirements") is not None,
-            state.get("decomposed_requirements") is not None,
             state.get("review_objectives") is not None,
         ])
 
@@ -456,10 +523,12 @@ class AggregatorNode(StandardLLMNode):
     def _build_payload(self, state: TCReviewState) -> dict:
         logical = state.get("logical_structure_analysis")
         prereqs = state.get("prereqs_analysis")
+        # Absent in no-decomposition mode — the v7 aggregator prompt omits it.
+        decomposed = state.get("decomposed_requirements") or []
         return {
             "test_case": state["test_case"].model_dump(),
             "requirements": [r.model_dump() for r in state["requirements"]],
-            "decomposed_requirements": [d.model_dump() for d in state["decomposed_requirements"]],
+            "decomposed_requirements": [d.model_dump() for d in decomposed],
             "coverage_analysis": [a.model_dump() for a in state.get("coverage_analysis", [])],
             "logical_structure_analysis": logical.model_dump() if logical is not None else None,
             "prereqs_analysis": prereqs.model_dump() if prereqs is not None else None,

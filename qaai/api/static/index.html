@@ -167,6 +167,18 @@
               >i</span
             >
           </div>
+          <div class="cache-toggle">
+            <label class="cache-check">
+              <input type="checkbox" id="tc-require-decomp" checked />
+              <span>Include requirement decomposition analysis</span>
+            </label>
+            <span
+              class="cache-info"
+              tabindex="0"
+              title="When on (default), QAAI decomposes each requirement into atomic specs and evaluates coverage per spec (test_case_reviewer_v2). Turn off to skip decomposition and review each test case directly against the original requirement text (test_case_reviewer_v3) — faster, coarser-grained."
+              >i</span
+            >
+          </div>
           <button class="btn-submit" id="btn-tc" onclick="submitBaseline('tc')">
             <span>▶</span> Run Test Case Adequacy Review
           </button>

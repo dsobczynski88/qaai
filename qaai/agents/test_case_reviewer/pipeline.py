@@ -24,13 +24,14 @@ from qaai.agents.shared.data_integration import (
     PyJamaNodeConfig,
 )
 from qaai.core.cache import ReviewCacheManager
-from qaai.core.config import settings
+from qaai.core.config import PromptConfig, settings
 from qaai.utils import render_graph_png, write_graph_png_bytes
 
 from .core import TCReviewState
 from qaai.agents.shared.gate import make_validation_gate, make_gate_router
 from .nodes import (
     dispatch_coverage,
+    dispatch_coverage_by_requirement,
     make_aggregator_node,
     make_coverage_single_node,
     make_logical_single_node,
@@ -83,6 +84,8 @@ class TCReviewerRunnable:
         checkpointer: Union[MemorySaver, None] = None,
         pyjama_config: Optional[PyJamaNodeConfig] = None,
         cache_manager: Optional[ReviewCacheManager] = None,
+        prompt_config: Optional[PromptConfig] = None,
+        include_decomposition: bool = True,
     ):
         self.client = client
         self.model = model
@@ -91,37 +94,44 @@ class TCReviewerRunnable:
         self.pyjama_config = pyjama_config
         # Optional shared cache; per-run behaviour driven by state["cache_mode"].
         self.cache_manager = cache_manager
+        # Prompt templates resolved per node; defaults to the module-level config.
+        self.prompt_config = prompt_config or settings.prompt_config
+        # When False, skip requirement decomposition entirely and review the test
+        # case directly against the original requirement text.
+        self.include_decomposition = include_decomposition
         self.graph = self.build()
 
     def build(self) -> Runnable:
         sg = StateGraph(TCReviewState)
+        pc = self.prompt_config
 
         # Data integration layer
         data_integration = DataIntegrationNode(self.pyjama_config)
         transform = make_transform_node_test_case_review()
 
         cm = self.cache_manager
-        decomposer = make_tc_decomposer_node(
-            self.client, self.model, self.model_kwargs, cache_manager=cm,
-        )
         coverage_eval = make_coverage_single_node(
-            self.client, self.model, self.model_kwargs, cache_manager=cm,
+            self.client, self.model, self.model_kwargs,
+            prompt_template=pc.single_test_coverage_eval, cache_manager=cm,
+            include_decomposition=self.include_decomposition,
         )
         logical_eval = make_logical_single_node(
-            self.client, self.model, self.model_kwargs, cache_manager=cm,
+            self.client, self.model, self.model_kwargs,
+            prompt_template=pc.single_test_logical_steps, cache_manager=cm,
         )
         prereqs_eval = make_prereqs_single_node(
-            self.client, self.model, self.model_kwargs, cache_manager=cm,
+            self.client, self.model, self.model_kwargs,
+            prompt_template=pc.single_test_prereqs, cache_manager=cm,
         )
         aggregator = make_aggregator_node(
-            self.client, self.model, self.model_kwargs, cache_manager=cm,
+            self.client, self.model, self.model_kwargs,
+            prompt_template=pc.single_test_aggregator, cache_manager=cm,
         )
 
-        # Add all nodes
+        # Add the shared nodes
         sg.add_node("data_integration", data_integration)
         sg.add_node("transform", transform)
         sg.add_node("validation_gate", make_validation_gate(validate_tc_inputs))
-        sg.add_node("decomposer", decomposer)
         # Join barrier: add_conditional_edges needs a single named source for
         # each fan-out. coverage_router is the shared parent that all three
         # axis dispatchers branch from.
@@ -134,19 +144,38 @@ class TCReviewerRunnable:
         # Wire data integration layer
         sg.add_edge(START, "data_integration")
         sg.add_edge("data_integration", "transform")
-        # Input gate: skip the graph (no LLM calls) when the test case has no
-        # traced requirements or no step text; otherwise proceed to decomposer.
         sg.add_edge("transform", "validation_gate")
-        sg.add_conditional_edges(
-            "validation_gate",
-            make_gate_router(["decomposer"]),
-            ["decomposer", END],
-        )
-        sg.add_edge("decomposer", "coverage_router")
 
-        # Coverage axis fans out per spec via Send. Logical and prereqs are
-        # test-case-level (single LLM call each) — direct edges, no Send.
-        sg.add_conditional_edges("coverage_router", dispatch_coverage, ["coverage_evaluator"])
+        # Input gate: skip the graph (no LLM calls) when the test case has no
+        # traced requirements or no step text. The first node after the gate
+        # differs by mode: the decomposer (with decomposition) or the
+        # coverage_router directly (no decomposition).
+        if self.include_decomposition:
+            decomposer = make_tc_decomposer_node(
+                self.client, self.model, self.model_kwargs,
+                prompt_template=pc.decomposer, cache_manager=cm,
+            )
+            sg.add_node("decomposer", decomposer)
+            sg.add_conditional_edges(
+                "validation_gate",
+                make_gate_router(["decomposer"]),
+                ["decomposer", END],
+            )
+            sg.add_edge("decomposer", "coverage_router")
+            # Coverage axis fans out per spec via Send.
+            coverage_dispatch = dispatch_coverage
+        else:
+            sg.add_conditional_edges(
+                "validation_gate",
+                make_gate_router(["coverage_router"]),
+                ["coverage_router", END],
+            )
+            # Coverage axis fans out per requirement via Send (no specs).
+            coverage_dispatch = dispatch_coverage_by_requirement
+
+        # Coverage fans out via Send. Logical and prereqs are test-case-level
+        # (single LLM call each) — direct edges, no Send.
+        sg.add_conditional_edges("coverage_router", coverage_dispatch, ["coverage_evaluator"])
         sg.add_edge("coverage_router", "logical_evaluator")
         sg.add_edge("coverage_router", "prereqs_evaluator")
 

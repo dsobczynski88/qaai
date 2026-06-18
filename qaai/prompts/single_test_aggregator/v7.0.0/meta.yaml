@@ -1,0 +1,19 @@
+role: single_test_aggregator
+version: v7.0.0
+component: test_case_reviewer
+authored: '2026-06-18'
+status: published
+parent_version: v6.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: TestCaseAssessment
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: |
+  No-decomposition variant. Removes the decomposed_requirements input and all
+  per-spec language: the test case is reviewed directly against the original
+  requirement text. coverage_analysis is now one SpecAnalysis per requirement
+  (spec_id == req_id). Retains the v6 mandatory/recommended overall_verdict
+  roll-up. Used by the test_case_reviewer_v3 prompt set when "Include
+  requirement decomposition analysis" is toggled off.

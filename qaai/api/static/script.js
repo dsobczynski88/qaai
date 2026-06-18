@@ -318,6 +318,10 @@ async function submitBaseline(type) {
   // Edge-case toggle only applies to the RTM (test-suite) review.
   const edgeCase =
     document.getElementById(type + "-edge-case")?.checked || false;
+  // Decomposition toggle only applies to the TC (test-case) review; default on
+  // (true) when the checkbox isn't present, preserving current behavior.
+  const decompEl = document.getElementById(type + "-require-decomp");
+  const includeDecomp = decompEl ? decompEl.checked : true;
 
   if (!baseline) {
     alert("Please enter a JAMA Baseline ID.");
@@ -342,6 +346,7 @@ async function submitBaseline(type) {
         cache_mode: cacheMode,
         test_mode: testMode,
         include_edge_case_analysis: edgeCase,
+        include_decomposition_analysis: includeDecomp,
       }),
     },
     filename,

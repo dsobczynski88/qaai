@@ -33,6 +33,19 @@ def resolve_prompt_set(include_edge_case_analysis: bool) -> str:
     return PROMPT_SET_EDGE_CASE if include_edge_case_analysis else PROMPT_SET_BASELINE
 
 
+# Prompt sets selected by the test-case reviewer's "Include requirement
+# decomposition analysis" toggle. v2 (default) decomposes each requirement into
+# specs; v3 skips decomposition and reviews the test case directly against the
+# original requirement text (coverage v4 + aggregator v7, no decomposed_spec).
+TC_PROMPT_SET_DECOMP = "test_case_reviewer_v2"
+TC_PROMPT_SET_NO_DECOMP = "test_case_reviewer_v3"
+
+
+def resolve_tc_prompt_set(include_decomposition_analysis: bool) -> str:
+    """Map the test-case reviewer's decomposition toggle to a prompt-set name."""
+    return TC_PROMPT_SET_DECOMP if include_decomposition_analysis else TC_PROMPT_SET_NO_DECOMP
+
+
 def _json_default(obj):
     """Fallback JSON serializer for Pydantic models in LangGraph state dicts."""
     if hasattr(obj, 'model_dump'):
@@ -569,6 +582,10 @@ class TestCaseReviewService:
     """
     Wraps the compiled LangGraph test_case_reviewer pipeline for use by the FastAPI layer.
     Instantiated once at application startup and stored on app.state.
+
+    Holds one compiled TCReviewerRunnable per prompt set (v2 with decomposition /
+    v3 without); run_from_baseline picks the graph for the requested set based on
+    the "Include requirement decomposition analysis" toggle.
     """
 
     _logger = logging.getLogger("qaai.api.test_case")
@@ -580,23 +597,47 @@ class TestCaseReviewService:
         model_kwargs: dict = {},
         pyjama_config: Optional[PyJamaNodeConfig] = None,
         cache_manager: Optional["ReviewCacheManager"] = None,
+        tc_runnables: Optional[Dict[str, TCReviewerRunnable]] = None,
     ):
         self.pyjama_config = pyjama_config
         self.cache_manager = cache_manager
-        self.graph = TCReviewerRunnable(
-            client, model, model_kwargs, checkpointer=MemorySaver(),
-            pyjama_config=pyjama_config, cache_manager=cache_manager,
+        # One cache-enabled runnable per prompt set. v2 includes requirement
+        # decomposition; v3 skips it. Callers (lifespan) can inject pre-built
+        # runnables; otherwise build the default v2/v3 pair here.
+        self.graphs = tc_runnables or {
+            TC_PROMPT_SET_DECOMP: TCReviewerRunnable(
+                client, model, model_kwargs, checkpointer=MemorySaver(),
+                pyjama_config=pyjama_config, cache_manager=cache_manager,
+                prompt_config=PromptConfig.from_set(TC_PROMPT_SET_DECOMP),
+                include_decomposition=True,
+            ),
+            TC_PROMPT_SET_NO_DECOMP: TCReviewerRunnable(
+                client, model, model_kwargs, checkpointer=MemorySaver(),
+                pyjama_config=pyjama_config, cache_manager=cache_manager,
+                prompt_config=PromptConfig.from_set(TC_PROMPT_SET_NO_DECOMP),
+                include_decomposition=False,
+            ),
+        }
+
+    def _select(self, prompt_set: Optional[str]) -> TCReviewerRunnable:
+        """Resolve the runnable for a prompt set, defaulting to the decomposition set."""
+        return (
+            self.graphs.get(prompt_set)
+            or self.graphs.get(TC_PROMPT_SET_DECOMP)
+            or next(iter(self.graphs.values()))
         )
 
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
-        test_mode: Optional[bool] = None, progress=None,
+        test_mode: Optional[bool] = None, include_decomposition_analysis: bool = True,
+        progress=None,
     ) -> str:
         """Fetch a JAMA baseline, run the TC graph for every test case, return viewer_tc.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
-        with no live API calls when True. progress (the background Job) receives
-        live per-test-case progress.
+        with no live API calls when True. include_decomposition_analysis selects
+        the v2 (with decomposition) or v3 (without) graph. progress (the
+        background Job) receives live per-test-case progress.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -610,12 +651,16 @@ class TestCaseReviewService:
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
 
+        prompt_set = resolve_tc_prompt_set(include_decomposition_analysis)
+        runnable = self._select(prompt_set)
+
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
         run_dir = start_new_run()
-        self.graph.write_graph_png(run_dir)
+        runnable.write_graph_png(run_dir)
 
         self._logger.info(
-            "Starting batch TC review for baseline %s (test_mode=%s)", baseline_id, test_mode
+            "Starting batch TC review for baseline %s (test_mode=%s, prompt_set=%s)",
+            baseline_id, test_mode, prompt_set,
         )
 
         cfg = self.pyjama_config
@@ -641,7 +686,7 @@ class TestCaseReviewService:
             logger=self._logger,
             run_dir=run_dir,
             items=state_dicts,
-            graph=self.graph.graph,
+            graph=runnable.graph,
             thread_id_fn=lambda i, _item: f"{thread_id_prefix}-{i:03d}",
             graph_input_fn=lambda _i, state_dict: {
                 **state_dict,

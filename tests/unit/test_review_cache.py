@@ -199,6 +199,58 @@ async def test_redis_absent_disk_only(tmp_path):
     assert got["result"]["value"] == "x"
 
 
+async def test_relative_cache_dir_anchored_to_project_root(tmp_path, monkeypatch):
+    """A relative CACHE_DIR resolves against PROJECT_ROOT, not the process cwd —
+    so a set() from one working directory is read back as a tier-3 HIT from
+    another. This is the regression guard for the phantom-MISS bug where a run
+    started from a different cwd read a *different* ./shared than it wrote to."""
+    import qaai.core.cache as cache_mod
+
+    anchor = tmp_path / "repo_root"
+    anchor.mkdir()
+    monkeypatch.setattr(cache_mod, "PROJECT_ROOT", anchor)
+
+    # Construct + write from cwd A using a *relative* cache dir.
+    (tmp_path / "cwd_a").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd_a")
+    mgr = cache_mod.ReviewCacheManager(cache_dir="shared")
+    assert mgr.cache_dir == anchor / "shared"  # anchored, not cwd-relative
+    await mgr.set(
+        "TEST-88", "singlespeccoveragenode_REQ_100-S3", "v3.0.0",
+        {"value": "x"}, 0, 0, "m",
+    )
+
+    # Move to a different cwd, fresh manager, same relative cache dir → HIT.
+    (tmp_path / "cwd_b").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd_b")
+    mgr2 = cache_mod.ReviewCacheManager(cache_dir="shared")
+    assert mgr2.cache_dir == anchor / "shared"
+    got = await mgr2.get("TEST-88", "singlespeccoveragenode_REQ_100-S3", "v3.0.0")
+    assert got is not None  # cross-cwd HIT
+    assert got["result"] == {"value": "x"}
+    assert got["meta"]["cache_tier_origin"] == 3
+
+
+async def test_absolute_cache_dir_honored_unchanged(tmp_path):
+    """An absolute CACHE_DIR is used verbatim (no anchoring)."""
+    mgr = ReviewCacheManager(cache_dir=tmp_path / "abs_cache")
+    assert mgr.cache_dir == tmp_path / "abs_cache"
+
+
+async def test_disk_file_without_meta_still_hits(cache, tmp_path):
+    """An older-schema file lacking a 'meta' block must read as a HIT, not be
+    silently downgraded to a MISS by a KeyError on payload['meta']."""
+    entity_dir = tmp_path / "TEST-1"
+    entity_dir.mkdir()
+    (entity_dir / "n_v1.0.0.json").write_text(
+        json.dumps({"result": {"value": "legacy"}}), encoding="utf-8"
+    )
+    got = await cache.get("TEST-1", "n", "v1.0.0")
+    assert got is not None
+    assert got["result"] == {"value": "legacy"}
+    assert got["meta"]["cache_tier_origin"] == 3
+
+
 def test_extract_prompt_version():
     assert ReviewCacheManager.extract_prompt_version("hazard_h1/v1.0.0/template.jinja2") == "v1.0.0"
     assert ReviewCacheManager.extract_prompt_version("synthesizer/v8.0.0/template.jinja2") == "v8.0.0"

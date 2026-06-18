@@ -65,10 +65,10 @@ async def test_test_case_use_cache_false_maps_to_off(submit_and_wait, dummy_html
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", progress=None):
+                       include_decomposition_analysis=True, progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
-        rec["prompt_set"] = prompt_set
+        rec["include_decomposition_analysis"] = include_decomposition_analysis
         return dummy_html
 
     app.state.test_case_service.run_from_baseline = AsyncMock(side_effect=fake_run)
@@ -78,6 +78,8 @@ async def test_test_case_use_cache_false_maps_to_off(submit_and_wait, dummy_html
     )
     assert resp.status_code == status.HTTP_200_OK
     assert rec["cache_mode"] == "off"
+    # Decomposition defaults on when the flag is omitted (non-breaking).
+    assert rec["include_decomposition_analysis"] is True
 
 
 async def test_hazard_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
@@ -149,7 +151,7 @@ async def test_test_case_explicit_cache_mode_forwarded(submit_and_wait, dummy_ht
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", progress=None):
+                       include_decomposition_analysis=True, progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
 

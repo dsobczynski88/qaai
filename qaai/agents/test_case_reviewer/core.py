@@ -144,7 +144,9 @@ class TestCaseAssessment(BaseModel):
     """Aggregator output: holistic review of one test case."""
     test_case: TestCase
     requirements: List[Requirement]
-    decomposed_requirements: List[DecomposedRequirement]
+    # Empty in the no-decomposition mode (test_case_reviewer_v3): the test case is
+    # reviewed directly against the original requirement text, so no specs exist.
+    decomposed_requirements: List[DecomposedRequirement] = Field(default_factory=list)
     evaluated_checklist: List[EvaluatedReviewObjective] = Field(
         ..., description="Populated review-objectives checklist (one entry per objective)."
     )

@@ -111,7 +111,9 @@ async def test_case_review(
     return _submit_with_job_id(
         job_manager,
         lambda job: service.run_from_baseline(
-            body.baseline_id, job.job_id, cache_mode, test_mode, progress=job,
+            body.baseline_id, job.job_id, cache_mode, test_mode,
+            include_decomposition_analysis=body.include_decomposition_analysis,
+            progress=job,
         ),
         "qaai_tc_review.html",
     )

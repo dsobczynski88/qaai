@@ -27,6 +27,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Repo root (the directory that holds ./shared) — qaai/core/cache.py → parents[2].
+# Used to anchor a *relative* CACHE_DIR so every entrypoint (API startup, hazard
+# subgraph, tests) resolves to the SAME cache location regardless of the process
+# working directory. Mirrors the Path(__file__) idiom in qaai/utils.py.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 _REDIS_AVAILABLE = False
 try:
     import redis.asyncio as aioredis  # type: ignore[import]
@@ -64,8 +70,14 @@ class ReviewCacheManager:
         redis_url: Optional[str] = None,
         telemetry_tracker: Optional["TokenUsageTracker"] = None,
     ):
-        self.cache_dir = Path(cache_dir)
+        # Anchor a relative cache_dir to the repo root rather than the (variable)
+        # process cwd — otherwise a run started from a different directory writes
+        # to one ./shared and reads from another, producing phantom CACHE MISSes
+        # against files that visibly exist. An absolute CACHE_DIR is honored as-is.
+        p = Path(cache_dir)
+        self.cache_dir = p if p.is_absolute() else (PROJECT_ROOT / p)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("ReviewCacheManager: cache_dir=%s", self.cache_dir)
         self.telemetry_tracker = telemetry_tracker
         self._redis: Optional[object] = None
 
@@ -118,14 +130,18 @@ class ReviewCacheManager:
                 logger.warning("ReviewCacheManager: Redis get error — %s", e)
 
         # --- Tier 3: Disk ---
-        if disk_path.exists():
+        disk_existed = disk_path.exists()
+        if disk_existed:
             try:
                 raw = disk_path.read_text(encoding="utf-8")
                 payload = json.loads(raw)
-                payload["meta"]["cache_tier_origin"] = 3
+                # Guard against older-schema files that lack a "meta" block —
+                # a KeyError here used to be swallowed and reported as a MISS,
+                # making a present-but-stale file indistinguishable from absent.
+                payload.setdefault("meta", {})["cache_tier_origin"] = 3
                 logger.info(
-                    "Cache HIT (tier=3): node=%s entity=%s file=%s",
-                    node_name, entity_id, disk_path.name,
+                    "Cache HIT (tier=3): node=%s entity=%s version=%s prompt_set=%s file=%s",
+                    node_name, entity_id, prompt_version, prompt_set, disk_path,
                 )
                 # Backfill Redis so next request is faster
                 if self._redis is not None:
@@ -136,12 +152,18 @@ class ReviewCacheManager:
                 await self._emit_hit(payload, node_name, entity_id, tier=3)
                 return payload
             except Exception as e:
+                # Present but unreadable/unparseable — surface it loudly so it is
+                # not mistaken for a plain miss. Falls through to the MISS path.
                 logger.warning(
-                    "ReviewCacheManager: disk read error for %s — %s", disk_path, e
+                    "ReviewCacheManager: disk read error for %s — %s: %s",
+                    disk_path, type(e).__name__, e,
                 )
 
         # --- Miss ---
-        logger.debug("Cache MISS: node=%s entity=%s", node_name, entity_id)
+        logger.debug(
+            "Cache MISS: node=%s entity=%s version=%s prompt_set=%s disk_path=%s existed=%s",
+            node_name, entity_id, prompt_version, prompt_set, disk_path, disk_existed,
+        )
         if self.telemetry_tracker:
             try:
                 await self.telemetry_tracker.record_cache_miss(
