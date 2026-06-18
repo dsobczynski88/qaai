@@ -54,11 +54,10 @@ testpaths = ["tests"]
 python_classes = []
 
 [tool.uv.sources]
-# pyjama tracks the `main` branch of pyjama-fastapi. uv still locks a specific
-# commit SHA in uv.lock for reproducibility — a plain `uv sync`/`--frozen` installs
-# that locked SHA. To advance the pin to the latest commit on `main`, run:
-#   uv sync --upgrade-package pyjama --native-tls   (or: scripts/update_pyjama.sh / .ps1)
-pyjama = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git", branch = "main" }
+# pyjama is vendored locally at libs/pyjama (a git subtree of pyjama-fastapi) and installed
+# as an editable path dependency, so edits under libs/pyjama take effect without reinstall.
+# Sync with the standalone repo via: scripts/pyjama_subtree.ps1 pull|push  (.sh on POSIX).
+pyjama = { path = "libs/pyjama", editable = true }
 
 [project.scripts]
 qaai-api = "qaai.api.run:main"

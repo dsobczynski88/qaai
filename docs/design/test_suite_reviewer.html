@@ -33,10 +33,10 @@
   .src{color:var(--mute);font:12px ui-monospace,monospace}
   .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
   figure{margin:18px 0}
-  figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+  figure img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
   figure figcaption{color:var(--mute);font-size:13px;margin-top:6px}
   footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
-  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}}
+  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}th,td{overflow-wrap:anywhere}}
   @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
 </style>
 </head>
@@ -103,7 +103,7 @@ directly and both nodes are no-ops.</p>
 
 <h2 id="graph">Graph topology</h2>
 <figure>
-  <img src="img/test_suite_reviewer.png" alt="Test Suite Reviewer LangGraph diagram">
+  <img src="img/test_suite_reviewer.png" alt="Test Suite Reviewer LangGraph diagram" width="517" height="730" loading="lazy">
   <figcaption>Compiled <code>RTMReviewerRunnable</code> graph (rendered from the live pipeline).</figcaption>
 </figure>
 <pre class="diagram"><code>START
@@ -178,5 +178,14 @@ M1–M5 + R6 rubric, the decomposed specs, and the inlined test cases.</p>
 <footer class="doc">Generated from the QAAI (qaai) codebase on 2026-06-14.</footer>
 </main>
 </div>
+<script>
+  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
+  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
+    links.forEach(l=>l.classList.remove('active'));
+    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
+    {rootMargin:'-10% 0px -80% 0px'});
+  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
+</script>
 </body>
 </html>

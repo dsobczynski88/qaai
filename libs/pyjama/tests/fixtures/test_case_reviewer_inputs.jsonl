@@ -1,0 +1,3 @@
+{"test_name": "basic_test_cases", "baseline_id": "BASE-84465", "expected_min_test_cases": 1}
+{"test_name": "large_test_cases", "baseline_id": "BASE-LARGE", "expected_min_test_cases": 10}
+{"test_name": "empty_baseline", "baseline_id": "BASE-EMPTY"}
