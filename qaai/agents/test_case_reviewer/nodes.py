@@ -21,7 +21,6 @@ from langgraph.types import Send
 
 from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.agents.shared.nodes import (
-    BaseLLMNode,
     StandardLLMNode,
     DecomposerNode,
     make_decomposer_node,
@@ -166,15 +165,36 @@ def make_tc_decomposer_node(
 # ---------------------------------------------------------------------------
 
 
-class _SingleSpecAxisNode(BaseLLMNode):
+class _SingleSpecAxisNode(StandardLLMNode):
     """
     Common base for the three axis evaluators. Each axis differs only by
     the state field it writes into; behavior is otherwise identical:
     payload = {test_case, requirement, decomposed_spec}; response is a single
     SpecAnalysis appended via the operator.add reducer on TCReviewState.
+
+    The cache → LLM → cache flow is inherited from StandardLLMNode; this base
+    only supplies the per-spec cache-node-name, the payload, and the
+    list-wrapped state update (keyed by OUTPUT_KEY) for the operator.add reducer.
     """
 
     OUTPUT_KEY: str = ""
+
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        system_prompt: str,
+        model_kwargs: dict | None = None,
+        cache_manager: Optional[Any] = None,
+        prompt_version: str = "",
+        is_final_output: bool = False,
+        prompt_set: Optional[str] = None,
+    ):
+        # response_model is fixed for every axis (mirrors HazardEvaluatorNode).
+        super().__init__(
+            client, model, SpecAnalysis, system_prompt, model_kwargs,
+            cache_manager, prompt_version, is_final_output, prompt_set=prompt_set,
+        )
 
     def _validate_state(self, state: Any) -> bool:
         return all([
@@ -183,18 +203,21 @@ class _SingleSpecAxisNode(BaseLLMNode):
             state.get("decomposed_spec") is not None,
         ])
 
+    def _get_skip_response(self) -> dict:
+        return {self.OUTPUT_KEY: []}
+
     def _get_cache_entity_id(self, state: Any) -> Optional[str]:
         test_case = state.get("test_case")
         return getattr(test_case, "test_id", None) if test_case else None
 
-    def _cache_node_name(self, state: Any) -> str:
+    def _get_cache_node_name(self, state: Any = None) -> str:
         # One file per spec under the test case's folder — disambiguate by
         # spec_id so parallel per-spec evaluations don't clobber one key.
-        spec = state.get("decomposed_spec")
+        spec = state.get("decomposed_spec") if state else None
         spec_id = getattr(spec, "spec_id", "") if spec else ""
         return f"{self.__class__.__name__.lower()}_{spec_id}"
 
-    def _build_axis_payload(self, state: Any) -> dict:
+    def _build_payload(self, state: Any) -> dict:
         """Payload sent to the LLM. Per-spec by default; the no-decomposition
         variant overrides this to judge the requirement directly (no spec)."""
         return {
@@ -203,57 +226,9 @@ class _SingleSpecAxisNode(BaseLLMNode):
             "decomposed_spec": state["decomposed_spec"].model_dump(),
         }
 
-    async def __call__(self, state: Any) -> dict:
-        if not self.OUTPUT_KEY:
-            raise RuntimeError(f"{self.__class__.__name__}: OUTPUT_KEY must be set")
-        if not self._validate_state(state):
-            logger.debug("%s: skipping — validation failed", self.__class__.__name__)
-            return {self.OUTPUT_KEY: []}
-
-        entity_id = self._get_cache_entity_id(state)
-        node_name = self._cache_node_name(state)
-
-        # --- Tier 2/3: cache check ---
-        if self._cache_read_allowed(state) and entity_id:
-            cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version)
-            if cached is not None:
-                try:
-                    return {self.OUTPUT_KEY: [SpecAnalysis.model_validate(cached["result"])]}
-                except Exception as e:
-                    logger.warning("%s: cache restore failed, re-running — %s", self.__class__.__name__, e)
-
-        payload = self._build_axis_payload(state)
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": json.dumps(payload)},
-        ]
-
-        result = await self.client.chat_completion(
-            model=self.model,
-            messages=messages,
-            **self.model_kwargs,
-        )
-        parsed = self._parse_llm_response(result, SpecAnalysis, self.__class__.__name__)
-        if not parsed:
-            return {self.OUTPUT_KEY: []}
-
-        # --- Tier 2/3: write-through cache ---
-        if self._cache_write_allowed(state) and entity_id:
-            usage = getattr(result, "usage", None)
-            try:
-                await self.cache_manager.set(
-                    entity_id=entity_id,
-                    node_name=node_name,
-                    prompt_version=self.prompt_version,
-                    result_dict=parsed.model_dump(),
-                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
-                    model=self.model,
-                )
-            except Exception as e:
-                logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
-
-        return {self.OUTPUT_KEY: [parsed]}
+    def _format_response(self, parsed_result: Any) -> dict:
+        # List-wrapped for the operator.add reducer on OUTPUT_KEY.
+        return {self.OUTPUT_KEY: [parsed_result]}
 
 
 class SingleSpecCoverageNode(_SingleSpecAxisNode):
@@ -274,13 +249,13 @@ class SingleReqCoverageNode(_SingleSpecAxisNode):
             state.get("requirement") is not None,
         ])
 
-    def _cache_node_name(self, state: Any) -> str:
+    def _get_cache_node_name(self, state: Any = None) -> str:
         # One file per requirement under the test case's folder.
-        req = state.get("requirement")
+        req = state.get("requirement") if state else None
         req_id = getattr(req, "req_id", "") if req else ""
         return f"{self.__class__.__name__.lower()}_{req_id}"
 
-    def _build_axis_payload(self, state: Any) -> dict:
+    def _build_payload(self, state: Any) -> dict:
         return {
             "test_case": state["test_case"].model_dump(),
             "requirement": state["requirement"].model_dump(),
@@ -294,6 +269,7 @@ def _make_axis_node(
     model_kwargs: dict,
     prompt_template: str,
     cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
     **template_vars,
 ) -> _SingleSpecAxisNode:
     system_prompt = render_prompt(prompt_template, **template_vars)
@@ -304,6 +280,7 @@ def _make_axis_node(
         model_kwargs=model_kwargs,
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        prompt_set=prompt_set,
     )
 
 

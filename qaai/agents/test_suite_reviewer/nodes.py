@@ -16,7 +16,6 @@ from qaai.utils import render_prompt
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.constants import DEFAULT_BATCH_SIZE
 from qaai.agents.shared.nodes import (
-    BaseLLMNode,
     BatchedLLMNode,
     StandardLLMNode,
     DecomposerNode,
@@ -191,13 +190,34 @@ def dispatch_coverage(state: RTMReviewState) -> List[Send]:
     ]
 
 
-class SingleSpecEvaluatorNode(BaseLLMNode):
+class SingleSpecEvaluatorNode(StandardLLMNode):
     """
     Evaluates coverage for a single decomposed spec (one LLM call).
     Invoked in parallel via the LangGraph Send API — dispatch_coverage()
     creates one Send per spec; results are accumulated by the operator.add
     reducer on RTMReviewState.coverage_analysis.
+
+    The cache → LLM → cache flow is inherited from StandardLLMNode; this
+    subclass only supplies the per-spec cache-node-name, the payload, and the
+    list-wrapped state update for the operator.add reducer.
     """
+
+    def __init__(
+        self,
+        client: RateLimitOpenAIClient,
+        model: str,
+        system_prompt: str,
+        model_kwargs: dict | None = None,
+        cache_manager: Optional[Any] = None,
+        prompt_version: str = "",
+        is_final_output: bool = False,
+        prompt_set: Optional[str] = None,
+    ):
+        # response_model is fixed for this node (mirrors HazardEvaluatorNode).
+        super().__init__(
+            client, model, EvaluatedSpec, system_prompt, model_kwargs,
+            cache_manager, prompt_version, is_final_output, prompt_set=prompt_set,
+        )
 
     def _validate_state(self, state: Any) -> bool:
         return all((
@@ -206,40 +226,26 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
             state.get("test_suite") is not None,
         ))
 
+    def _get_skip_response(self) -> RTMReviewState:
+        return {"coverage_analysis": []}
+
     def _get_cache_entity_id(self, state: Any) -> Optional[str]:
         requirement = state.get("requirement")
         return getattr(requirement, "req_id", None) if requirement else None
 
-    def _cache_node_name(self, state: Any) -> str:
+    def _get_cache_node_name(self, state: Any = None) -> str:
         # One file per spec under the requirement's folder — disambiguate by
         # spec_id so parallel per-spec evaluations don't clobber one key.
-        spec = state.get("decomposed_spec")
+        spec = state.get("decomposed_spec") if state else None
         spec_id = getattr(spec, "spec_id", "") if spec else ""
         return f"singlespecevaluatornode_{spec_id}"
 
-    async def __call__(self, state: Any) -> RTMReviewState:
-        if not self._validate_state(state):
-            logger.debug("%s: skipping — validation failed", self.__class__.__name__)
-            return {"coverage_analysis": []}
-
+    def _build_payload(self, state: Any) -> dict:
         requirement = state["requirement"]
         spec = state["decomposed_spec"]
         test_suite = state["test_suite"]
         summarized_designs = state.get("summarized_designs")
-
-        entity_id = self._get_cache_entity_id(state)
-        node_name = self._cache_node_name(state)
-
-        # --- Tier 2/3: cache check ---
-        if self._cache_read_allowed(state) and entity_id:
-            cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
-            if cached is not None:
-                try:
-                    return {"coverage_analysis": [EvaluatedSpec.model_validate(cached["result"])]}
-                except Exception as e:
-                    logger.warning("%s: cache restore failed, re-running — %s", self.__class__.__name__, e)
-
-        payload = {
+        return {
             "original_requirement": requirement.model_dump(),
             "decomposed_spec": spec.model_dump(),
             "test_suite": test_suite.model_dump(),
@@ -250,38 +256,9 @@ class SingleSpecEvaluatorNode(BaseLLMNode):
             ),
         }
 
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": json.dumps(payload)},
-        ]
-
-        result = await self.client.chat_completion(
-            model=self.model,
-            messages=messages,
-            **self.model_kwargs,
-        )
-        parsed = self._parse_llm_response(result, EvaluatedSpec, self.__class__.__name__)
-        if not parsed:
-            return {"coverage_analysis": []}
-
-        # --- Tier 2/3: write-through cache ---
-        if self._cache_write_allowed(state) and entity_id:
-            usage = getattr(result, "usage", None)
-            try:
-                await self.cache_manager.set(
-                    entity_id=entity_id,
-                    node_name=node_name,
-                    prompt_version=self.prompt_version,
-                    result_dict=parsed.model_dump(),
-                    prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-                    completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
-                    model=self.model,
-                    prompt_set=self.prompt_set,
-                )
-            except Exception as e:
-                logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
-
-        return {"coverage_analysis": [parsed]}
+    def _format_response(self, parsed_result: Any) -> RTMReviewState:
+        # List-wrapped for the operator.add reducer on coverage_analysis.
+        return {"coverage_analysis": [parsed_result]}
 
 
 class SynthesizerNode(StandardLLMNode):

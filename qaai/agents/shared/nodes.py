@@ -349,13 +349,15 @@ class StandardLLMNode(BaseLLMNode, ABC):
         """
         return None
 
-    def _get_cache_node_name(self) -> str:
+    def _get_cache_node_name(self, state: Any = None) -> str:
         """Node component of the cache key. Defaults to the class name.
 
         Subclasses that share one class across several distinct graph nodes
-        (e.g. a single evaluator class parametrised per dimension) MUST
-        override this so each logical node gets its own key — otherwise they
-        collide on class name and read back each other's cached results.
+        (e.g. a single evaluator class parametrised per dimension, or a per-spec
+        fan-out evaluator) MUST override this so each logical node gets its own
+        key — otherwise they collide on class name and read back each other's
+        cached results. The optional ``state`` lets overrides disambiguate by a
+        per-invocation field (e.g. spec_id supplied via the Send payload).
         """
         return self.__class__.__name__.lower()
 
@@ -377,7 +379,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
             logger.debug("%s: skipping — validation failed", self.__class__.__name__)
             return self._get_skip_response()
 
-        node_name = self._get_cache_node_name()
+        node_name = self._get_cache_node_name(state)
 
         # --- Tier 2/3: cache check ---
         if self._cache_read_allowed(state):
@@ -509,7 +511,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
     def _get_cache_entity_id(self, state: Any) -> Optional[str]:
         return None
 
-    def _get_cache_node_name(self) -> str:
+    def _get_cache_node_name(self, state: Any = None) -> str:
         return self.__class__.__name__.lower()
 
     def _restore_from_cache(self, cached: dict) -> list:
@@ -561,7 +563,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
             return self._get_skip_response()
 
         # --- Cache check ---
-        node_name = self._get_cache_node_name()
+        node_name = self._get_cache_node_name(state)
         if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:

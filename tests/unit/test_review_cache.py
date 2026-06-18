@@ -237,6 +237,18 @@ async def test_absolute_cache_dir_honored_unchanged(tmp_path):
     assert mgr.cache_dir == tmp_path / "abs_cache"
 
 
+def test_cache_dir_defaults_to_shared_not_cache():
+    """Regression guard: the reviewer cache and pyjama's JAMA source cache both
+    default under ./shared, never ./cache. A stale ./cache default is what made
+    runs write regulatory evidence to the wrong folder on older deployments —
+    this fails CI if either default is silently reverted to ./cache."""
+    from qaai.core.config import Settings
+    from pyjama.utils.jama_constants import CACHE_SOURCE_ROOT
+
+    assert Settings.model_fields["cache_dir"].default == "./shared"
+    assert CACHE_SOURCE_ROOT.startswith("./shared")
+
+
 async def test_disk_file_without_meta_still_hits(cache, tmp_path):
     """An older-schema file lacking a 'meta' block must read as a HIT, not be
     silently downgraded to a MISS by a KeyError on payload['meta']."""

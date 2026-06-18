@@ -104,34 +104,6 @@ def parse_sha_excel(
     )
 
 
-def parse_sha_excel_to_jsonl(
-    file_path: str,
-    output_path: str,
-    sheet_name: str = "SHA Table",
-    extract_gids_format: str = "GID-\\d+",
-) -> HazardPackageFromExcel:
-    """
-    Parse the SHA Excel file into JSONL format with additional control reference fields.
-
-    Args:
-        file_path: Path to the Excel file
-        output_path: Path to output JSONL file
-        sheet_name: Excel sheet name (default = "SHA Table")
-        extract_gids_format: Regex pattern for extracting GIDs
-        
-    Returns:
-        HazardPackageFromExcel model with parsed rows
-    """
-    results = parse_sha_excel(file_path, sheet_name, extract_gids_format)
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        for item in results.rows:
-            f.write(item.model_dump_json(ensure_ascii=False) + "\n")
-
-    print(f"JSONL written to: {output_path}")
-    return results
-
-
 def merge_hazard_with_pyjama_traceability(
     excel_row: HazardRowFromExcel,
     pyjama_lookup: Dict[str, Any],
@@ -247,30 +219,3 @@ def merge_hazard_with_pyjama_traceability(
     )
 
     return output_row
-
-
-def hazard_row_to_trace_matrix(
-    hazard_row: HazardRowWithTraceMatrix,
-) -> HazardRowWithTraceMatrix:
-    """
-    Identity/passthrough function to maintain backward compatibility.
-    
-    In the old architecture, this function converted hazard dicts to records.
-    With the new architecture, HazardRowWithTraceMatrix is the canonical model
-    and contains all information via requirements_traceability field.
-    
-    This function is kept for backward compatibility with existing code paths.
-    Access relational data via hazard_row.requirements_traceability fields:
-    - hazard_row.requirements_traceability.requirements
-    - hazard_row.requirements_traceability.test_cases
-    - hazard_row.requirements_traceability.design_docs
-    - hazard_row.requirements_traceability.user_needs
-    - hazard_row.requirements_traceability.system_requirements
-    
-    Args:
-        hazard_row: HazardRowWithTraceMatrix model
-        
-    Returns:
-        The same HazardRowWithTraceMatrix (no transformation needed)
-    """
-    return hazard_row

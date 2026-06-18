@@ -88,11 +88,11 @@ def test_req_coverage_node_validation_and_payload(stub_llm_client):
     # Missing requirement -> invalid (would skip).
     assert node._validate_state({"test_case": _tc()}) is False
 
-    payload = node._build_axis_payload(state)
+    payload = node._build_payload(state)
     assert "decomposed_spec" not in payload
     assert payload["requirement"]["req_id"] == "REQ-1"
     # Cache key disambiguated by req_id, not spec_id.
-    assert node._cache_node_name(state).endswith("_REQ-1")
+    assert node._get_cache_node_name(state).endswith("_REQ-1")
 
 
 def test_aggregator_payload_handles_missing_decomposed_requirements(stub_llm_client):

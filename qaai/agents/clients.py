@@ -6,9 +6,7 @@ import time
 import nest_asyncio
 import asyncio
 from collections import deque
-from tqdm.asyncio import tqdm_asyncio
-from langchain_core.runnables import RunnableSequence
-from openai import OpenAI, AsyncOpenAI, RateLimitError
+from openai import AsyncOpenAI, RateLimitError
 from openai.types.chat import ChatCompletion
 from qaai.core.constants import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
@@ -316,8 +314,6 @@ class RateLimitOpenAIClient:
         telemetry_tracker: Optional["TokenUsageTracker"] = None,
         ):
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self.max_rpm = max_requests_per_minute
-        self.max_tpm = max_tokens_per_minute
         self.rate_limiter = OpenAIRateLimiter(max_requests_per_minute)
         self.token_limiter = OpenAITokenLimiter(max_tokens_per_minute) if max_tokens_per_minute else None
         self._token_estimator_fn = token_estimator or (lambda messages, model: _estimate_tokens_from_messages(messages, model))

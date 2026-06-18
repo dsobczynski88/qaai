@@ -462,7 +462,7 @@ def transform_hazard_record_to_state(
        c. Write to output JSONL
     
     This function handles data transformation only. Graph invocation and orchestration
-    are the responsibility of the caller (see scripts/run_hazard_pipeline.py for an example).
+    are the responsibility of the caller (see HazardReviewService in qaai/api/services.py).
 
     Args:
         excel_file_path: Path to software_hazard_analysis.xlsx

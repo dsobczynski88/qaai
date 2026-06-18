@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Any, Union
 from jinja2 import Environment, FileSystemLoader, Template
-import qaai
 
 def render_graph_png(graph) -> Union[bytes, None]:
     """Render a compiled LangGraph runnable to Mermaid PNG bytes (or None).
