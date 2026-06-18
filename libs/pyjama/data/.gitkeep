@@ -1,0 +1,187 @@
+2025-10-03 22:12:25,398 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 22:12:25,399 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 22:12:25,401 - projectlog.jama - DEBUG - __init__ completed in 0.003283 seconds
+2025-10-03 22:12:25,403 - projectlog.jama - DEBUG - Entering: process_all_data
+2025-10-03 22:12:25,404 - projectlog.jama - DEBUG - Exiting: process_all_data
+2025-10-03 22:12:25,405 - projectlog.jama - DEBUG - process_all_data completed in 0.002728 seconds
+2025-10-03 22:12:25,411 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 22:12:25,415 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 22:12:57,968 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 22:12:57,969 - projectlog.jama - DEBUG - get_proj_list completed in 32.551450 seconds
+2025-10-03 22:12:57,971 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 22:12:58,196 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 22:12:58,197 - projectlog.jama - DEBUG - get_proj_fields completed in 0.225985 seconds
+2025-10-03 22:12:58,198 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 22:12:58,202 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 22:12:58,205 - projectlog.jama - DEBUG - get_proj_num completed in 0.006430 seconds
+2025-10-03 22:12:59,480 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 22:12:59,481 - projectlog.jama - DEBUG - load_proj_info completed in 34.067984 seconds
+2025-10-03 22:12:59,483 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 22:12:59,484 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 22:12:59,486 - projectlog.jama - DEBUG - create_items_df completed in 0.002725 seconds
+2025-10-03 22:12:59,488 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 22:12:59,489 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 22:12:59,493 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 0.005417 seconds
+2025-10-03 22:24:32,033 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 22:24:32,034 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 22:24:32,036 - projectlog.jama - DEBUG - __init__ completed in 0.003268 seconds
+2025-10-03 22:24:32,037 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 22:24:32,039 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 22:25:03,847 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 22:25:03,848 - projectlog.jama - DEBUG - get_proj_list completed in 31.808344 seconds
+2025-10-03 22:25:03,851 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 22:25:04,074 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 22:25:04,075 - projectlog.jama - DEBUG - get_proj_fields completed in 0.224098 seconds
+2025-10-03 22:25:04,077 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 22:25:04,079 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 22:25:04,079 - projectlog.jama - DEBUG - get_proj_num completed in 0.002123 seconds
+2025-10-03 22:25:05,148 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 22:25:05,149 - projectlog.jama - DEBUG - load_proj_info completed in 33.111714 seconds
+2025-10-03 22:25:05,153 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 22:25:05,154 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 22:25:41,968 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 22:25:41,969 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 36.814763 seconds
+2025-10-03 22:25:42,052 - projectlog.jama - DEBUG - AttributeError:'DataFrame' object has no attribute 'str' occurred in wrapper (line 53) of proj_exception.py
+2025-10-03 22:25:42,053 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 22:25:42,055 - projectlog.jama - DEBUG - create_items_df completed in 36.901789 seconds
+2025-10-03 22:29:23,746 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 22:29:23,747 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 22:29:23,749 - projectlog.jama - DEBUG - __init__ completed in 0.002538 seconds
+2025-10-03 22:29:23,749 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 22:29:23,751 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 22:29:54,760 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 22:29:54,765 - projectlog.jama - DEBUG - get_proj_list completed in 31.013606 seconds
+2025-10-03 22:29:54,785 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 22:29:55,140 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 22:29:55,141 - projectlog.jama - DEBUG - get_proj_fields completed in 0.355427 seconds
+2025-10-03 22:29:55,143 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 22:29:55,147 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 22:29:55,147 - projectlog.jama - DEBUG - get_proj_num completed in 0.004669 seconds
+2025-10-03 22:29:57,028 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 22:29:57,029 - projectlog.jama - DEBUG - load_proj_info completed in 33.279351 seconds
+2025-10-03 22:29:57,051 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 22:29:57,055 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 22:30:08,195 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 22:30:08,197 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 11.141725 seconds
+2025-10-03 22:30:08,203 - projectlog.jama - DEBUG - UnboundLocalError:cannot access local variable 'output' where it is not associated with a value occurred in wrapper (line 53) of proj_exception.py
+2025-10-03 22:30:08,205 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 22:30:08,206 - projectlog.jama - DEBUG - create_items_df completed in 11.154803 seconds
+2025-10-03 22:31:39,154 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 22:31:39,156 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 22:31:39,158 - projectlog.jama - DEBUG - __init__ completed in 0.004063 seconds
+2025-10-03 22:31:39,160 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 22:31:39,161 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 22:32:11,868 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 22:32:11,872 - projectlog.jama - DEBUG - get_proj_list completed in 32.710555 seconds
+2025-10-03 22:32:11,873 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 22:32:12,049 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 22:32:12,050 - projectlog.jama - DEBUG - get_proj_fields completed in 0.177368 seconds
+2025-10-03 22:32:12,051 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 22:32:12,054 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 22:32:12,054 - projectlog.jama - DEBUG - get_proj_num completed in 0.002865 seconds
+2025-10-03 22:32:12,987 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 22:32:12,988 - projectlog.jama - DEBUG - load_proj_info completed in 33.828115 seconds
+2025-10-03 22:32:12,991 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 22:32:12,991 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 22:32:47,620 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 22:32:47,621 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 34.629974 seconds
+2025-10-03 22:32:47,708 - projectlog.jama - DEBUG - AttributeError:'DataFrame' object has no attribute 'str' occurred in wrapper (line 53) of proj_exception.py
+2025-10-03 22:32:47,709 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 22:32:47,713 - projectlog.jama - DEBUG - create_items_df completed in 34.722488 seconds
+2025-10-03 22:35:15,272 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 22:35:15,274 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 22:35:15,275 - projectlog.jama - DEBUG - __init__ completed in 0.003345 seconds
+2025-10-03 22:35:15,277 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 22:35:15,278 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 22:35:47,145 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 22:35:47,146 - projectlog.jama - DEBUG - get_proj_list completed in 31.868115 seconds
+2025-10-03 22:35:47,148 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 22:35:47,399 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 22:35:47,400 - projectlog.jama - DEBUG - get_proj_fields completed in 0.251498 seconds
+2025-10-03 22:35:47,402 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 22:35:47,405 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 22:35:47,406 - projectlog.jama - DEBUG - get_proj_num completed in 0.004226 seconds
+2025-10-03 22:35:48,440 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 22:35:48,441 - projectlog.jama - DEBUG - load_proj_info completed in 33.164252 seconds
+2025-10-03 22:35:48,445 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 22:35:48,446 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 22:36:24,974 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 22:36:24,976 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 36.530009 seconds
+2025-10-03 22:36:25,069 - projectlog.jama - DEBUG - AttributeError:'DataFrame' object has no attribute 'str' occurred in wrapper (line 53) of proj_exception.py
+2025-10-03 22:36:25,070 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 22:36:25,071 - projectlog.jama - DEBUG - create_items_df completed in 36.625933 seconds
+2025-10-03 22:38:44,655 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 22:38:44,657 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 22:38:44,659 - projectlog.jama - DEBUG - __init__ completed in 0.003932 seconds
+2025-10-03 22:38:44,661 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 22:38:44,664 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 22:39:15,409 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 22:39:15,410 - projectlog.jama - DEBUG - get_proj_list completed in 30.746190 seconds
+2025-10-03 22:39:15,411 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 22:39:15,578 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 22:39:15,582 - projectlog.jama - DEBUG - get_proj_fields completed in 0.170296 seconds
+2025-10-03 22:39:15,584 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 22:39:15,587 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 22:39:15,590 - projectlog.jama - DEBUG - get_proj_num completed in 0.006167 seconds
+2025-10-03 22:39:16,794 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 22:39:16,797 - projectlog.jama - DEBUG - load_proj_info completed in 32.136402 seconds
+2025-10-03 22:39:16,867 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 22:39:16,884 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 22:39:46,735 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 22:39:46,736 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 29.852371 seconds
+2025-10-03 22:39:49,559 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 22:39:49,562 - projectlog.jama - DEBUG - create_items_df completed in 32.694452 seconds
+2025-10-03 22:39:49,566 - projectlog.jama - DEBUG - Entering: create_steps_df
+2025-10-03 22:39:49,569 - projectlog.jama - DEBUG - TypeError:JamaFrame.create_steps_df() missing 2 required positional arguments: 'artifact_type' and 'typeKey_filter' occurred in wrapper (line 53) of proj_exception.py
+2025-10-03 22:39:49,570 - projectlog.jama - DEBUG - Exiting: create_steps_df
+2025-10-03 22:39:49,572 - projectlog.jama - DEBUG - create_steps_df completed in 0.005119 seconds
+2025-10-03 23:19:55,185 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 23:19:55,188 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 23:19:55,196 - projectlog.jama - DEBUG - __init__ completed in 0.011462 seconds
+2025-10-03 23:19:55,197 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 23:19:55,197 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 23:20:25,866 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 23:20:25,866 - projectlog.jama - DEBUG - get_proj_list completed in 30.668918 seconds
+2025-10-03 23:20:25,867 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 23:20:26,011 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 23:20:26,012 - projectlog.jama - DEBUG - get_proj_fields completed in 0.145183 seconds
+2025-10-03 23:20:26,013 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 23:20:26,014 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 23:20:26,017 - projectlog.jama - DEBUG - get_proj_num completed in 0.004633 seconds
+2025-10-03 23:20:27,289 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 23:20:27,290 - projectlog.jama - DEBUG - load_proj_info completed in 32.093290 seconds
+2025-10-03 23:20:27,293 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 23:20:27,294 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 23:21:03,517 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 23:21:03,518 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 36.224213 seconds
+2025-10-03 23:21:06,440 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 23:21:06,441 - projectlog.jama - DEBUG - create_items_df completed in 39.148528 seconds
+2025-10-03 23:21:06,455 - projectlog.jama - DEBUG - Entering: create_steps_df
+2025-10-03 23:21:06,457 - projectlog.jama - DEBUG - TypeError:JamaFrame.create_steps_df() missing 2 required positional arguments: 'artifact_type' and 'typeKey_filter' occurred in wrapper (line 53) of proj_exception.py
+2025-10-03 23:21:06,457 - projectlog.jama - DEBUG - Exiting: create_steps_df
+2025-10-03 23:21:06,458 - projectlog.jama - DEBUG - create_steps_df completed in 0.003434 seconds
+2025-10-03 23:23:33,199 - projectlog.jama - DEBUG - Entering: __init__
+2025-10-03 23:23:33,201 - projectlog.jama - DEBUG - Exiting: __init__
+2025-10-03 23:23:33,203 - projectlog.jama - DEBUG - __init__ completed in 0.003840 seconds
+2025-10-03 23:23:33,205 - projectlog.jama - DEBUG - Entering: load_proj_info
+2025-10-03 23:23:33,207 - projectlog.jama - DEBUG - Entering: get_proj_list
+2025-10-03 23:24:04,412 - projectlog.jama - DEBUG - Exiting: get_proj_list
+2025-10-03 23:24:04,414 - projectlog.jama - DEBUG - get_proj_list completed in 31.205858 seconds
+2025-10-03 23:24:04,418 - projectlog.jama - DEBUG - Entering: get_proj_fields
+2025-10-03 23:24:04,599 - projectlog.jama - DEBUG - Exiting: get_proj_fields
+2025-10-03 23:24:04,599 - projectlog.jama - DEBUG - get_proj_fields completed in 0.181049 seconds
+2025-10-03 23:24:04,601 - projectlog.jama - DEBUG - Entering: get_proj_num
+2025-10-03 23:24:04,603 - projectlog.jama - DEBUG - Exiting: get_proj_num
+2025-10-03 23:24:04,604 - projectlog.jama - DEBUG - get_proj_num completed in 0.003353 seconds
+2025-10-03 23:24:05,838 - projectlog.jama - DEBUG - Exiting: load_proj_info
+2025-10-03 23:24:05,839 - projectlog.jama - DEBUG - load_proj_info completed in 32.633278 seconds
+2025-10-03 23:24:05,845 - projectlog.jama - DEBUG - Entering: create_items_df
+2025-10-03 23:24:05,846 - projectlog.jama - DEBUG - Entering: load_project_items_from_proj_num
+2025-10-03 23:24:34,698 - projectlog.jama - DEBUG - Exiting: load_project_items_from_proj_num
+2025-10-03 23:24:34,700 - projectlog.jama - DEBUG - load_project_items_from_proj_num completed in 28.853330 seconds
+2025-10-03 23:24:37,237 - projectlog.jama - DEBUG - Exiting: create_items_df
+2025-10-03 23:24:37,239 - projectlog.jama - DEBUG - create_items_df completed in 31.393164 seconds
+2025-10-03 23:24:37,247 - projectlog.jama - DEBUG - Entering: create_steps_df
+2025-10-03 23:24:37,272 - projectlog.jama - DEBUG - Found 714 null values in the steps_df
+2025-10-03 23:24:39,064 - projectlog.jama - DEBUG - Exiting: create_steps_df
+2025-10-03 23:24:39,065 - projectlog.jama - DEBUG - create_steps_df completed in 1.818040 seconds
