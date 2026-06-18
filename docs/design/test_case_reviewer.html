@@ -94,10 +94,12 @@ review-objectives checklist into a <code>TestCaseAssessment</code>.</li>
 <tbody>
 <tr><td><code>test_case</code></td><td><code>TestCase</code></td><td>Yes</td><td>The single test case under review (id, description, setup, steps, expected results). <code>test_id</code> is the cache partition.</td></tr>
 <tr><td><code>requirements</code></td><td><code>List[Requirement]</code></td><td>Yes</td><td>One or more requirements the test case traces to.</td></tr>
-<tr><td><code>design_docs</code></td><td><code>List[DesignDocument]</code></td><td>Optional</td><td>Supporting design context (defaults to empty).</td></tr>
+<tr><td><code>design_docs</code></td><td><code>List[DesignDocument]</code></td><td>Accepted (unused)</td><td>Accepted on the state and defaulted to empty by the service, but <strong>not consumed by any node or prompt</strong> in this reviewer &mdash; it does not affect the verdict. (Design context <em>is</em> used by the test-suite and hazard reviewers, not here.)</td></tr>
 <tr><td><code>review_objectives</code></td><td><code>List[ReviewObjective]</code></td><td>Defaulted</td><td>The checklist (loaded from <code>review_objectives.yaml</code> when omitted).</td></tr>
 <tr><td><code>cache_mode</code></td><td><code>"off" | "partial" | "full"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>partial</code>.</td></tr>
 </tbody></table>
+
+<div class="note warn"><strong>Note &mdash; <code>design_docs</code> is currently inert here.</strong> Although the field is on <code>TCReviewState</code> and the service passes it through, no test-case-reviewer node reads it and none of its prompts reference design specifications. It is retained as a placeholder aligned with the test-suite and hazard reviewers (which <em>do</em> consume design context).</div>
 
 <h2 id="graph">Graph topology</h2>
 <figure>

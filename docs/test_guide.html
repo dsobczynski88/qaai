@@ -194,7 +194,7 @@ for project-specific data, e.g. <code>tests/fixtures/local/my_requirements.jsonl
 <li>Match the reviewer's graph-input schema per row:
 <ul>
 <li>RTM: <code>{"requirement": {...}, "test_cases": [...], "design_docs": [...]}</code></li>
-<li>TC: <code>{"test_case": {...}, "requirements": [...], "design_docs": [...]}</code></li>
+<li>TC: <code>{"test_case": {...}, "requirements": [...]}</code> (<code>design_docs</code> is accepted by the schema but unused by this reviewer &mdash; safe to omit)</li>
 </ul></li>
 <li>Run by <strong>bare filename</strong>: <code>--input-file=my_requirements.jsonl</code>
 (found via the search order above, unless shadowed by a same-named file in
