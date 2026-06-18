@@ -71,3 +71,60 @@ function openLog() {
     btn.addEventListener("click", openLog);
   }
 })();
+
+// ── Missing-required-fields warning ──
+// The input gate (qaai.agents.shared.gate) marks records review_status ==
+// "skipped" with skip_reason / missing_fields when required inputs were absent
+// and the graph short-circuited (no review produced). When any record in this
+// batch was skipped for that reason, reveal the warning banner near the top and
+// wire its "Details" button to a modal listing which fields were missing per
+// record. Reads the embedded <script id="DATA"> directly so it does not depend
+// on the per-reviewer script.js load order.
+function readData() {
+  const el = document.getElementById("DATA");
+  if (!el) return [];
+  try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; }
+}
+
+function recordLabel(rec, i) {
+  const r = rec || {};
+  const id = (r.requirement && r.requirement.req_id)
+    || (r.test_case && r.test_case.test_id)
+    || (r.hazard && r.hazard.hazard_id);
+  return id || `record ${i + 1}`;
+}
+
+function openMissingFields() {
+  const skipped = readData()
+    .map((rec, i) => ({ rec, i }))
+    .filter(({ rec }) => rec && rec.review_status === "skipped");
+  const rows = skipped.map(({ rec, i }) => {
+    const fields = Array.isArray(rec.missing_fields) ? rec.missing_fields : [];
+    const chips = fields.length
+      ? fields.map(f => `<code>${escapeHTML(f)}</code>`).join(" ")
+      : escapeHTML(rec.skip_reason || "—");
+    return `<tr>
+      <td class="cited">${escapeHTML(recordLabel(rec, i))}</td>
+      <td>${chips}</td>
+    </tr>`;
+  }).join("");
+  openModal(`
+    <h3>Missing required fields <span style="font-weight:normal;color:var(--mute)">(${skipped.length} record${skipped.length === 1 ? "" : "s"})</span></h3>
+    <p style="color:var(--mute);margin:0 0 8px">These records were skipped because required inputs were absent, so no review was produced.</p>
+    <table class="detail">
+      <thead><tr><th>Record</th><th>Missing fields</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `);
+}
+
+(function initMissingWarning() {
+  const banner = document.getElementById("missing-warning");
+  const btn = document.getElementById("missing-details-btn");
+  if (!banner) return;
+  const anySkipped = readData().some(rec => rec && rec.review_status === "skipped");
+  if (anySkipped) {
+    banner.hidden = false;
+    if (btn) btn.addEventListener("click", openMissingFields);
+  }
+})();

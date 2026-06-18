@@ -18,60 +18,8 @@ from qaai.agents.hazard_risk_reviewer.core import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-def _jama_data():
-    """Two-entry bidirectional_trace response with overlapping artifacts.
-
-    REQ-1 and REQ-2 both trace to TC-1 and DD-1 (shared) so we can assert
-    deduplication; REQ-2 adds TC-2. SYS-1 is shared across both entries and
-    carries nested user needs UND-1 (shared) and UND-2 (unique).
-    """
-    return [
-        {
-            "requirement": {"req_id": "REQ-1", "text": "Req one text"},
-            "system_requirements": [
-                {
-                    "req_id": "SYS-1",
-                    "text": "System req one",
-                    "user_needs": [{"req_id": "UND-1", "text": "Need one"}],
-                }
-            ],
-            "test_cases": [
-                {
-                    "test_id": "TC-1",
-                    "description": "Test one",
-                    "setup": "s",
-                    "steps": "st",
-                    "expectedResults": "er",
-                    "in_review_baseline": True,
-                }
-            ],
-            "design_docs": [{"doc_id": "DD-1", "name": "Design one", "description": "d"}],
-        },
-        {
-            "requirement": {"req_id": "REQ-2", "text": "Req two text"},
-            "system_requirements": [
-                {
-                    "req_id": "SYS-1",
-                    "text": "System req one",
-                    "user_needs": [
-                        {"req_id": "UND-1", "text": "Need one"},
-                        {"req_id": "UND-2", "text": "Need two"},
-                    ],
-                }
-            ],
-            "test_cases": [
-                {"test_id": "TC-1", "description": "Test one", "setup": "s",
-                 "steps": "st", "expectedResults": "er", "in_review_baseline": True},
-                {"test_id": "TC-2", "description": "Test two", "in_review_baseline": False},
-            ],
-            "design_docs": [{"doc_id": "DD-1", "name": "Design one", "description": "d"}],
-        },
-    ]
+# Test-data fixtures (`jama_data`, `bare_hazard`) live in tests/conftest.py so
+# they can be shared across the unit and integration suites.
 
 
 # ---------------------------------------------------------------------------
@@ -79,8 +27,8 @@ def _jama_data():
 # ---------------------------------------------------------------------------
 
 
-def test_aggregates_and_dedups_across_entries():
-    matrix = transform_bidirectional_trace_to_state(_jama_data())
+def test_aggregates_and_dedups_across_entries(jama_data):
+    matrix = transform_bidirectional_trace_to_state(jama_data)
 
     assert isinstance(matrix, HazardTraceMatrix)
     # One requirement per entry, no dedup collapse (distinct ids)
@@ -95,8 +43,8 @@ def test_aggregates_and_dedups_across_entries():
     assert sorted(un.req_id for un in matrix.user_needs) == ["UND-1", "UND-2"]
 
 
-def test_in_review_baseline_maps_to_in_baseline():
-    matrix = transform_bidirectional_trace_to_state(_jama_data())
+def test_in_review_baseline_maps_to_in_baseline(jama_data):
+    matrix = transform_bidirectional_trace_to_state(jama_data)
     by_id = {tc.test_id: tc for tc in matrix.test_cases}
     assert by_id["TC-1"].in_baseline is True
     assert by_id["TC-2"].in_baseline is False
@@ -127,17 +75,9 @@ def test_malformed_entries_are_skipped_not_raised():
 # ---------------------------------------------------------------------------
 
 
-def _bare_hazard():
-    """A hazard row with empty traceability (the Excel-parsed starting point)."""
-    return HazardRowWithTraceMatrix(
-        hazard_id="HAZ-1",
-        requirements_traceability=HazardTraceMatrix(),
-    )
-
-
-def test_node_merges_jama_data_onto_hazard():
+def test_node_merges_jama_data_onto_hazard(bare_hazard, jama_data):
     transform = make_transform_node_bidirectional_trace()
-    out = transform({"hazard": _bare_hazard(), "jama_data": _jama_data()})
+    out = transform({"hazard": bare_hazard, "jama_data": jama_data})
 
     assert "hazard" in out
     merged = out["hazard"]
@@ -147,14 +87,13 @@ def test_node_merges_jama_data_onto_hazard():
     assert sorted(tc.test_id for tc in merged.requirements_traceability.test_cases) == ["TC-1", "TC-2"]
 
 
-def test_node_is_noop_without_jama_data():
+def test_node_is_noop_without_jama_data(bare_hazard):
     transform = make_transform_node_bidirectional_trace()
-    hazard = _bare_hazard()
     # Local/Excel mode: no jama_data -> no-op, hazard untouched
-    assert transform({"hazard": hazard}) == {}
-    assert transform({"hazard": hazard, "jama_data": []}) == {}
+    assert transform({"hazard": bare_hazard}) == {}
+    assert transform({"hazard": bare_hazard, "jama_data": []}) == {}
 
 
-def test_node_is_noop_when_jama_data_present_but_no_hazard():
+def test_node_is_noop_when_jama_data_present_but_no_hazard(jama_data):
     transform = make_transform_node_bidirectional_trace()
-    assert transform({"jama_data": _jama_data()}) == {}
+    assert transform({"jama_data": jama_data}) == {}

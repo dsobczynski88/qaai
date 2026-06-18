@@ -28,6 +28,7 @@ from qaai.core.config import settings
 from qaai.utils import render_graph_png, write_graph_png_bytes
 
 from .core import TCReviewState
+from qaai.agents.shared.gate import make_validation_gate, make_gate_router
 from .nodes import (
     dispatch_coverage,
     make_aggregator_node,
@@ -35,6 +36,7 @@ from .nodes import (
     make_logical_single_node,
     make_prereqs_single_node,
     make_tc_decomposer_node,
+    validate_tc_inputs,
 )
 
 
@@ -118,6 +120,7 @@ class TCReviewerRunnable:
         # Add all nodes
         sg.add_node("data_integration", data_integration)
         sg.add_node("transform", transform)
+        sg.add_node("validation_gate", make_validation_gate(validate_tc_inputs))
         sg.add_node("decomposer", decomposer)
         # Join barrier: add_conditional_edges needs a single named source for
         # each fan-out. coverage_router is the shared parent that all three
@@ -131,7 +134,14 @@ class TCReviewerRunnable:
         # Wire data integration layer
         sg.add_edge(START, "data_integration")
         sg.add_edge("data_integration", "transform")
-        sg.add_edge("transform", "decomposer")
+        # Input gate: skip the graph (no LLM calls) when the test case has no
+        # traced requirements or no step text; otherwise proceed to decomposer.
+        sg.add_edge("transform", "validation_gate")
+        sg.add_conditional_edges(
+            "validation_gate",
+            make_gate_router(["decomposer"]),
+            ["decomposer", END],
+        )
         sg.add_edge("decomposer", "coverage_router")
 
         # Coverage axis fans out per spec via Send. Logical and prereqs are

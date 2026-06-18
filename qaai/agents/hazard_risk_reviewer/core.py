@@ -410,3 +410,8 @@ class HazardReviewState(TypedDict, total=False):
     summarized_user_needs: Optional[List[HazardSummarizedUserNeed]]
     hazard_findings: Annotated[List[HazardFinding], operator.add]
     hazard_assessment: Optional[HazardAssessment]
+    # Input-gate outcome (see qaai.agents.shared.gate). Mirrors BaseReviewState's
+    # gate fields, declared locally since HazardReviewState does not inherit it.
+    review_status: Optional[str]
+    skip_reason: Optional[str]
+    missing_fields: Optional[List[str]]

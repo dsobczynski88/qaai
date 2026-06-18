@@ -14,6 +14,7 @@ from qaai.agents.shared.data_integration import (
     PyJamaNodeConfig,
 )
 from .core import RTMReviewState
+from qaai.agents.shared.gate import make_validation_gate, make_gate_router
 from .nodes import (
     make_coverage_evaluator,
     make_decomposer_node,
@@ -21,6 +22,7 @@ from .nodes import (
     make_design_summarizer_node,
     make_synthesizer_node,
     dispatch_coverage,
+    validate_rtm_inputs,
 )
 
 
@@ -138,6 +140,7 @@ class RTMReviewerRunnable:
         # Add all nodes
         sg.add_node("data_integration", data_integration)
         sg.add_node("transform", transform)
+        sg.add_node("validation_gate", make_validation_gate(validate_rtm_inputs))
         sg.add_node("decomposer", decomposer)
         sg.add_node("summarizer", summarizer)
         sg.add_node("design_summarizer", design_summarizer)
@@ -151,10 +154,14 @@ class RTMReviewerRunnable:
         sg.add_edge(START, "data_integration")
         sg.add_edge("data_integration", "transform")
 
-        # Decomposer, summarizer, and design_summarizer run in parallel from transform
-        sg.add_edge("transform", "decomposer")
-        sg.add_edge("transform", "summarizer")
-        sg.add_edge("transform", "design_summarizer")
+        # Input gate: skip the graph (no LLM calls) when the requirement has no
+        # text or no traced test cases; otherwise fan out to the work nodes.
+        sg.add_edge("transform", "validation_gate")
+        sg.add_conditional_edges(
+            "validation_gate",
+            make_gate_router(["decomposer", "summarizer", "design_summarizer"]),
+            ["decomposer", "summarizer", "design_summarizer", END],
+        )
 
         # Fan-in to coverage_router, then fan-out via Send to N parallel spec evaluators
         sg.add_edge("decomposer", "coverage_router")

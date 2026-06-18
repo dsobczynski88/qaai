@@ -41,6 +41,24 @@ from .core import (
 logger = logging.getLogger(__name__)
 
 
+def validate_tc_inputs(state: TCReviewState) -> List[str]:
+    """Input-gate check for the single-test-case reviewer.
+
+    A review is meaningful only with at least one traced upstream requirement
+    and a test case that has step text to evaluate. Returns the labels of
+    missing inputs; an empty list means the graph proceeds normally.
+    See qaai.agents.shared.gate.
+    """
+    missing: List[str] = []
+    if not state.get("requirements"):
+        missing.append("requirements")
+    test_case = state.get("test_case")
+    steps = getattr(test_case, "steps", None) if test_case else None
+    if not (steps and str(steps).strip()):
+        missing.append("test_case_steps")
+    return missing
+
+
 # ---------------------------------------------------------------------------
 # Review objectives loader
 # ---------------------------------------------------------------------------

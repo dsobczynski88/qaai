@@ -49,6 +49,7 @@ dev = [
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests that make real LLM API calls (deselect with -m 'not integration')",
+    "unit: marks fast unit tests with no live LLM calls (select with -m unit)",
 ]
 testpaths = ["tests"]
 python_classes = []

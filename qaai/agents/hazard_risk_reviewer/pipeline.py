@@ -46,6 +46,7 @@ from qaai.agents.shared.data_integration import (
     PyJamaNodeConfig,
     make_transform_node_bidirectional_trace,
 )
+from qaai.agents.shared.gate import make_validation_gate, make_gate_router
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import PromptConfig, settings
@@ -61,6 +62,7 @@ from .nodes import (
     make_h6_evaluator_node,
     make_hazard_design_summarizer_node,
     make_hazard_needs_summarizer_node,
+    validate_hazard_inputs,
     RequirementReviewerNode,
 )
 
@@ -212,6 +214,11 @@ class HazardReviewerRunnable:
         # Add all nodes to the graph
         sg.add_node("data_integration", data_integration)
         sg.add_node("transform", transform)
+        sg.add_node("validation_gate", make_validation_gate(validate_hazard_inputs))
+        # No-op join the gate fans out to when inputs are valid; the early
+        # evaluators, requirement reviews, and summarizers all branch from here
+        # (so the gate has a single named successor to route to or bypass).
+        sg.add_node("work_router", lambda state: {})
         sg.add_node("h1_evaluator", h1)
         sg.add_node("h2_evaluator", h2)
         sg.add_node("h3_evaluator", h3)
@@ -229,19 +236,29 @@ class HazardReviewerRunnable:
         sg.add_edge(START, "data_integration")
         sg.add_edge("data_integration", "transform")
 
-        # Early evaluators (H1, H2, H3, H7) run after the transform
+        # Input gate: skip the graph (no LLM calls) when the hazard is missing
+        # any required SHA field or references no risk-control requirements;
+        # otherwise fan out to the work nodes via work_router.
+        sg.add_edge("transform", "validation_gate")
         sg.add_conditional_edges(
-            "transform",
+            "validation_gate",
+            make_gate_router(["work_router"]),
+            ["work_router", END],
+        )
+
+        # Early evaluators (H1, H2, H3, H7) run after the gate
+        sg.add_conditional_edges(
+            "work_router",
             dispatch_hazard_evaluators_early,
             ["h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"],
         )
 
-        # Requirement reviews also flow from transform
-        sg.add_conditional_edges("transform", dispatch_requirement_reviews, ["requirement_reviewer"])
+        # Requirement reviews also flow from work_router
+        sg.add_conditional_edges("work_router", dispatch_requirement_reviews, ["requirement_reviewer"])
 
-        # Summarizers also flow from transform
-        sg.add_edge("transform", "design_summarizer")
-        sg.add_edge("transform", "needs_summarizer")
+        # Summarizers also flow from work_router
+        sg.add_edge("work_router", "design_summarizer")
+        sg.add_edge("work_router", "needs_summarizer")
 
         # Late evaluators (H4, H5) wait for requirement_reviews AND summarizers
         # We need a join node to synchronize requirement_reviewer + design_summarizer + needs_summarizer

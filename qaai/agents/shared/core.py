@@ -27,6 +27,13 @@ class BaseReviewState(TypedDict, total=False):
     pyjama_request: Optional[Any]  # PyJamaRequest, but avoid import cycle
     jama_data: Optional[List[Dict[str, Any]]]
     jama_metadata: Optional[Dict[str, Any]]
+    # Input-gate outcome (see qaai.agents.shared.gate). Set to "skipped" with a
+    # populated skip_reason / missing_fields when required inputs are absent and
+    # the graph short-circuits to END before any LLM call. Read per-record by the
+    # viewer to render the missing-fields warning banner.
+    review_status: Optional[str]
+    skip_reason: Optional[str]
+    missing_fields: Optional[List[str]]
 
 
 class Requirement(BaseModel):

@@ -25,7 +25,11 @@ from qaai.agents.clients import (
 )
 
 from qaai.agents.hazard_risk_reviewer.core import (
-    HazardRowWithTraceMatrix
+    HazardRowWithTraceMatrix,
+    HazardTraceMatrix,
+)
+from qaai.agents.hazard_risk_reviewer.constants import (
+    HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS,
 )
 
 from qaai.agents.test_suite_reviewer.core import (
@@ -79,6 +83,41 @@ def pytest_addoption(parser):
             "Defaults to pyjama_response_unified.jsonl."
         ),
     )
+    # Default graph-invocation settings, surfaced by the `review_settings`
+    # fixture so tests never hard-code them. Each is overridable at the command
+    # line, e.g. `uv run pytest -m unit --cache-mode partial`.
+    parser.addoption(
+        "--cache-mode",
+        action="store",
+        default="off",
+        choices=["off", "partial", "full"],
+        help="cache_mode threaded into reviewer graph state (default: off).",
+    )
+    parser.addoption(
+        "--test-mode",
+        action="store",
+        default="true",
+        help=(
+            "When true, tests use the call-counting stub_llm_client instead of a "
+            "real LLM client (default: true)."
+        ),
+    )
+    parser.addoption(
+        "--include-edge-case-analysis",
+        action="store",
+        default="false",
+        help=(
+            "Selects the edge-case prompt set for the test-suite / hazard "
+            "reviewers (default: false)."
+        ),
+    )
+
+
+def _as_bool(value) -> bool:
+    """Coerce a CLI string ('true'/'1'/'yes') or bool to a bool."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _row_id(row: dict, index: int) -> str:
@@ -413,5 +452,225 @@ def _recorder_fixture(viewer_fn: str, label: str):
 jsonl_recorders    = _recorder_fixture("write_viewer",    "jsonl_recorders")
 jsonl_recorders_tc = _recorder_fixture("write_viewer_tc", "jsonl_recorders_tc")
 jsonl_recorders_hz = _recorder_fixture("write_viewer_hz", "jsonl_recorders_hz")
+
+
+# ===========================================================================
+# Graph-invocation settings + stub client
+# ===========================================================================
+
+
+@pytest.fixture
+def review_settings(request):
+    """Default reviewer graph settings, overridable from the command line.
+
+    Centralizes the knobs tests pass into a reviewer graph (cache_mode,
+    test_mode, include_edge_case_analysis) so individual tests don't hard-code
+    them. Defaults come from the CLI options registered in pytest_addoption and
+    can be overridden per run, e.g. `uv run pytest -m unit --cache-mode partial`.
+    """
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        cache_mode=request.config.getoption("--cache-mode"),
+        test_mode=_as_bool(request.config.getoption("--test-mode")),
+        include_edge_case_analysis=_as_bool(
+            request.config.getoption("--include-edge-case-analysis")
+        ),
+    )
+
+
+class _StubLLMClient:
+    """Call-counting stand-in for RateLimitOpenAIClient — makes no network calls.
+
+    Mimics the OpenAI ChatCompletion response shape consumed by the node base
+    classes (``choices[0].message.content`` + ``usage``). ``call_count`` lets a
+    test assert that a graph short-circuited before any inference
+    (``stub_llm_client.call_count == 0``). The returned content is intentionally
+    minimal — these tests exercise the input-gate skip paths, which never call
+    the client.
+    """
+
+    def __init__(self, content: str = "{}"):
+        self.call_count = 0
+        self._content = content
+        self.telemetry_tracker = None
+
+    async def chat_completion(self, *args, **kwargs):
+        from types import SimpleNamespace
+
+        self.call_count += 1
+        usage = SimpleNamespace(prompt_tokens=0, completion_tokens=0)
+        choice = SimpleNamespace(message=SimpleNamespace(content=self._content))
+        return SimpleNamespace(choices=[choice], usage=usage)
+
+
+@pytest.fixture
+def stub_llm_client():
+    """A fresh call-counting stub LLM client (realizes review_settings.test_mode)."""
+    return _StubLLMClient()
+
+
+# ===========================================================================
+# JAMA bidirectional-trace sample data (moved here from
+# tests/unit/test_hazard_bidirectional_transform.py per the conftest-only
+# fixture convention)
+# ===========================================================================
+
+
+@pytest.fixture
+def jama_data():
+    """Two-entry bidirectional_trace response with overlapping artifacts.
+
+    REQ-1 and REQ-2 both trace to TC-1 and DD-1 (shared) so we can assert
+    deduplication; REQ-2 adds TC-2. SYS-1 is shared across both entries and
+    carries nested user needs UND-1 (shared) and UND-2 (unique).
+    """
+    return [
+        {
+            "requirement": {"req_id": "REQ-1", "text": "Req one text"},
+            "system_requirements": [
+                {
+                    "req_id": "SYS-1",
+                    "text": "System req one",
+                    "user_needs": [{"req_id": "UND-1", "text": "Need one"}],
+                }
+            ],
+            "test_cases": [
+                {
+                    "test_id": "TC-1",
+                    "description": "Test one",
+                    "setup": "s",
+                    "steps": "st",
+                    "expectedResults": "er",
+                    "in_review_baseline": True,
+                }
+            ],
+            "design_docs": [{"doc_id": "DD-1", "name": "Design one", "description": "d"}],
+        },
+        {
+            "requirement": {"req_id": "REQ-2", "text": "Req two text"},
+            "system_requirements": [
+                {
+                    "req_id": "SYS-1",
+                    "text": "System req one",
+                    "user_needs": [
+                        {"req_id": "UND-1", "text": "Need one"},
+                        {"req_id": "UND-2", "text": "Need two"},
+                    ],
+                }
+            ],
+            "test_cases": [
+                {"test_id": "TC-1", "description": "Test one", "setup": "s",
+                 "steps": "st", "expectedResults": "er", "in_review_baseline": True},
+                {"test_id": "TC-2", "description": "Test two", "in_review_baseline": False},
+            ],
+            "design_docs": [{"doc_id": "DD-1", "name": "Design one", "description": "d"}],
+        },
+    ]
+
+
+@pytest.fixture
+def bare_hazard():
+    """A hazard row with empty traceability (the Excel-parsed starting point)."""
+    return HazardRowWithTraceMatrix(
+        hazard_id="HAZ-1",
+        requirements_traceability=HazardTraceMatrix(),
+    )
+
+
+# ===========================================================================
+# Bad-input fixtures for the input-gate (skip) tests
+# ===========================================================================
+#
+# Each returns the graph-input dict (sans cache_mode) for an invalid-input
+# scenario. Tests merge in cache_mode from review_settings and assert the graph
+# skips early (review_status == "skipped", zero LLM calls) — or, for the
+# "completed" case, that the gate lets the graph proceed.
+
+
+@pytest.fixture
+def rtm_input_no_test_cases():
+    """RTM: a requirement with text but zero traced test cases -> skip."""
+    return {
+        "requirement": Requirement(req_id="REQ-1", text="The system shall do X."),
+        "test_cases": [],
+    }
+
+
+@pytest.fixture
+def rtm_input_no_requirement_text():
+    """RTM: traced test cases but blank requirement text -> skip."""
+    return {
+        "requirement": Requirement(req_id="REQ-1", text=""),
+        "test_cases": [
+            TestCase(test_id="TC-1", description="d", setup="s", steps="st",
+                     expectedResults="er"),
+        ],
+    }
+
+
+@pytest.fixture
+def rtm_input_no_design_docs():
+    """RTM: valid requirement + test cases, no design docs -> proceeds (no skip)."""
+    return {
+        "requirement": Requirement(req_id="REQ-1", text="The system shall do X."),
+        "test_cases": [
+            TestCase(test_id="TC-1", description="d", setup="s", steps="st",
+                     expectedResults="er"),
+        ],
+        "design_docs": [],
+    }
+
+
+@pytest.fixture
+def tc_input_no_requirements():
+    """TC: a test case with steps but zero upstream requirements -> skip."""
+    return {
+        "test_case": TestCase(test_id="TC-1", description="d", setup="s", steps="st",
+                              expectedResults="er"),
+        "requirements": [],
+    }
+
+
+@pytest.fixture
+def tc_input_no_steps():
+    """TC: upstream requirements present but the test case has no step text -> skip."""
+    return {
+        "test_case": TestCase(test_id="TC-1", description="d", setup="s", steps="",
+                              expectedResults="er"),
+        "requirements": [Requirement(req_id="REQ-1", text="The system shall do X.")],
+    }
+
+
+def _full_hazard(**overrides) -> HazardRowWithTraceMatrix:
+    """Build a fully-populated HazardRowWithTraceMatrix (all required fields set,
+    one traced control requirement). `overrides` blank/replace specific fields."""
+    fields = {f: f"{f} value" for f in HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS}
+    fields.update(overrides)
+    trace = HazardTraceMatrix(requirements=[Requirement(req_id="REQ-1", text="ctrl")])
+    return HazardRowWithTraceMatrix(
+        **fields,
+        row_specific_controls_references=["REQ-1"],
+        requirements_traceability=trace,
+    )
+
+
+@pytest.fixture
+def hazard_input_no_controls():
+    """Hazard: all required fields present but no traced control requirements -> skip."""
+    hazard = _full_hazard()
+    hazard = hazard.model_copy(update={
+        "row_specific_controls_references": [],
+        "requirements_traceability": HazardTraceMatrix(),
+    })
+    return {"hazard": hazard}
+
+
+@pytest.fixture
+def hazard_input_missing_fields():
+    """Hazard: required fields blanked out -> skip (lists the missing field names)."""
+    # Blank a representative subset of required fields.
+    blanked = {"harm": "", "severity": "", "final_risk_rating": ""}
+    return {"hazard": _full_hazard(**blanked)}
 
 

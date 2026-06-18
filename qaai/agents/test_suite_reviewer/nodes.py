@@ -38,6 +38,24 @@ from .core import (
 )
 
 
+def validate_rtm_inputs(state: RTMReviewState) -> List[str]:
+    """Input-gate check for the test-suite reviewer.
+
+    A review is meaningful only with a non-empty requirement text and at least
+    one traced test case. Design docs are optional, so their absence is NOT a
+    miss (the graph still completes). Returns the labels of missing inputs;
+    an empty list means the graph proceeds normally. See qaai.agents.shared.gate.
+    """
+    missing: List[str] = []
+    requirement = state.get("requirement")
+    text = getattr(requirement, "text", None) if requirement else None
+    if not (text and str(text).strip()):
+        missing.append("requirement_text")
+    if not state.get("test_cases"):
+        missing.append("test_cases")
+    return missing
+
+
 class SummaryNode(BatchedLLMNode):
     """Summarizes raw test cases into structured format with batching support."""
 

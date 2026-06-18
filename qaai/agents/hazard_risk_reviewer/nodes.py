@@ -27,6 +27,7 @@ from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.utils import render_prompt
 
+from .constants import HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS
 from .core import (
     FinalAssessorProse,
     HazardAssessment,
@@ -40,6 +41,35 @@ from .core import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def validate_hazard_inputs(state: HazardReviewState) -> List[str]:
+    """Input-gate check for the hazard risk reviewer.
+
+    A review is meaningful only when the hazard record populates every required
+    SHA field (HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS) and references at
+    least one risk-control requirement (traced requirements or extracted control
+    IDs). Returns the labels of missing inputs; an empty list means the graph
+    proceeds normally. See qaai.agents.shared.gate.
+    """
+    hazard = state.get("hazard")
+    if hazard is None:
+        return ["hazard"]
+
+    missing: List[str] = []
+    for field in HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS:
+        value = getattr(hazard, field, "")
+        if not (value and str(value).strip()):
+            missing.append(field)
+
+    # No traced controls: neither traced requirements nor extracted control IDs.
+    trace = getattr(hazard, "requirements_traceability", None)
+    has_traced_reqs = bool(getattr(trace, "requirements", None)) if trace else False
+    has_control_refs = bool(getattr(hazard, "row_specific_controls_references", None))
+    if not has_traced_reqs and not has_control_refs:
+        missing.append("risk_control_requirements")
+
+    return missing
 
 
 # --- design and user needs summarizer nodes -------------------------------

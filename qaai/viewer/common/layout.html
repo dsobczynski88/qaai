@@ -16,6 +16,11 @@
     <button id="export-btn">Export feedback JSON</button>
   </div>
 </header>
+<div id="missing-warning" class="missing-warning" hidden>
+  <span>Required fields were missing from this record. As a result, the review
+  was unable to complete successfully. See additional details in logs.</span>
+  <button id="missing-details-btn" type="button">Details</button>
+</div>
 <main>
   <section class="panel left" id="left"></section>
   <section class="panel right" id="right">
