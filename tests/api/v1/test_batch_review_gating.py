@@ -1,6 +1,7 @@
 """Success-gating in `_run_batch_review`: results from a run that errors or comes
 out incomplete are purged from the cache and never reused, while one bad item no
-longer aborts the whole batch.
+longer aborts the whole batch. Also covers the live-progress + run-log behaviour
+threaded through the background Job.
 
 Pure unit test — a stub graph and a fake cache manager stand in for the real
 LangGraph pipeline and ReviewCacheManager (no LLM / no JAMA).
@@ -10,6 +11,7 @@ import logging
 
 import pytest
 
+from qaai.api.jobs import Job
 from qaai.api.services import _run_batch_review
 from qaai.core.constants import OUTPUT_JSONL_FILENAME
 
@@ -35,12 +37,14 @@ class _FakeCache:
         self.purged.append((entity_id, prompt_set))
 
 
-def _viewer_writer(outputs_path):
+def _viewer_writer(outputs_path, log_entries=None):
+    # Capture the log handed to the viewer so tests can assert on it.
+    _viewer_writer.last_log = list(log_entries or [])
     text = outputs_path.read_text(encoding="utf-8")
     return f"{outputs_path}.html" if text.strip() else None
 
 
-async def _run(items, cache, tmp_path):
+async def _run(items, cache, tmp_path, *, progress=None, missing_records_fn=None):
     return await _run_batch_review(
         logger=logger,
         run_dir=tmp_path,
@@ -52,8 +56,10 @@ async def _run(items, cache, tmp_path):
         item_noun="thing",
         entity_id_fn=lambda _i, item: item["entity"],
         is_complete_fn=lambda s: s.get("ok") is True,
+        missing_records_fn=missing_records_fn,
         cache_manager=cache,
         prompt_set="test_suite_reviewer_v4",
+        progress=progress,
     )
 
 
@@ -95,3 +101,57 @@ async def test_all_items_failing_raises(tmp_path):
         await _run(items, cache, tmp_path)
     assert ("E0", "test_suite_reviewer_v4") in cache.purged
     assert ("E1", "test_suite_reviewer_v4") in cache.purged
+
+
+async def test_progress_counts_and_run_log(tmp_path):
+    """The Job's progress counters advance once per item and the problems-only
+    run log captures errored / incomplete / missing-input notes — and the same
+    log is handed to the viewer writer."""
+    cache = _FakeCache()
+    job = Job(job_id="j1", filename="x.html")
+    items = [
+        {"entity": "E0", "behave": "ok"},          # clean
+        {"entity": "E1", "behave": "raise"},        # errored
+        {"entity": "E2", "behave": "incomplete"},   # incomplete output
+        {"entity": "E3", "behave": "ok", "missing": True},  # clean output, missing input
+    ]
+
+    def missing_records_fn(item):
+        return ["No test cases are traced to this requirement."] if item.get("missing") else []
+
+    viewer = await _run(
+        items, cache, tmp_path, progress=job, missing_records_fn=missing_records_fn
+    )
+    assert viewer is not None
+
+    # begin() set the total; record_item() advanced once per item.
+    assert job.total == 4
+    assert job.done == 4
+    # Missing-input is advisory (E3 still completed) → only E1 + E2 are failures.
+    assert job.succeeded == 2
+    assert job.failed == 2
+
+    # Problems-only log: errored (E1), incomplete (E2), missing-input (E3); E0 clean → absent.
+    by_item = {(m["item_id"], m["level"]) for m in job.messages}
+    assert ("E1", "error") in by_item
+    assert ("E2", "warning") in by_item
+    assert ("E3", "warning") in by_item
+    assert not any(m["item_id"] == "E0" for m in job.messages)
+
+    # The viewer received exactly the same run log (shared by reference).
+    assert _viewer_writer.last_log == job.messages
+
+    # ETA is None until at least one item is done, and resolves to 0 once finished
+    # (done == total ⇒ nothing remaining ⇒ None, not negative).
+    assert job.to_status_dict()["eta_seconds"] is None
+
+
+async def test_status_dict_exposes_progress_fields(tmp_path):
+    """to_status_dict carries the fields the frontend poll loop reads."""
+    job = Job(job_id="j2", filename="x.html")
+    job.begin(3)
+    job.record_item(ok=True)
+    d = job.to_status_dict()
+    assert d["total"] == 3 and d["done"] == 1 and d["succeeded"] == 1 and d["failed"] == 0
+    assert d["eta_seconds"] is not None and d["eta_seconds"] >= 0
+    assert d["messages"] == []

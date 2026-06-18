@@ -75,10 +75,19 @@ function hideStatus() {
   document.getElementById("error-box").classList.remove("visible");
 }
 
+function resetProgress() {
+  document.getElementById("progress-wrap").hidden = true;
+  document.getElementById("progress-count").textContent = "";
+  document.getElementById("progress-meta").textContent = "";
+  document.getElementById("progress-fill").style.width = "0%";
+  document.getElementById("progress-log").innerHTML = "";
+}
+
 function showLoading(title, sub) {
   document.getElementById("status-area").style.display = "block";
   document.getElementById("status-title").textContent = title;
   document.getElementById("status-sub").textContent = sub;
+  resetProgress();
   document.getElementById("status-box").classList.add("visible");
   document.getElementById("result-box").classList.remove("visible");
   document.getElementById("error-box").classList.remove("visible");
@@ -87,13 +96,131 @@ function showLoading(title, sub) {
     .scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function showResult(blob, filename) {
+function showResult(blob, filename, job) {
   document.getElementById("status-box").classList.remove("visible");
   document.getElementById("result-box").classList.add("visible");
   const url = URL.createObjectURL(blob);
   const link = document.getElementById("download-link");
   link.href = url;
   link.download = filename;
+  renderResultSummary(job);
+}
+
+// Build the completion message from the job's final counts: all-clean (green),
+// clean-with-advisories (green + notes), or some-did-not-complete (amber).
+function renderResultSummary(job) {
+  const box = document.getElementById("result-box");
+  const icon = document.getElementById("result-icon");
+  const title = document.getElementById("result-title");
+  const summary = document.getElementById("result-summary");
+  const total = (job && job.total) || 0;
+  const succeeded = (job && job.succeeded) || 0;
+  const failed = (job && job.failed) || 0;
+  const msgs = (job && job.messages) || [];
+  const plural = (n) => (n === 1 ? "" : "s");
+
+  box.classList.remove("partial");
+  summary.innerHTML = "";
+
+  const appendList = () => {
+    if (!msgs.length) return;
+    const ul = document.createElement("ul");
+    ul.className = "result-list";
+    msgs.forEach((m) => {
+      const li = document.createElement("li");
+      li.textContent = `${m.item_id ?? "—"} — ${m.text ?? ""}`;
+      ul.appendChild(li);
+    });
+    summary.appendChild(ul);
+  };
+  const appendLine = (text, marginTop) => {
+    const div = document.createElement("div");
+    if (marginTop) div.style.marginTop = "6px";
+    div.textContent = text;
+    summary.appendChild(div);
+  };
+
+  if (!total) {
+    icon.textContent = "✓";
+    title.textContent = "Review complete";
+    summary.textContent =
+      "Your report is ready. Click below to download the self-contained HTML viewer.";
+    return;
+  }
+
+  if (failed === 0) {
+    icon.textContent = "✓";
+    title.textContent = "Review complete";
+    appendLine(
+      `All ${total} item${plural(total)} reviewed successfully.` +
+        (msgs.length
+          ? ` ${msgs.length} advisory note${plural(msgs.length)} recorded:`
+          : " Your report is ready to download."),
+    );
+    appendList();
+  } else {
+    box.classList.add("partial");
+    icon.textContent = "⚠";
+    title.textContent = "Completed with issues";
+    appendLine(
+      `${succeeded} of ${total} item${plural(total)} completed cleanly — ` +
+        `${failed} did not complete fully:`,
+    );
+    appendList();
+    appendLine("These items are also flagged in the report's “View log”.", true);
+  }
+}
+
+// Update the blue progress bar, count, ETA + elapsed, and live problem list from
+// a poll. `shown` carries how many messages we've already rendered (so we only
+// append new ones). Returns nothing; mutates the DOM.
+function renderProgress(job, startTs, baseSub, shown) {
+  const total = job.total || 0;
+  const done = job.done || 0;
+  const wrap = document.getElementById("progress-wrap");
+  const sub = document.getElementById("status-sub");
+
+  if (total > 0) {
+    wrap.hidden = false;
+    const pct = Math.round((done / total) * 100);
+    document.getElementById("progress-count").textContent =
+      done === 0
+        ? `${total} item${total === 1 ? "" : "s"} to review`
+        : `[${done}/${total}] reviewed`;
+    const bar = wrap.querySelector(".progress-bar");
+    document.getElementById("progress-fill").style.width = pct + "%";
+    if (bar) bar.setAttribute("aria-valuenow", String(pct));
+    const etaText = done >= total ? "Finalizing…" : fmtEta(job.eta_seconds);
+    document.getElementById("progress-meta").textContent =
+      `${pct}% · ${etaText} · ${fmtElapsed(startTs)}`;
+    sub.textContent = baseSub;
+  } else {
+    // Total not known yet (queued, or before the JAMA fetch / Excel parse).
+    wrap.hidden = true;
+    sub.textContent = `${baseSub} · Detecting items… · ${fmtElapsed(startTs)}`;
+  }
+
+  // Append any messages we haven't shown yet (problem notes, in order).
+  const msgs = job.messages || [];
+  const log = document.getElementById("progress-log");
+  for (let i = shown.n; i < msgs.length; i++) {
+    const m = msgs[i];
+    const li = document.createElement("li");
+    li.className = "log-" + (m.level || "warning");
+    const id = document.createElement("span");
+    id.className = "log-item";
+    id.textContent = m.item_id ?? "—";
+    li.appendChild(id);
+    li.appendChild(document.createTextNode(m.text ?? ""));
+    log.appendChild(li);
+  }
+  shown.n = msgs.length;
+}
+
+function fmtEta(sec) {
+  if (sec == null) return "Estimating time remaining…";
+  if (sec < 45) return "Estimated <1 min remaining";
+  return `Estimated ${Math.round(sec / 60)} min remaining`;
 }
 
 function showError(msg) {
@@ -135,6 +262,7 @@ async function runJob(endpoint, fetchOpts, filename, label, baseSub) {
   setButtons(true);
   const startTs = Date.now();
   const myToken = ++pollToken; // claim this run; supersedes any earlier poll loop
+  const shown = { n: 0 }; // how many run-log messages we've already rendered
   try {
     const submit = await fetch(ROOT_PATH + endpoint, fetchOpts);
     if (!submit.ok) throw new Error(await parseErr(submit));
@@ -157,19 +285,19 @@ async function runJob(endpoint, fetchOpts, filename, label, baseSub) {
       const job = await statusResp.json();
 
       if (job.status === "completed") {
+        renderProgress(job, startTs, baseSub, shown); // bar to 100% + final notes
         const resultResp = await fetch(
           ROOT_PATH + "/api/v1/jobs/" + job_id + "/result",
         );
         if (!resultResp.ok) throw new Error(await parseErr(resultResp));
-        showResult(await resultResp.blob(), filename);
+        showResult(await resultResp.blob(), filename, job);
         return;
       }
       if (job.status === "failed") {
         throw new Error(job.error || "Review failed.");
       }
-      // pending / running — keep the user informed.
-      document.getElementById("status-sub").textContent =
-        `${baseSub} · ${fmtElapsed(startTs)}`;
+      // pending / running — drive the progress bar, count, ETA + elapsed, log.
+      renderProgress(job, startTs, baseSub, shown);
     }
   } catch (e) {
     // Don't clobber the UI if this loop was already superseded.

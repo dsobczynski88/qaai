@@ -9,7 +9,7 @@
 body { margin: 0; font: 14px/1.45 -apple-system, Segoe UI, sans-serif; background: var(--bg); color: var(--ink); }
 header { padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 14px; }
 header .src { color: var(--mute); font-size: 12px; }
-header button { margin-left: auto; }
+.header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 main { display: grid; grid-template-columns: 1fr 340px; gap: 18px; padding: 18px; height: calc(100vh - 56px); overflow: hidden; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow: auto; }
 .panel h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mute); }
@@ -68,6 +68,13 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 table.detail { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
 table.detail th, table.detail td { border: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
 table.detail th { background: #f2f4f7; font-weight: 600; }
+
+/* run log ("View log" modal) */
+table.log-table tr.log-error { background: var(--bad); }
+table.log-table tr.log-warning { background: var(--warn); }
+.log-badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; }
+.log-badge-error { background: var(--chip-no); }
+.log-badge-warning { background: var(--chip-warn); }
 
 /* shared across reviewer viewers (per-viewer style.css adds .modal sizing) */
 .cited { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--mute); }

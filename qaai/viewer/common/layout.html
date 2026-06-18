@@ -11,7 +11,10 @@
 <header>
   <strong>{{HEADER_TITLE}}</strong>
   <span class="src">{{SOURCE}}</span>
-  <button id="export-btn">Export feedback JSON</button>
+  <div class="header-actions">
+    <button id="view-log-btn" hidden>View log</button>
+    <button id="export-btn">Export feedback JSON</button>
+  </div>
 </header>
 <main>
   <section class="panel left" id="left"></section>
@@ -37,6 +40,7 @@
 </div>
 
 <script id="DATA" type="application/json">{{DATA}}</script>
+<script id="LOG" type="application/json">{{LOG}}</script>
 <script>
 {{JS}}
 </script>

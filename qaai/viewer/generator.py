@@ -21,39 +21,53 @@ def _render(
     run_key: str,
     template: str,
     title_prefix: str,
+    log_entries: Optional[list] = None,
 ) -> str:
     data_json = json.dumps(list(records), ensure_ascii=False)
     data_json = data_json.replace("</", "<\\/")
+    log_json = json.dumps(list(log_entries or []), ensure_ascii=False)
+    log_json = log_json.replace("</", "<\\/")
     return (
         template
         .replace("{{DATA}}", data_json)
+        .replace("{{LOG}}", log_json)
         .replace("{{SOURCE}}", _escape_html(source_label))
         .replace("{{TITLE}}", _escape_html(f"{title_prefix} — {source_label}"))
         .replace("{{RUN_KEY}}", _escape_html(run_key))
     )
 
 
-def build_viewer(records: Iterable[dict], source_label: str, run_key: str) -> str:
+def build_viewer(
+    records: Iterable[dict], source_label: str, run_key: str,
+    log_entries: Optional[list] = None,
+) -> str:
     """Render the single-file HTML viewer for RTM (test_suite_reviewer) records.
 
     ``source_label`` appears in the title/header (usually the JSONL path).
     ``run_key`` becomes part of the localStorage key that stores reviewer feedback,
     so the same run's ratings persist across re-opens of the same viewer.
+    ``log_entries`` (problem notes from the run) populate the "View log" button.
     """
-    return _render(records, source_label, run_key, HTML_TEMPLATE, "Batch output viewer")
+    return _render(records, source_label, run_key, HTML_TEMPLATE, "Batch output viewer", log_entries)
 
 
-def build_viewer_tc(records: Iterable[dict], source_label: str, run_key: str) -> str:
+def build_viewer_tc(
+    records: Iterable[dict], source_label: str, run_key: str,
+    log_entries: Optional[list] = None,
+) -> str:
     """Render the single-file HTML viewer for test-case-reviewer records.
 
     Same contract as :func:`build_viewer` but renders TCReviewState records
     using the test-case template. The localStorage key namespace is distinct
     so RTM feedback and test-case feedback never collide for the same run.
     """
-    return _render(records, source_label, run_key, TC_HTML_TEMPLATE, "Test case output viewer")
+    return _render(records, source_label, run_key, TC_HTML_TEMPLATE, "Test case output viewer", log_entries)
 
 
-def build_viewer_hz(records: Iterable[dict], source_label: str, run_key: str) -> str:
+def build_viewer_hz(
+    records: Iterable[dict], source_label: str, run_key: str,
+    log_entries: Optional[list] = None,
+) -> str:
     """Render the single-file HTML viewer for hazard-risk-reviewer records.
 
     Same contract as :func:`build_viewer` but renders HazardReviewState
@@ -61,7 +75,7 @@ def build_viewer_hz(records: Iterable[dict], source_label: str, run_key: str) ->
     distinct so RTM, test-case, and hazard feedback never collide for the
     same run.
     """
-    return _render(records, source_label, run_key, HZ_HTML_TEMPLATE, "Hazard reviewer output viewer")
+    return _render(records, source_label, run_key, HZ_HTML_TEMPLATE, "Hazard reviewer output viewer", log_entries)
 
 
 def _read_records(jsonl_path: PathLike) -> tuple[pathlib.Path, list[dict]]:
@@ -83,55 +97,61 @@ def _read_records(jsonl_path: PathLike) -> tuple[pathlib.Path, list[dict]]:
 def write_viewer(
     jsonl_path: PathLike,
     output_path: Optional[PathLike] = None,
+    log_entries: Optional[list] = None,
 ) -> Optional[pathlib.Path]:
     """Read ``jsonl_path``, render the RTM viewer, write to ``output_path``.
 
     Default output is ``<jsonl_dir>/viewer.html``. Returns the output path on
     success; returns ``None`` when the JSONL is empty (no viewer is written).
     Raises ``FileNotFoundError`` if the input path does not exist.
+    ``log_entries`` are the run's problem notes shown by the "View log" button.
     """
     src, records = _read_records(jsonl_path)
     if not records:
         return None
     out = pathlib.Path(output_path) if output_path else src.parent / "viewer.html"
     run_key = src.parent.name or src.stem
-    out.write_text(build_viewer(records, str(src), run_key), encoding="utf-8")
+    out.write_text(build_viewer(records, str(src), run_key, log_entries), encoding="utf-8")
     return out
 
 
 def write_viewer_tc(
     jsonl_path: PathLike,
     output_path: Optional[PathLike] = None,
+    log_entries: Optional[list] = None,
 ) -> Optional[pathlib.Path]:
     """Read ``jsonl_path``, render the test-case viewer, write to ``output_path``.
 
     Default output is ``<jsonl_dir>/viewer_tc.html`` so a single run directory
     can hold both an RTM viewer and a test-case viewer side by side.
+    ``log_entries`` are the run's problem notes shown by the "View log" button.
     """
     src, records = _read_records(jsonl_path)
     if not records:
         return None
     out = pathlib.Path(output_path) if output_path else src.parent / "viewer_tc.html"
     run_key = src.parent.name or src.stem
-    out.write_text(build_viewer_tc(records, str(src), run_key), encoding="utf-8")
+    out.write_text(build_viewer_tc(records, str(src), run_key, log_entries), encoding="utf-8")
     return out
 
 
 def write_viewer_hz(
     jsonl_path: PathLike,
     output_path: Optional[PathLike] = None,
+    log_entries: Optional[list] = None,
 ) -> Optional[pathlib.Path]:
     """Read ``jsonl_path``, render the hazard viewer, write to ``output_path``.
 
     Default output is ``<jsonl_dir>/viewer_hz.html`` so a single run directory
     can hold RTM, test-case, and hazard viewers side by side.
+    ``log_entries`` are the run's problem notes shown by the "View log" button.
     """
     src, records = _read_records(jsonl_path)
     if not records:
         return None
     out = pathlib.Path(output_path) if output_path else src.parent / "viewer_hz.html"
     run_key = src.parent.name or src.stem
-    out.write_text(build_viewer_hz(records, str(src), run_key), encoding="utf-8")
+    out.write_text(build_viewer_hz(records, str(src), run_key, log_entries), encoding="utf-8")
     return out
 
 

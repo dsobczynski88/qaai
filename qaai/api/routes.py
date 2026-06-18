@@ -84,8 +84,9 @@ async def test_suite_review(
 
     return _submit_with_job_id(
         job_manager,
-        lambda job_id: service.run_from_baseline(
-            body.baseline_id, job_id, cache_mode, test_mode, prompt_set=prompt_set,
+        lambda job: service.run_from_baseline(
+            body.baseline_id, job.job_id, cache_mode, test_mode,
+            prompt_set=prompt_set, progress=job,
         ),
         "qaai_rtm_review.html",
     )
@@ -109,7 +110,9 @@ async def test_case_review(
 
     return _submit_with_job_id(
         job_manager,
-        lambda job_id: service.run_from_baseline(body.baseline_id, job_id, cache_mode, test_mode),
+        lambda job: service.run_from_baseline(
+            body.baseline_id, job.job_id, cache_mode, test_mode, progress=job,
+        ),
         "qaai_tc_review.html",
     )
 
@@ -148,16 +151,17 @@ async def hazard_risk_review(
 
     return _submit_with_job_id(
         job_manager,
-        lambda job_id: service.run_from_excel_upload(
+        lambda job: service.run_from_excel_upload(
             file_bytes=file_bytes,
             filename=filename,
             project_name=project_name,
-            thread_id_prefix=job_id,
+            thread_id_prefix=job.job_id,
             sheet_name=sheet_name,
             cache_mode=resolved_cache_mode,
             test_mode=effective_test_mode,
             prompt_set=prompt_set,
             extract_gids_format=identifier_pattern,
+            progress=job,
         ),
         "qaai_hazard_review.html",
     )
@@ -166,9 +170,10 @@ async def hazard_risk_review(
 def _submit_with_job_id(job_manager: JobManager, make_coro, filename: str) -> JSONResponse:
     """Submit a review job and return 202 + job_id.
 
-    ``make_coro`` is ``job_id -> awaitable``: the service methods take the job_id
-    as their per-record thread_id prefix, and the manager passes it in when the
-    background task starts.
+    ``make_coro`` is ``Job -> awaitable``: the manager passes the whole Job in
+    when the background task starts. The service methods read ``job.job_id`` as
+    their per-record thread_id prefix and report live progress onto the Job
+    (``progress=job``), which GET /jobs/{id} then surfaces to the poller.
     """
     job = job_manager.submit(make_coro, filename)
     return JSONResponse(status_code=202, content={"job_id": job.job_id, "status": job.status})

@@ -55,6 +55,51 @@ class Job:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
+    # ── Per-run progress (driven by _run_batch_review via begin/record_item) ──
+    # total stays 0 until the service has fetched/parsed its items and called
+    # begin(); the frontend treats total==0 as "detecting items…".
+    total: int = 0
+    done: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    # Wall-clock start of actual item processing (after any queue wait), used for
+    # the ETA. None until begin() is called.
+    progress_started_at: Optional[float] = None
+    # Problem-only log: one {item_id, level, text} dict per errored / incomplete /
+    # missing-input item. Surfaced live in the UI and echoed in the report viewer.
+    messages: list = field(default_factory=list)
+
+    def begin(self, total: int) -> None:
+        """Mark the start of item processing once the total count is known."""
+        self.total = total
+        self.progress_started_at = time.time()
+        self.updated_at = time.time()
+
+    def add_message(self, entry: dict) -> None:
+        """Append a problem note (``{item_id, level, text}``) to the run log.
+        Kept separate from :meth:`record_item` so one item can emit several notes
+        (e.g. a missing-input warning plus an incomplete-output warning) while the
+        progress bar still advances exactly one step."""
+        self.messages.append(entry)
+        self.updated_at = time.time()
+
+    def record_item(self, *, ok: bool) -> None:
+        """Advance the progress bar by one finished item and tally ok/failed."""
+        self.done += 1
+        if ok:
+            self.succeeded += 1
+        else:
+            self.failed += 1
+        self.updated_at = time.time()
+
+    def _eta_seconds(self) -> Optional[float]:
+        """Estimate remaining seconds from the mean time per finished item.
+        None until at least one item is done (no basis to extrapolate)."""
+        if not self.done or self.progress_started_at is None or self.done >= self.total:
+            return None
+        elapsed = time.time() - self.progress_started_at
+        return (elapsed / self.done) * (self.total - self.done)
+
     def to_status_dict(self) -> Dict[str, object]:
         """Public status payload for GET /jobs/{id} (no internal paths)."""
         return {
@@ -62,14 +107,21 @@ class Job:
             "status": self.status,
             "filename": self.filename,
             "error": self.error,
+            "total": self.total,
+            "done": self.done,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "eta_seconds": self._eta_seconds(),
+            "messages": self.messages,
         }
 
 
-# A factory that, given the assigned job_id, returns the awaitable doing the
-# actual work. We take a factory (not a bare coroutine) so the coroutine is
-# created inside the task, after the serialization lock is held; it receives the
-# job_id because the service methods use it as their thread_id prefix.
-CoroFactory = Callable[[str], Awaitable[str]]
+# A factory that, given the assigned Job, returns the awaitable doing the actual
+# work. We take a factory (not a bare coroutine) so the coroutine is created
+# inside the task, after the serialization lock is held. It receives the whole
+# Job so the service can report progress onto it (and still read job.job_id,
+# which the service methods use as their thread_id prefix).
+CoroFactory = Callable[["Job"], Awaitable[str]]
 
 
 class JobManager:
@@ -106,7 +158,7 @@ class JobManager:
             self._set(job, RUNNING)
             logger.info("Job %s running", job.job_id)
             try:
-                result_path = await coro_factory(job.job_id)
+                result_path = await coro_factory(job)
             except ValueError as exc:
                 # Bad input (e.g. unknown baseline) — surface the detail as a 400.
                 self._fail(job, str(exc), 400)

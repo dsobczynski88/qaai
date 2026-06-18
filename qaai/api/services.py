@@ -82,6 +82,34 @@ def hazard_is_complete(state: dict) -> bool:
     return assessment is not None and isinstance(findings, list) and len(findings) == 7
 
 
+# ── Missing-required-records checks (advisory, input-based) ──
+# Each returns human-readable notes for a review item whose core traced
+# verification inputs are entirely absent. Distinct from the is_complete checks
+# above (which judge the produced output): an item can have its inputs yet still
+# fail to complete, or be flagged here yet still complete. The item id is carried
+# alongside in the run log, so the note text stays id-free.
+
+def rtm_missing_records(item: dict) -> list:
+    """RTM: flag a requirement with zero traced test cases."""
+    if not item.get("test_cases"):
+        return ["No test cases are traced to this requirement."]
+    return []
+
+
+def tc_missing_records(item: dict) -> list:
+    """Test case: flag a test case with zero upstream requirements."""
+    if not item.get("requirements"):
+        return ["No upstream requirements are traced to this test case."]
+    return []
+
+
+def hazard_missing_records(item) -> list:
+    """Hazard: flag a hazard row with zero referenced risk-control requirements."""
+    if not getattr(item, "row_specific_controls_references", None):
+        return ["No risk-control requirements are referenced for this hazard."]
+    return []
+
+
 async def _run_batch_review(
     *,
     logger: logging.Logger,
@@ -94,8 +122,10 @@ async def _run_batch_review(
     item_noun: str,
     entity_id_fn=None,
     is_complete_fn=None,
+    missing_records_fn=None,
     cache_manager=None,
     prompt_set: Optional[str] = None,
+    progress=None,
 ) -> str:
     """Shared batch loop for the three reviewer services.
 
@@ -110,6 +140,17 @@ async def _run_batch_review(
     purged (scoped to ``prompt_set``) so a failed/incomplete run is never reused.
     A hard error no longer aborts the whole batch — the item is skipped and the
     remaining items still run; the job only fails if *nothing* produced output.
+
+    Live progress + run log: when a ``progress`` handle (the background ``Job``)
+    is supplied, ``begin(total)`` is called once the item count is known and
+    ``record_item(ok=...)`` advances it per item, so GET /jobs/{id} can report
+    ``[done/total]`` + ETA to the frontend. Problem notes — an errored item, an
+    incomplete output, or (via ``missing_records_fn(item) -> list[str]``) a review
+    item whose required traced inputs are absent — are collected into a
+    problems-only ``run_log`` that is both pushed onto ``progress`` (shown live)
+    and embedded into the viewer (the "View log" button). ``missing_records_fn``
+    is advisory: a flagged item that still produces a complete output is *not*
+    counted as failed.
     """
     inputs_path = run_dir / INPUT_JSONL_FILENAME
     with inputs_path.open("w", encoding="utf-8") as f:
@@ -133,10 +174,33 @@ async def _run_batch_review(
         except Exception as exc:  # purge is best-effort
             logger.warning("Cache purge failed for %s — %s", entity_id, exc)
 
+    # Problems-only run log: one {item_id, level, text} dict per errored /
+    # incomplete / missing-input item. Shared by reference with progress.messages
+    # (shown live in the UI) and embedded into the viewer ("View log" button).
+    run_log: list = []
+
+    def _log(item_id: Optional[str], level: str, text: str) -> None:
+        entry = {"item_id": item_id, "level": level, "text": text}
+        run_log.append(entry)
+        if progress is not None:
+            progress.add_message(entry)
+
+    if progress is not None:
+        progress.begin(len(items))
+
     start = time.perf_counter()
     succeeded = 0
     failed = 0
     for i, item in enumerate(items):
+        item_id = entity_id_fn(i, item) if entity_id_fn else None
+        label = item_id or f"#{i + 1}"
+
+        # Note absent required inputs up front (advisory — does not fail the item).
+        if missing_records_fn is not None:
+            for note in missing_records_fn(item) or []:
+                logger.warning("[%d/%d] %s %s: %s", i + 1, len(items), item_noun, label, note)
+                _log(item_id, "warning", note)
+
         config = {"configurable": {"thread_id": thread_id_fn(i, item)}}
         try:
             final_state = await graph.ainvoke(graph_input_fn(i, item), config)
@@ -146,7 +210,10 @@ async def _run_batch_review(
                 "[%d/%d] %s review errored, skipping item: %s",
                 i + 1, len(items), item_noun, exc, exc_info=True,
             )
+            _log(item_id, "error", f"{item_noun.capitalize()} {label}: review errored — item skipped.")
             await _purge(i, item, "run errored")
+            if progress is not None:
+                progress.record_item(ok=False)
             continue
 
         if is_complete_fn is not None and not is_complete_fn(final_state):
@@ -156,15 +223,21 @@ async def _run_batch_review(
                 "[%d/%d] %s review incomplete — recording output but purging cache",
                 i + 1, len(items), item_noun,
             )
+            _log(item_id, "warning",
+                 f"{item_noun.capitalize()} {label}: incomplete output (rubric/coverage missing).")
             await _purge(i, item, "incomplete output")
+            if progress is not None:
+                progress.record_item(ok=False)
         else:
             succeeded += 1
             logger.info("[%d/%d] Completed %s review", i + 1, len(items), item_noun)
+            if progress is not None:
+                progress.record_item(ok=True)
 
         with outputs_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(final_state, default=_json_default) + "\n")
 
-    viewer_path = viewer_writer(outputs_path)
+    viewer_path = viewer_writer(outputs_path, log_entries=run_log)
     if viewer_path is None:
         raise ValueError(f"{item_noun} review produced no output records")
 
@@ -220,11 +293,13 @@ class RTMReviewService:
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
         test_mode: Optional[bool] = None, prompt_set: str = PROMPT_SET_BASELINE,
+        progress=None,
     ) -> str:
         """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
         with no live API calls when True. prompt_set selects the v3/v4 graph.
+        progress (the background Job) receives live per-requirement progress.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -276,8 +351,10 @@ class RTMReviewService:
             item_noun="requirement",
             entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("requirement"), "req_id", None),
             is_complete_fn=rtm_is_complete,
+            missing_records_fn=rtm_missing_records,
             cache_manager=self.cache_manager,
             prompt_set=prompt_set,
+            progress=progress,
         )
 
 
@@ -411,6 +488,7 @@ class HazardReviewService:
         test_mode: Optional[bool] = None,
         prompt_set: str = PROMPT_SET_BASELINE,
         extract_gids_format: str = "GID-\\d+",
+        progress=None,
     ) -> str:
         """Parse an uploaded SHA Excel file and run the hazard graph for every row.
 
@@ -480,8 +558,10 @@ class HazardReviewService:
             item_noun="hazard",
             entity_id_fn=lambda _i, hazard_row: getattr(hazard_row, "hazard_id", None),
             is_complete_fn=hazard_is_complete,
+            missing_records_fn=hazard_missing_records,
             cache_manager=self.cache_manager,
             prompt_set=prompt_set,
+            progress=progress,
         )
 
 
@@ -510,12 +590,13 @@ class TestCaseReviewService:
 
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
-        test_mode: Optional[bool] = None,
+        test_mode: Optional[bool] = None, progress=None,
     ) -> str:
         """Fetch a JAMA baseline, run the TC graph for every test case, return viewer_tc.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
-        with no live API calls when True.
+        with no live API calls when True. progress (the background Job) receives
+        live per-test-case progress.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -572,6 +653,8 @@ class TestCaseReviewService:
             item_noun="test case",
             entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("test_case"), "test_id", None),
             is_complete_fn=tc_is_complete,
+            missing_records_fn=tc_missing_records,
             cache_manager=self.cache_manager,
             prompt_set=None,  # test-case reviewer uses the default un-namespaced cache
+            progress=progress,
         )

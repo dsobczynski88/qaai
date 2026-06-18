@@ -293,18 +293,30 @@
           <span id="status-sub"
             >This may take several minutes. Do not close this tab.</span
           >
+          <div class="progress-wrap" id="progress-wrap" hidden>
+            <div class="progress-count" id="progress-count"></div>
+            <div
+              class="progress-bar"
+              role="progressbar"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            >
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-meta" id="progress-meta"></div>
+            <ul class="progress-log" id="progress-log"></ul>
+          </div>
         </div>
       </div>
 
       <div class="result-box" id="result-box">
-        <span class="result-icon">✓</span>
+        <span class="result-icon" id="result-icon">✓</span>
         <div class="status-text">
-          <strong>Review complete</strong>
-          <span
-            >Your report is ready. Click below to download the self-contained
-            HTML viewer.</span
-          >
-          <br />
+          <strong id="result-title">Review complete</strong>
+          <div id="result-summary">
+            Your report is ready. Click below to download the self-contained
+            HTML viewer.
+          </div>
           <a class="btn-download" id="download-link" href="#" download
             >⬇ Download Report</a
           >

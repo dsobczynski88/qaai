@@ -28,7 +28,7 @@ async def test_test_suite_use_cache_false_maps_to_off(submit_and_wait, dummy_htm
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         rec["prompt_set"] = prompt_set
@@ -47,7 +47,7 @@ async def test_test_suite_use_cache_default_is_partial(submit_and_wait, dummy_ht
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         rec["prompt_set"] = prompt_set
@@ -65,7 +65,7 @@ async def test_test_case_use_cache_false_maps_to_off(submit_and_wait, dummy_html
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         rec["prompt_set"] = prompt_set
@@ -85,7 +85,8 @@ async def test_hazard_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
                        sheet_name="SHA Table", cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+"):
+                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
+                       progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         return dummy_html
@@ -106,7 +107,8 @@ async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
                        sheet_name="SHA Table", cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+"):
+                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
+                       progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
         return dummy_html
@@ -129,7 +131,7 @@ async def test_test_suite_explicit_cache_mode_forwarded(submit_and_wait, dummy_h
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
 
@@ -147,7 +149,7 @@ async def test_test_case_explicit_cache_mode_forwarded(submit_and_wait, dummy_ht
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
 
@@ -166,7 +168,8 @@ async def test_hazard_explicit_cache_mode_forwarded(submit_and_wait, dummy_html,
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
                        sheet_name="SHA Table", cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+"):
+                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
+                       progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
 
@@ -185,7 +188,7 @@ async def test_explicit_cache_mode_overrides_use_cache(submit_and_wait, dummy_ht
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
 
@@ -205,7 +208,7 @@ async def test_test_suite_test_mode_propagates(submit_and_wait, dummy_html, sent
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["test_mode"] = test_mode
         return dummy_html
 
@@ -225,7 +228,8 @@ async def test_hazard_test_mode_propagates(submit_and_wait, dummy_html, sent, ex
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
                        sheet_name="SHA Table", cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+"):
+                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
+                       progress=None):
         rec["test_mode"] = test_mode
         return dummy_html
 
@@ -252,7 +256,7 @@ async def test_test_suite_edge_case_toggle_selects_prompt_set(
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["prompt_set"] = prompt_set
         return dummy_html
 
@@ -270,7 +274,7 @@ async def test_test_suite_edge_case_default_is_baseline(submit_and_wait, dummy_h
     rec = {}
 
     async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3"):
+                       prompt_set="test_suite_reviewer_v3", progress=None):
         rec["prompt_set"] = prompt_set
         return dummy_html
 
@@ -293,7 +297,8 @@ async def test_hazard_edge_case_toggle_selects_prompt_set(
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
                        sheet_name="SHA Table", cache_mode="partial", test_mode=None,
-                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+"):
+                       prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
+                       progress=None):
         rec["prompt_set"] = prompt_set
         return dummy_html
 
