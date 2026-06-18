@@ -11,9 +11,12 @@ config.yaml
 
 # docs
 
-# cache
-cache/*
-!/cache/.gitkeep
+# shared (reviewer cache; CACHE_DIR default ./shared)
+shared/*
+!/shared/.gitkeep
+
+# pyjama JAMA test-mode source data (local-only, pyjama-owned path)
+cache/
 
 # data
 data/*

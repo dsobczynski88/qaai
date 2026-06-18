@@ -84,8 +84,10 @@
 <tr><td><code>JAMA_CLIENT_SECRET</code></td><td><code>jama_client_secret</code></td><td><code>None</code></td><td>JAMA OAuth client secret</td></tr>
 <tr><td><code>PYJAMA_TEST_MODE</code></td><td><code>pyjama_test_mode</code></td><td><code>false</code></td><td>Cache-only JAMA, no live calls</td></tr>
 <tr><td><code>ENABLE_CACHE</code></td><td><code>enable_cache</code></td><td><code>true</code></td><td>Master review-cache switch</td></tr>
-<tr><td><code>CACHE_DIR</code></td><td><code>cache_dir</code></td><td><code>./cache</code></td><td>Disk cache directory</td></tr>
+<tr><td><code>CACHE_DIR</code></td><td><code>cache_dir</code></td><td><code>./shared</code></td><td>Disk cache directory</td></tr>
 <tr><td><code>PROMPT_SET</code></td><td><code>prompt_set</code></td><td><code>None</code></td><td>Named prompt set to load</td></tr>
+<tr><td><code>APP_ENV</code></td><td><code>app_env</code></td><td><code>DEV</code></td><td><code>TEST</code>/<code>PROD</code> pull secrets from the AWS secret store (see below)</td></tr>
+<tr><td><code>QAAI_SECRET_ID</code></td><td>(read in <code>secrets.py</code>)</td><td><code>None</code></td><td>AWS Secrets Manager secret id used when <code>APP_ENV=TEST/PROD</code></td></tr>
 <tr><td><code>ALLOWED_ORIGINS</code></td><td>(read in <code>main.py</code>)</td><td><code>*</code></td><td>CORS origins (comma-separated)</td></tr>
 <tr><td><code>ENVIRONMENT</code></td><td>(read in <code>main.py</code>)</td><td><code>development</code></td><td><code>production</code> hides <code>/docs</code> &amp; <code>/redoc</code></td></tr>
 </tbody></table>
@@ -103,10 +105,16 @@ PYJAMA_TEST_MODE=false
 
 # Caching
 ENABLE_CACHE=true
-CACHE_DIR=./cache
+CACHE_DIR=./shared
 
 # Prompts
-# PROMPT_SET=test_suite_reviewer_v4</code></pre>
+# PROMPT_SET=test_suite_reviewer_v4
+
+# Deployment environment (DEV reads this .env; TEST/PROD pull from AWS Secrets
+# Manager via EnvVariableRetriever — set QAAI_SECRET_ID + AWS_REGION on the host).
+# Locally you can mimic the AWS flow with prefixed vars, e.g. APP_ENV=PROD plus
+# PROD_API_KEY=... PROD_API_MODEL=... (no QAAI_SECRET_ID set).
+# APP_ENV=DEV</code></pre>
 
 <h2 id="models">AI model settings</h2>
 <p><code>API_KEY</code>, <code>API_BASE_URL</code>, and <code>API_MODEL</code> configure the

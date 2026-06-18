@@ -87,16 +87,16 @@ uncached.</p>
 It is the single durable store: it survives process restarts and is the artifact a reviewer or
 auditor inspects after a run.</p>
 <p>Files are laid out one folder per entity directly under the cache root
-(<code>CACHE_DIR</code>, default <code>./cache</code>):</p>
+(<code>CACHE_DIR</code>, default <code>./shared</code>):</p>
 <pre class="diagram"><code>{CACHE_DIR}/{entity_id}/{node}_{prompt_version}.json</code></pre>
 <p>The <code>entity_id</code> folder name carries a reviewer-specific prefix, so all three
 reviewers coexist under one cache root:</p>
 <table>
 <thead><tr><th>Prefix</th><th>Reviewer</th><th>Example folder</th></tr></thead>
 <tbody>
-<tr><td><code>REQ-*</code></td><td>Test Suite (RTM)</td><td><code>./cache/REQ-PUMP-101/</code></td></tr>
-<tr><td><code>TEST-*</code></td><td>Test Case</td><td><code>./cache/TEST-4417/</code></td></tr>
-<tr><td><code>HAZ-*</code></td><td>Hazard Risk</td><td><code>./cache/HAZ-12/</code></td></tr>
+<tr><td><code>REQ-*</code></td><td>Test Suite (RTM)</td><td><code>./shared/REQ-PUMP-101/</code></td></tr>
+<tr><td><code>TEST-*</code></td><td>Test Case</td><td><code>./shared/TEST-4417/</code></td></tr>
+<tr><td><code>HAZ-*</code></td><td>Hazard Risk</td><td><code>./shared/HAZ-12/</code></td></tr>
 </tbody></table>
 <p>Each file stores both the model result and a metadata sidecar in one payload, so the
 evidence is self-describing <span class="src">qaai/core/cache.py</span>:</p>
@@ -222,7 +222,7 @@ delete entity folders (or per-version files) directly.</div>
 <thead><tr><th>Setting</th><th>Default</th><th>Effect</th></tr></thead>
 <tbody>
 <tr><td><code>ENABLE_CACHE</code></td><td><code>true</code></td><td>Master switch. When <code>false</code>, no cache manager is created and every run recomputes regardless of the per-request toggle.</td></tr>
-<tr><td><code>CACHE_DIR</code></td><td><code>./cache</code></td><td>Root directory for the on-disk cache (one folder per entity).</td></tr>
+<tr><td><code>CACHE_DIR</code></td><td><code>./shared</code></td><td>Root directory for the on-disk cache (one folder per entity).</td></tr>
 </tbody></table>
 <p>Per request, the <code>use_cache</code> toggle then chooses <code>partial</code> (on) or
 <code>off</code> (off) for that run. See the

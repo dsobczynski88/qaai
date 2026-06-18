@@ -96,6 +96,12 @@ class Settings(BaseSettings):
         MAX_OUTPUT_TOKENS: Maximum output tokens per request (default: 16000)
         PROMPT_SET: Named prompt set to load (optional, e.g., "test_case_reviewer_v2")
     """
+    # Deployment environment selector (DEV / TEST / PROD). DEV (default) reads from
+    # the local .env exactly as before. TEST/PROD hydrate the process environment
+    # from the AWS secret store (or a prefixed-.env local mimic) via
+    # EnvVariableRetriever in __init__ — see below.
+    app_env: str = Field(default="DEV", alias='APP_ENV')
+
     openai_api_key: str = Field(..., alias='API_KEY')
     url: Union[str, None] = Field(default=None, alias='API_BASE_URL')
     model: str = Field(..., alias='API_MODEL')
@@ -120,9 +126,12 @@ class Settings(BaseSettings):
 
     # Reviewer cache, shared by all three reviewers (set ENABLE_CACHE=false to
     # disable entirely; CACHE_DIR holds one folder per entity id — e.g.
-    # cache/HAZ-PUMP-001, cache/REQ-PUMP-101, cache/TEST-PUMP-201).
+    # shared/HAZ-PUMP-001, shared/REQ-PUMP-101, shared/TEST-PUMP-201).
+    # The default dir is ./shared to align with sibling org apps on this infra.
+    # NOTE: the pyjama JAMA test-mode source path (./cache/source/...) is owned by
+    # the pyjama package and is NOT derived from this setting — it is unaffected.
     redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
-    cache_dir: str = Field(default="./cache", alias="CACHE_DIR")
+    cache_dir: str = Field(default="./shared", alias="CACHE_DIR")
     enable_cache: bool = Field(default=True, alias="ENABLE_CACHE")
 
     # Optional JAMA / Pyjama integration settings
@@ -140,7 +149,20 @@ class Settings(BaseSettings):
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
     
     _prompt_config_cache: Optional[PromptConfig] = None
-    
+
+    def __init__(self, **data):
+        # In a non-dev deployment (APP_ENV=TEST/PROD on AWS), pull secrets from the
+        # AWS secret store and hydrate them into the process environment BEFORE
+        # pydantic validates, so the existing env-var aliases below resolve from the
+        # store with no per-field plumbing. DEV (default) is a no-op and keeps the
+        # plain .env flow. The retriever import is lazy so boto3 stays an AWS-only
+        # optional dependency. See qaai/core/secrets.py.
+        app_env = os.getenv("APP_ENV", "DEV").upper()
+        if app_env in ("TEST", "PROD"):
+            from qaai.core.secrets import EnvVariableRetriever
+            EnvVariableRetriever.for_environment(app_env).hydrate_environment()
+        super().__init__(**data)
+
     @property
     def telemetry_file_path(self) -> str:
         return str(Path(self.log_file_path).parent / TOKEN_USAGE_JSONL_FILENAME)
@@ -168,7 +190,7 @@ settings = Settings()
 logger.info("=" * 60)
 logger.info("QAAI Configuration Loaded")
 logger.info("=" * 60)
-logger.info("OpenAI API Key: %s", settings.openai_api_key[:20] + "..." if settings.openai_api_key else "NOT SET")
+logger.info("API Key: %s", settings.openai_api_key[:20] + "..." if settings.openai_api_key else "NOT SET")
 logger.info("Model: %s", settings.model)
 logger.info("Cache Enabled: %s", settings.enable_cache)
 logger.info("Cache Dir: %s", settings.cache_dir)

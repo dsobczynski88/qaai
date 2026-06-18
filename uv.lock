@@ -2887,6 +2887,11 @@ dependencies = [
     { name = "truststore" },
 ]
 
+[package.optional-dependencies]
+aws = [
+    { name = "boto3" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "matplotlib" },
@@ -2898,6 +2903,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.34" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", specifier = ">=1.2.17" },
@@ -2920,6 +2926,7 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.66" },
     { name = "truststore", specifier = ">=0.10.4" },
 ]
+provides-extras = ["aws"]
 
 [package.metadata.requires-dev]
 dev = [

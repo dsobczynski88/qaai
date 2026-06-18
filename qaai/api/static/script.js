@@ -225,14 +225,12 @@ async function submitBaseline(type) {
 // ── Hazard submit ──
 async function submitHazard() {
   const project = document.getElementById("hz-project").value.trim();
-  const sheet =
-    document.getElementById("hz-sheet").value.trim() || "SHA Table";
+  const sheet = document.getElementById("hz-sheet").value.trim() || "SHA Table";
   const cacheMode = document.querySelector(
     'input[name="hz-cache"]:checked',
   ).value;
   const testMode = document.getElementById("hz-test-mode").checked;
-  const edgeCase =
-    document.getElementById("hz-edge-case")?.checked || false;
+  const edgeCase = document.getElementById("hz-edge-case")?.checked || false;
   const fileInput = document.getElementById("hz-file");
 
   if (!project) {
