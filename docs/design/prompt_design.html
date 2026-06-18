@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAAI &middot; Prompt Design</title>
+<style>
+  :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
+    --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--bad:#b22;--maxw:880px}
+  @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;
+    --line:#222a33;--accent:#6ea8ff;--code-bg:#161b22;--sidebar:#11161c;--ok:#5bd07e;--warn:#e3b341;--bad:#ff7b72}}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .layout{display:grid;grid-template-columns:266px 1fr;min-height:100vh}
+  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:24px 18px;background:var(--sidebar);border-right:1px solid var(--line);font-size:14px}
+  nav.toc strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
+  nav.toc a{display:block;color:var(--mute);text-decoration:none;padding:3px 0}
+  nav.toc a:hover,nav.toc a.active{color:var(--accent)}
+  main{max-width:var(--maxw);padding:32px 30px 90px;margin:0 auto;width:100%}
+  header.doc{border-bottom:1px solid var(--line);margin-bottom:8px;padding-bottom:12px}
+  header.doc .meta{color:var(--mute);font-size:13px}
+  h1,h2,h3{line-height:1.25;scroll-margin-top:14px}
+  h2{margin-top:40px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{margin-top:26px}
+  a{color:var(--accent)}
+  code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
+  pre code{background:none;padding:0}
+  pre.diagram{line-height:1.35}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--code-bg)}
+  .src{color:var(--mute);font:12px ui-monospace,monospace}
+  .pill{display:inline-block;font:12px ui-monospace,monospace;padding:1px 7px;border-radius:999px;border:1px solid var(--line)}
+  .get{color:var(--ok)}.post{color:var(--accent)}
+  .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
+  .note.warn{border-left-color:var(--warn)}
+  figure{margin:18px 0}
+  figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+  figure figcaption{color:var(--mute);font-size:13px;margin-top:6px}
+  footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
+  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}}
+  @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Table of contents">
+  <strong>Prompt Design</strong>
+  <a href="#summary">Executive summary</a>
+  <a href="#principles-core">Five core principles</a>
+  <a href="#overview">Consolidated app overview</a>
+  <a href="#pattern">Shared design pattern</a>
+  <a href="#ts">Test Suite Reviewer</a>
+  <a href="#tc">Test Case Reviewer</a>
+  <a href="#hz">Hazard Risk Reviewer</a>
+  <a href="#alignment">Cross-app standard alignment</a>
+  <a href="#design-principles">Prompt design principles</a>
+  <a href="#output">Output &amp; evidence model</a>
+  <a href="#appendix">Appendix A &middot; Traceability</a>
+  <a href="#conclusion">Conclusion</a>
+  <strong style="margin-top:16px">More docs</strong>
+  <a href="../index.html">&larr; Docs home</a>
+  <a href="agents.html">Agent design overview</a>
+  <a href="test_suite_reviewer.html">Test Suite Reviewer</a>
+  <a href="test_case_reviewer.html">Test Case Reviewer</a>
+  <a href="hazard_risk_reviewer.html">Hazard Risk Reviewer</a>
+  <a href="../api.html">API guide</a>
+</nav>
+<main>
+<header class="doc">
+  <h1>Prompt Design</h1>
+  <div class="meta">QAAI (qaai) &middot; prompt suites for all three reviewers &middot; Standards: ISO/IEC/IEEE&nbsp;29148:2018, ISO/IEC/IEEE&nbsp;29119-3:2021, ISO&nbsp;14971:2007(E) &middot; generated from the codebase 2026-06-18</div>
+</header>
+
+<p><strong>Apps:</strong> Test Suite Reviewer, Test Case Reviewer, and Hazard Risk Reviewer.
+This document consolidates the prompt design descriptions into a single, concise design
+narrative. It captures how the prompt suites transform requirements engineering, software
+test documentation, and medical-device risk-management expectations into deterministic,
+auditable LLM review workflows.</p>
+
+<div class="note"><strong>A design narrative, not a code reference.</strong> This page
+describes the <em>intent and structure</em> of the prompt suites behind the three
+reviewers. For the runnable graph topologies, node classes, and rubric verdict logic,
+see the per-reviewer design pages:
+<a href="test_suite_reviewer.html">Test Suite Reviewer</a>,
+<a href="test_case_reviewer.html">Test Case Reviewer</a>, and
+<a href="hazard_risk_reviewer.html">Hazard Risk Reviewer</a>.</div>
+
+<h2 id="summary">Executive summary</h2>
+<p>Across the three source designs, the common architectural pattern is a
+<strong>regulated evidence reviewer</strong> rather than a general-purpose summarizer.
+Each app narrows the review scope to one controlled unit &mdash; one requirement/test
+suite, one traced test case, or one hazard record &mdash; and decomposes that unit into
+objective, evidence-based checks.</p>
+
+<h3 id="principles-core">The five core principles</h3>
+<ol>
+<li><strong>Atomic decomposition before judgment.</strong> Requirements are decomposed
+into singular, verifiable specifications; hazards are decomposed through hazard &rarr;
+sequence &rarr; hazardous situation &rarr; harm; test cases are decomposed into setup,
+steps, expected results, and trace targets.</li>
+<li><strong>Objective evidence over implication.</strong> Coverage, verification, and
+risk-control adequacy are credited only when explicit documented evidence exists:
+protocol steps, expected results, acceptance criteria, traced requirement IDs, traced
+test IDs, control requirements, or residual-risk rationale.</li>
+<li><strong>Traceability as a first-class output.</strong> Each workflow preserves
+identifiers across parent requirement, decomposed specification, test case, requirement,
+hazard, risk-control, and residual-risk fields so outputs can function as audit-ready
+review records.</li>
+<li><strong>Deterministic verdicts.</strong> Each app converts independent findings into
+a binary overall disposition using defined roll-up rules. Advisory, Partial, and N-A
+paths are allowed only under narrow, documented conditions.</li>
+<li><strong>Semantic integrity.</strong> The prompts protect source meaning and regulated
+terminology. They reject vocabulary drift, invented implementation mechanisms, malformed
+hazard semantics, and unsupported residual-risk or verification claims.</li>
+</ol>
+
+<h2 id="overview">Consolidated app overview</h2>
+<table>
+<thead><tr><th>App</th><th>Review unit</th><th>Primary question</th><th>Main standards</th><th>Core output logic</th></tr></thead>
+<tbody>
+<tr>
+  <td>Test Suite Reviewer</td>
+  <td>One requirement and its traced test suite</td>
+  <td>Does the traced test suite adequately cover this requirement?</td>
+  <td>ISO/IEC/IEEE 29148:2018 and BS ISO/IEC/IEEE 29119-3:2021</td>
+  <td>Decompose requirement &rarr; evaluate per-spec coverage &rarr; synthesize M1&ndash;M5 plus advisory R6 into deterministic SoP-gating verdict</td>
+</tr>
+<tr>
+  <td>Test Case Reviewer</td>
+  <td>One traced test case</td>
+  <td>Is this test case well-formed and adequate for the requirements it traces to?</td>
+  <td>ISO/IEC/IEEE 29119-3:2021</td>
+  <td>Decompose traced requirements &rarr; evaluate setup clarity, logical sequence, expected-result support, and per-spec coverage &rarr; aggregate five checklist rows into deterministic <code>overall_verdict</code></td>
+</tr>
+<tr>
+  <td>Hazard Risk Reviewer</td>
+  <td>One Software Hazard Analysis hazard record</td>
+  <td>Does the hazard record and traced evidence provide reasonable assurance of safety?</td>
+  <td>ISO 14971:2007(E)</td>
+  <td>Evaluate H1&ndash;H7 dimensions spanning semantic completeness, causes, initial risk, controls, verification, residual risk, and newly identified hazards &rarr; calculate deterministic overall verdict</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="pattern">Shared design pattern</h2>
+
+<h3>1. Scope control</h3>
+<p>Each prompt suite deliberately reviews one object at a time. This prevents broad,
+subjective conclusions and supports repeatable audit trails:</p>
+<ul>
+<li>The Test Suite Reviewer evaluates one requirement and its traced test suite.</li>
+<li>The Test Case Reviewer evaluates one traced test case.</li>
+<li>The Hazard Risk Reviewer evaluates one hazard record.</li>
+</ul>
+<p>This scoping keeps evidence chains compact and inspectable.</p>
+
+<h3>2. Decomposition into reviewable units</h3>
+<p>The designs use decomposition to reduce ambiguity:</p>
+<ul>
+<li><strong>Requirement decomposition</strong> turns a compound source requirement into
+atomic actor&ndash;verb&ndash;object specifications with observable acceptance criteria.</li>
+<li><strong>Test-case decomposition</strong> separates setup, ordered actions, expected
+results, and requirement coverage so one strong area cannot hide another weak area.</li>
+<li><strong>Hazard decomposition</strong> preserves the ISO 14971 semantic chain of
+hazard, hazardous situation, sequence of events, harm, cause, control, verification, and
+residual risk.</li>
+</ul>
+
+<h3>3. Evidence-gated credit</h3>
+<p>The prompts consistently block credit based on inference alone:</p>
+<ul>
+<li>A test suite receives coverage credit only when protocol actions and expected results
+explicitly verify the decomposed specification.</li>
+<li>A test case receives adequacy credit only when setup, steps, and expected results
+provide executable and observable evidence.</li>
+<li>A hazard record receives closure credit only when controls are allocated, verification
+evidence supports effectiveness, and residual-risk acceptability is justified.</li>
+</ul>
+
+<h3>4. Identifier preservation</h3>
+<p>All designs treat IDs as review evidence, not decoration. Important identifiers include
+<code>req_id</code>, <code>spec_id</code>, <code>test_case_id</code>,
+<code>cited_req_ids</code>, <code>cited_test_case_ids</code>, hazard references, and
+uncovered/unblocked item lists. These fields make outputs compatible with RTMs, review
+dashboards, audit packages, and downstream remediation workflows.</p>
+
+<h3>5. Deterministic aggregation</h3>
+<p>Each system uses constrained findings and a defined roll-up rule:</p>
+<ul>
+<li><strong>Test Suite Reviewer:</strong> mandatory M1&ndash;M5 findings determine whether
+the traced suite adequately covers the requirement; R6 is advisory.</li>
+<li><strong>Test Case Reviewer:</strong> checklist rows roll up by deterministic AND logic;
+Partial Yes remains visible but does not fail the overall verdict.</li>
+<li><strong>Hazard Risk Reviewer:</strong> H1&ndash;H7 findings produce a binary
+safety-review disposition, with narrowly controlled N-A behavior only where justified.</li>
+</ul>
+
+<h2 id="ts">Test Suite Reviewer &mdash; ISO/IEC/IEEE 29148 + BS ISO/IEC/IEEE 29119-3</h2>
+
+<h3>Essence</h3>
+<p>The Test Suite Reviewer is an RTM coverage reviewer. It asks whether the set of traced
+tests adequately verifies a single requirement. The design combines 29148
+requirement-quality discipline with 29119-3 test-documentation discipline.</p>
+
+<h3>Prompt workflow</h3>
+<ol>
+<li><strong>Requirement decomposition:</strong> Convert the requirement into atomic,
+source-faithful, implementation-independent specifications.</li>
+<li><strong>Per-spec coverage evaluation:</strong> Compare each decomposed specification
+against documented test protocol and expected-result evidence.</li>
+<li><strong>Requirement-level synthesis:</strong> Aggregate per-spec results into
+M1&ndash;M5 mandatory findings plus advisory R6.</li>
+</ol>
+
+<h3>Core review gates</h3>
+<table>
+<thead><tr><th>Gate</th><th>Intent</th></tr></thead>
+<tbody>
+<tr><td><strong>M1</strong> Functional Coverage</td><td>Confirms positive required behavior is explicitly tested.</td></tr>
+<tr><td><strong>M2</strong> Negative Coverage</td><td>Confirms invalid, blocked, forbidden, failure-mode, or misuse paths are tested when applicable.</td></tr>
+<tr><td><strong>M3</strong> Boundary Coverage</td><td>Confirms thresholds, ranges, cutoffs, timing edges, cadence edges, or state transitions are tested when applicable.</td></tr>
+<tr><td><strong>M4</strong> Specification Coverage</td><td>Confirms every decomposed specification has supporting test evidence.</td></tr>
+<tr><td><strong>M5</strong> Terminology Alignment</td><td>Confirms tests preserve requirement vocabulary and meaning.</td></tr>
+<tr><td><strong>R6</strong> Design Alignment <em>(advisory)</em></td><td>Advises whether design context aligns with the requirement; it cannot compensate for missing test evidence.</td></tr>
+</tbody>
+</table>
+
+<h3>Design essence</h3>
+<p>The app operationalizes requirements engineering by preserving source semantics,
+avoiding invented design mechanisms, and requiring verifiable acceptance criteria. It
+operationalizes test documentation by requiring explicit protocol, preconditions, inputs,
+expected results, and traceability before coverage is credited.</p>
+
+<h2 id="tc">Test Case Reviewer &mdash; BS ISO/IEC/IEEE 29119-3</h2>
+
+<h3>Essence</h3>
+<p>The Test Case Reviewer is a structured documentation audit for a single test case. It
+does not merely ask whether a test case looks reasonable; it checks whether the case is
+executable, observable, traceable, and adequate for the requirements it claims to
+verify.</p>
+
+<h3>Prompt workflow</h3>
+<ol>
+<li><strong>Requirement decomposition:</strong> Convert traced requirements into atomic
+coverage targets.</li>
+<li><strong>Setup clarity review:</strong> Determine whether preconditions, data,
+environment, configuration, role, and dependency states are sufficiently documented.</li>
+<li><strong>Logical sequence review:</strong> Determine whether steps follow a coherent
+setup &rarr; stimulus &rarr; verification flow.</li>
+<li><strong>Per-spec coverage review:</strong> Determine whether the test verifies each
+decomposed specification with observable step or expected-result evidence.</li>
+<li><strong>Aggregation:</strong> Convert independent axis outputs into a five-row
+checklist and deterministic <code>overall_verdict</code>.</li>
+</ol>
+
+<h3>Five checklist objectives</h3>
+<table>
+<thead><tr><th>Objective</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>expected_result_support</code></td><td>Expected results provide observable, measurable evidence for traced requirements.</td></tr>
+<tr><td><code>expected_result_spec_align</code></td><td>Expected results and steps align to decomposed requirement specifications.</td></tr>
+<tr><td><code>test_case_achieves</code></td><td>Final steps reach and verify the intended requirement behavior.</td></tr>
+<tr><td><code>test_case_logical_sequence</code></td><td>Steps are ordered and procedurally coherent.</td></tr>
+<tr><td><code>test_case_setup_clarity</code></td><td>Setup contains sufficient preconditions, environment, role, configuration, dependency, and data-state detail for reproducible execution.</td></tr>
+</tbody>
+</table>
+
+<h3>Design essence</h3>
+<p>The app embeds ISO/IEC/IEEE 29119-3 by translating test case specification fields into
+executable review checks: unique ID, objective, traceability, preconditions,
+inputs/actions, expected results, test data, environment, and test-result reasoning. The
+output behaves like a controlled review record with explicit verdicts, partial findings,
+rationale, and clarification questions.</p>
+
+<h2 id="hz">Hazard Risk Reviewer &mdash; ISO 14971</h2>
+
+<h3>Essence</h3>
+<p>The Hazard Risk Reviewer is a single-hazard risk-management-file reviewer. It evaluates
+whether one SHA hazard record contains a complete and semantically valid risk chain,
+whether risk controls cover software-related causes and hazardous-path steps, whether
+verification evidence demonstrates control effectiveness, and whether residual-risk
+closure is justified.</p>
+
+<h3>Prompt workflow</h3>
+<p>The app evaluates seven deterministic dimensions:</p>
+<table>
+<thead><tr><th>Dimension</th><th>Review focus</th></tr></thead>
+<tbody>
+<tr><td><strong>H1</strong> Hazard Record Completeness and Semantic Integrity</td><td>Verifies non-placeholder hazard, hazardous situation, sequence, function, harm, and severity fields; rejects collapsed or malformed ISO 14971 concepts.</td></tr>
+<tr><td><strong>H2</strong> Software Contribution and Cause Coverage</td><td>Checks whether software contribution is correctly characterized across logic, state, data, timing, human factors, hardware/input behavior, OTS/SOUP, and cybersecurity.</td></tr>
+<tr><td><strong>H3</strong> Pre-Mitigation Risk and Exploitability Characterization</td><td>Confirms severity, probability of harm, initial risk rating, consistency of ratings, and exploitability characterization when cybersecurity is in scope.</td></tr>
+<tr><td><strong>H4</strong> Risk-Control Identification, Allocation, and Coverage</td><td>Confirms controls cover material hazardous-path steps and causes, and that software controls trace to requirements.</td></tr>
+<tr><td><strong>H5</strong> Verification Depth and Hazard-Path Effectiveness</td><td>Confirms tests verify risk-control effectiveness against the hazardous path, not merely nominal functionality.</td></tr>
+<tr><td><strong>H6</strong> Residual Risk Closure and Acceptability Decision</td><td>Confirms post-mitigation risk fields, acceptability basis, and upstream H4/H5 support for risk reduction.</td></tr>
+<tr><td><strong>H7</strong> HSHA Update and Newly Identified Hazard Capture</td><td>Checks whether the review reveals new hazards or hazardous situations that require linked updates.</td></tr>
+</tbody>
+</table>
+
+<h3>Design essence</h3>
+<p>The app operationalizes ISO 14971 by preserving the distinction between hazard,
+hazardous situation, sequence of events, harm, cause, control, verification, and residual
+risk. It prevents premature closure by requiring that residual-risk acceptability depend
+on control allocation and verification evidence.</p>
+
+<h2 id="alignment">Cross-app standard alignment</h2>
+<table>
+<thead><tr><th>Design concept</th><th>Test Suite Reviewer</th><th>Test Case Reviewer</th><th>Hazard Risk Reviewer</th></tr></thead>
+<tbody>
+<tr><td>Atomic review unit</td><td>One requirement/test suite</td><td>One traced test case</td><td>One hazard record</td></tr>
+<tr><td>Decomposition target</td><td>Requirement &rarr; specs</td><td>Requirements &rarr; specs; test case &rarr; setup/steps/expected results</td><td>Hazard &rarr; cause/sequence/control/verification/residual risk</td></tr>
+<tr><td>Evidence rule</td><td>Protocol + expected results must verify spec</td><td>Setup, steps, expected results, and traced specs must support adequacy</td><td>Requirements and tests must support controls and residual risk</td></tr>
+<tr><td>Trace outputs</td><td><code>spec_id</code>, <code>test_case_id</code>, uncovered specs</td><td><code>req_id</code>, <code>spec_id</code>, step/expectedResult references</td><td><code>cited_req_ids</code>, <code>cited_test_case_ids</code>, unblocked items</td></tr>
+<tr><td>Main failure prevention</td><td>False RTM coverage from semantic similarity</td><td>Good-looking but unreproducible or non-verifying test cases</td><td>Unsupported safety closure or malformed hazard semantics</td></tr>
+<tr><td>Aggregation style</td><td>M1&ndash;M5 mandatory findings plus R6 advisory</td><td>Five checklist rows plus deterministic overall verdict</td><td>H1&ndash;H7 dimension findings plus deterministic overall verdict</td></tr>
+</tbody>
+</table>
+
+<h2 id="design-principles">Consolidated prompt design principles</h2>
+
+<h3>Preserve source meaning</h3>
+<p>The prompts retain original requirement and hazard language wherever possible. They
+avoid replacing regulated vocabulary with weaker synonyms and reject semantic drift that
+could make a test appear relevant while verifying a different behavior.</p>
+
+<h3>Avoid invented mechanisms</h3>
+<p>The designs explicitly prohibit ungrounded additions such as retries, persistence,
+storage, audit logging, UI styling, recovery logic, transmission behavior, or risk
+controls unless the source text or supplied design context supports them.</p>
+
+<h3>Require observable acceptance criteria</h3>
+<p>Every useful decomposed specification needs an observable acceptance criterion. Every
+credited test needs actions and expected outcomes that allow comparison between expected
+and actual behavior.</p>
+
+<h3>Separate advisory context from gating evidence</h3>
+<p>Design summaries and contextual information may clarify interpretation, but they do not
+replace test evidence. Advisory findings such as R6 cannot compensate for missing
+coverage, poor expected results, or absent verification evidence.</p>
+
+<h3>Surface residual risk and coverage gaps</h3>
+<p>The outputs do not hide incompleteness. They identify uncovered specs, weak expected
+results, missing setup details, unsupported controls, incomplete hazard paths, and absent
+residual-risk rationale as discrete actionable items.</p>
+
+<h2 id="output">Combined output &amp; evidence model</h2>
+<p>The consolidated design favors machine-readable output because structured results are
+easier to validate, aggregate, and audit. Across the apps, output schemas consistently
+include:</p>
+<ul>
+<li>stable review codes or objective IDs;</li>
+<li>binary or controlled verdict values;</li>
+<li>concise rationale;</li>
+<li>cited requirement and test evidence;</li>
+<li>uncovered, missing, or unblocked items;</li>
+<li>controlled use of N-A or Partial findings;</li>
+<li>deterministic overall verdicts.</li>
+</ul>
+<p>This makes the prompt suites suitable for regulated review workflows, quality-system
+dashboards, and reviewer-facing remediation queues.</p>
+
+<h2 id="appendix">Appendix A &mdash; Clause &rarr; Prompt &rarr; App traceability</h2>
+<p>This appendix consolidates the standard-to-prompt mappings from the provided design
+descriptions into a single traceability view. The table is intentionally compact and
+focuses on the clause or concept, the prompt behavior it drives, and the app in which it
+is implemented.</p>
+<table>
+<thead><tr><th>Standard clause / concept</th><th>Prompt / review element</th><th>App</th><th>Prompt design implementation</th></tr></thead>
+<tbody>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 3.1.6 Condition</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Preserves applicability windows, states, triggers, roles, timing, and conditions as decomposed specification context.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 3.1.7 Constraint</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Distinguishes source constraints from invented mechanisms; retains numeric bounds, timing limits, and applicability constraints only when grounded in source text.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 3.1.19 Requirement</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Treats the parent requirement as the authoritative statement of need, conditions, and constraints to be decomposed into child verification targets.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 3.1.23 Requirements Traceability</td><td>Decomposition + Coverage + Synthesis Prompts</td><td>Test Suite Reviewer</td><td>Maintains requirement &rarr; spec &rarr; test evidence &rarr; finding trace chain through stable IDs, cited tests, and uncovered spec lists.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 3.1.24 Requirements Traceability Matrix</td><td>Requirement-Level Synthesis Prompt</td><td>Test Suite Reviewer</td><td>Produces RTM-style findings that identify supporting tests and residual uncovered specifications.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 3.1.37 Verification</td><td>Per-Spec Coverage Evaluation Prompt</td><td>Test Suite Reviewer</td><td>Credits coverage only when objective documented test evidence confirms the specified requirement behavior.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.2.3 Transformation of Needs Into Requirements</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Converts compound requirement language into structured, singular, reviewer-defensible child specifications.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.2.4 Requirements Construct</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Enforces actor&ndash;verb&ndash;object structure, measurable conditions, constraints, and observable acceptance criteria.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.2.5 Individual Requirement Characteristics</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Requires singular, complete, unambiguous, feasible, verifiable, conforming, implementation-independent decomposed specs.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.2.6 Requirements Set Characteristics</td><td>Requirement-Level Synthesis Prompt / M4</td><td>Test Suite Reviewer</td><td>Treats the decomposed specification set as the coverage set; M4 passes only when all specs have supporting evidence.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.2.7 &ldquo;What&rdquo; Not &ldquo;How&rdquo;</td><td>Requirement Decomposition + Coverage Prompts</td><td>Test Suite Reviewer</td><td>Blocks invented design details such as retries, persistence, storage, audit logging, UI styling, or recovery behavior unless source-grounded.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.2.8 Requirements Attributes</td><td>Decomposition + Synthesis Prompts</td><td>Test Suite Reviewer</td><td>Requires IDs, rationale, acceptance criteria, coverage dimensions, cited tests, and uncovered spec reporting.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 5.3 Iteration and Recursion</td><td>Prompt Graph Workflow</td><td>Test Suite Reviewer</td><td>Decomposes downward, evaluates per spec, and synthesizes upward into requirement-level disposition.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 6.3.3.4 Operational Scenarios</td><td>Requirement Decomposition Prompt</td><td>Test Suite Reviewer</td><td>Uses grounded scenario and edge-case lenses such as state/mode, concurrency, temporal, degenerate-input, ordering, and interface cases.</td></tr>
+<tr><td>ISO/IEC/IEEE 29148 &mdash; 6.4.3.5 Manage Requirements</td><td>Synthesis Prompt / R6</td><td>Test Suite Reviewer</td><td>Maintains parent requirement &rarr; specs &rarr; tests &rarr; optional design context; R6 reports design alignment without affecting mandatory verdict.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 1 Scope</td><td>Reviewer Scope Rules</td><td>Test Case Reviewer</td><td>Keeps review lifecycle-agnostic and focused on structured fields for one traced test case.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 3.2 Expected Results</td><td>Coverage and Expected-Result Support Prompts</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Requires observable predicted behavior and measurable outcomes before coverage or support is credited.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 3.7 Test Basis</td><td>Requirement Inputs / Coverage Evaluation</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Treats requirement text as the authoritative basis for test design and review.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 3.16 Test Model</td><td>Requirement Decomposition / Per-Spec Coverage</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Treats decomposed specs as natural-language test coverage items derived from the requirement.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 3.22 Test Result</td><td>Aggregation / Verdict Logic</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Converts evidence comparison into controlled Yes/No/N-A or checklist verdicts and deterministic overall result.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 3.26 Test Traceability Matrix</td><td>Traceability Fields</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Preserves requirement, spec, and test case IDs to support RTM-style records.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 4.1.1 Intended Usage</td><td>JSON / Tool-Based Review Record</td><td>Test Case Reviewer</td><td>Uses structured JSON-style outputs rather than fixed document templates, supporting electronic review records.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 4.1.3 Tailored Conformance</td><td>N-A, Partial, Advisory Findings</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Allows N-A or Partial only under defined rules with rationale, preventing silent omissions.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 5.2.1 Unique Identifier</td><td>ID Preservation</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Requires and echoes <code>test_id</code>, <code>req_id</code>, <code>spec_id</code>, checklist IDs, and cited test IDs.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 5.2.5 Status</td><td>Checklist Rows / Findings</td><td>Test Case Reviewer</td><td>Records verdict and partial status for each checklist row plus top-level <code>overall_verdict</code>.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 5.2.7 Scope</td><td>Prompt Scope Boundaries</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Separates per-spec, test-case-level, and requirement-level conclusions and prevents cross-objective commentary.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 5.2.8 References</td><td>Evidence Citation</td><td>Test Case Reviewer</td><td>Requires references to requirements, decomposed specs, steps, expected results, and IDs in assessments.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 5.2.9 Glossary</td><td>M5 Terminology Alignment</td><td>Test Suite Reviewer</td><td>Treats terminology drift as a mandatory coverage-quality issue.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 6.3.2.2 Risk Management Approach</td><td>Edge Analysis / Residual Coverage Risk</td><td>Test Suite Reviewer</td><td>Asks whether naive happy-path coverage could pass while real defects escape.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 6.3.2.3 Test Selection and Prioritization</td><td>Requirement Decomposition / Spec Coverage</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Uses decomposed specs as selected coverage targets and tallies covered versus uncovered specs.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 6.3.2.6 Configuration Management</td><td>Strict Schemas / Faithful Echo</td><td>Test Case Reviewer</td><td>Preserves stable review artifacts and source identities for controlled records.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.2.2 Test Items</td><td>Setup Clarity Prompt</td><td>Test Case Reviewer</td><td>Expects version, build, configuration, or item context where needed for reproducibility.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.2.4 Test Basis</td><td>Requirement Inputs</td><td>Test Case Reviewer</td><td>Keeps requirement intent visible during coverage and aggregation review.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.7.7 Test Completion Criteria</td><td>Aggregator / Deterministic Roll-Up</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Applies objective-specific criteria and roll-up rules to determine whether review completion criteria are met.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.7.9 Metrics</td><td>Coverage Counting</td><td>Test Case Reviewer</td><td>Counts covered and total decomposed specs and exposes partial coverage.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.7.10 Test Data Requirements</td><td>Setup Clarity Prompt</td><td>Test Case Reviewer</td><td>Looks for data state, values, thresholds, reference tables, records, and dependency readiness.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.7.11 Test Environment Requirements</td><td>Setup Clarity Prompt</td><td>Test Case Reviewer</td><td>Checks environment, role, configuration, version, connector, and external dependency states.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.2.7.15 Deviations</td><td>Comments / Partial / No Findings</td><td>Test Case Reviewer</td><td>Captures missing setup, missing verification, vague expected results, or uncovered specs as visible deviations.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.4.4 Test Completion Evaluation</td><td>Aggregator / Synthesis Prompt</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Evaluates whether criteria were met and explains unmet criteria or residual evidence gaps.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 7.4.7 Residual Risks</td><td>Comments / Uncovered Specs</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Reports incomplete testing or missing evidence as residual verification risk.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.2.6 Test Model</td><td>Decomposed Specifications</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Uses decomposed specs as focused test models for coverage review.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.2.7 Traceability</td><td>Spec and Requirement Linkage</td><td>Test Case Reviewer</td><td>Maintains parent requirement &rarr; decomposed spec &rarr; test evidence traceability.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.3.2 Test Coverage Item</td><td>Per-Spec Coverage Prompt</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Requires each coverage item/spec to be uniquely identified, described, and assessed.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.3.3 Test Case Specification</td><td>Test Case Reviewer Axis Prompts</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Reviews identifiers, objectives, traceability, preconditions, inputs/actions, and expected results.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.3.3.6 Preconditions</td><td>Setup Clarity Prompt</td><td>Test Case Reviewer</td><td>Judges whether starting state, environment, test data, role, and constraints are sufficient for independent execution.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.3.3.7 Inputs</td><td>Logical Structure Prompt</td><td>Test Case Reviewer</td><td>Checks ordered actions/events and verifies setup &rarr; stimulus &rarr; outcome flow.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.3.3.8 Expected Results</td><td>Expected Result Support / Coverage Prompts</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Requires observable expected behavior and comparison-ready outcomes.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.4.5 Start Up</td><td>Setup + Logical Structure Prompts</td><td>Test Case Reviewer</td><td>Connects documented setup to early execution steps that prepare the test.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.4.6 Ordered Test Cases</td><td>Logical Structure Prompt</td><td>Test Case Reviewer</td><td>Detects scrambled actions, contradictory order, or missing terminal verification.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.5 Test Data</td><td>Setup / Edge Case Review</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Reviews named data states, values/ranges, null/empty/duplicate data, and data-dependent reproducibility where grounded.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.6 Test Environment</td><td>Setup Clarity Prompt</td><td>Test Case Reviewer</td><td>Checks hardware/software/interface/tool/configuration details when required for repeatability.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.8 Environment Readiness</td><td>Setup Clarity Prompt</td><td>Test Case Reviewer</td><td>Names omitted external dependency states, readiness, or deviations when relevant.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.9 Actual Results / Test Result</td><td>Expected Result and Verdict Logic</td><td>Test Case Reviewer</td><td>Ensures expected results can later be compared with actual results and represented as pass/fail adequacy.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.10 Execution Log</td><td>Assessment Rationale</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Requires rationales to cite concrete steps, protocol elements, expected results, or event behavior.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Clause 8.11 Incident Report</td><td>No / Partial Finding Detail</td><td>Test Suite Reviewer; Test Case Reviewer</td><td>Makes review gaps reproducible and actionable for defect, incident, or CAPA-oriented follow-up.</td></tr>
+<tr><td>ISO/IEC/IEEE 29119-3 &mdash; Annex A</td><td>Mandatory / Advisory Objective Structure</td><td>Test Case Reviewer</td><td>Supports mandatory checklist rows and advisory setup clarity while preserving consistent evidence records.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 2.2, 2.3, 2.4, Annex E</td><td>H1 Hazard Record Completeness and Semantic Integrity</td><td>Hazard Risk Reviewer</td><td>Enforces distinct hazard, hazardous situation, sequence of events, and harm concepts.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 4.2, 4.3, 4.4</td><td>H2 Software Contribution and Cause Coverage</td><td>Hazard Risk Reviewer</td><td>Requires specific software contribution mechanisms rather than generic &ldquo;software error&rdquo; labels.</td></tr>
+<tr><td>ISO 14971 &mdash; Annex C / Annex D / Annex E Concepts</td><td>H2 Cause Taxonomy</td><td>Hazard Risk Reviewer</td><td>Considers software logic/state/data/timing, user interaction, hardware/input failures, OTS/SOUP, alarms, critical data, and cybersecurity contributions.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 2.16, 2.20, 4.4, 5</td><td>H3 Pre-Mitigation Risk</td><td>Hazard Risk Reviewer</td><td>Requires severity, probability of harm, initial risk rating, and consistency between risk inputs and rating.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 6.1, 6.2, 6.3, 6.7</td><td>H4 Risk-Control Identification and Allocation</td><td>Hazard Risk Reviewer</td><td>Confirms controls cover material hazardous-path steps and software causes and trace to software requirements when software-implemented.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 2.10, 2.28, 3.4(e), 6.3</td><td>H5 Verification Depth and Hazard-Path Effectiveness</td><td>Hazard Risk Reviewer</td><td>Requires objective evidence that controls work for the hazardous scenario, including negative, fault, boundary, timing, integration, security, alarm, or degraded-mode evidence where needed.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 3.2, 3.4(d), 3.5, 6.4, 6.5, 7</td><td>H6 Residual Risk Closure</td><td>Hazard Risk Reviewer</td><td>Requires post-mitigation risk fields, acceptability criteria, final rating rationale, and upstream H4/H5 support.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 6.6, 6.7, 9, Annex E, Annex G</td><td>H7 HSHA Update and New Hazard Capture</td><td>Hazard Risk Reviewer</td><td>Checks whether analysis reveals new hazards or hazardous situations and requires concrete <code>new_hs_reference</code> linkage when applicable.</td></tr>
+<tr><td>ISO 14971 &mdash; Risk Management File Traceability</td><td>Shared H1&ndash;H7 Output Schema</td><td>Hazard Risk Reviewer</td><td>Outputs evidence identifiers, cited requirements, cited tests, unblocked items, concise rationales, and deterministic verdicts.</td></tr>
+<tr><td>ISO 14971 &mdash; Documentation Completeness Expectations</td><td>Placeholder Detection Rule</td><td>Hazard Risk Reviewer</td><td>Treats empty, null, TBD, TBC, Unknown, ?, and inappropriate N/A values as non-substantive.</td></tr>
+</tbody>
+</table>
+
+<h2 id="conclusion">Conclusion</h2>
+<p>Taken together, the three prompt designs form a coherent validation, verification, and
+risk-review framework. The Test Suite Reviewer determines whether traced tests adequately
+cover requirements; the Test Case Reviewer determines whether an individual test case is
+executable, observable, traceable, and adequate; and the Hazard Risk Reviewer determines
+whether hazard records, risk controls, verification, and residual-risk decisions are
+complete and defensible.</p>
+<p>The combined design is intentionally evidence-first, traceability-first, and
+deterministic. Its value is not simply that it references ISO/IEC/IEEE 29148,
+ISO/IEC/IEEE 29119-3, and ISO 14971; it converts their core expectations into constrained
+prompt behavior that produces auditable review records.</p>
+
+<footer class="doc">Generated from the QAAI codebase on 2026-06-18.</footer>
+</main>
+</div>
+<script>
+  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
+  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
+    links.forEach(l=>l.classList.remove('active'));
+    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
+    {rootMargin:'-10% 0px -80% 0px'});
+  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>
