@@ -67,7 +67,7 @@ test uses, and how to run the tests against your own custom input files.</p>
 <h2 id="setup">Setup &amp; install</h2>
 <p>QAAI uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>
 <span class="src">pyproject.toml:9</span>.</p>
-<pre><code>uv sync --frozen        # install locked dependencies (incl. pyjama-fastapi from git)</code></pre>
+<pre><code>uv sync --frozen        # install locked dependencies (incl. pyjama, vendored locally at libs/pyjama)</code></pre>
 <p>pytest configuration <span class="src">pyproject.toml:44-48</span>:
 <code>asyncio_mode = "auto"</code>, test path <code>tests/</code>, and a single marker —
 <code>integration</code> (<em>"marks tests that make real LLM API calls"</em>).</p>

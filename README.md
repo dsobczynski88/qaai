@@ -80,21 +80,23 @@ The five review objectives default to `qaai/agents/test_case_reviewer/review_obj
 ```bash
 git clone <repo-url>
 cd qaai
-uv sync --frozen   # installs deps, including pyjama pinned to the SHA in uv.lock
+uv sync --frozen   # installs deps, including pyjama (vendored locally at libs/pyjama)
 ```
 
-`pyjama` (the `pyjama-fastapi` package) is a git dependency. `uv sync` installs the
-commit pinned in `uv.lock` — it does **not** auto-pull newer commits. To advance the
-pin to the latest commit on `main` and reinstall:
+`pyjama` (the `pyjama-fastapi` package) is **vendored into this repo** at `libs/pyjama`
+as a git subtree and installed as an editable path dependency — its source lives in-tree,
+so edits under `libs/pyjama` take effect immediately with no reinstall. To sync with the
+standalone `pyjama-fastapi` repo:
 
 ```bash
-uv sync --upgrade-package pyjama --native-tls   # re-pins uv.lock to latest pyjama-fastapi, reinstalls
-# or use the helper: scripts/update_pyjama.sh  (PowerShell: scripts/update_pyjama.ps1)
+scripts/pyjama_subtree.sh pull   # pull upstream changes into libs/pyjama  (PowerShell: scripts/pyjama_subtree.ps1 pull)
+scripts/pyjama_subtree.sh push   # push local libs/pyjama edits back to pyjama-fastapi
 ```
 
-> `--native-tls` uses the OS trust store; it's required behind corporate CAs (e.g. the
-> Baxter network) where uv otherwise fails reaching pypi.org with an "invalid peer
-> certificate" error. Drop it if you don't hit that error.
+> Behind corporate CAs (e.g. the Baxter network) where uv fails reaching pypi.org with an
+> "invalid peer certificate" error, add `--native-tls` to `uv sync` (e.g.
+> `uv sync --frozen --native-tls`); it uses the OS trust store. Drop it if you don't hit
+> that error.
 
 ### Configuration
 
