@@ -2676,7 +2676,7 @@ wheels = [
 [[package]]
 name = "pyjama"
 version = "1.0.0"
-source = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git?branch=main#4feaf369da127158837757d6201455a51d5471dd" }
+source = { git = "https://github.com/dsobczynski88/pyjama-fastapi.git?branch=main#7a26e1ec7e074b431d2234e04d0130b2c32bc830" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "fastapi" },
@@ -2861,7 +2861,7 @@ wheels = [
 
 [[package]]
 name = "qaai"
-version = "0.1.0"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },

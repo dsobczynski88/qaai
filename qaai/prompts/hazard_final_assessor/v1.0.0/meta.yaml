@@ -2,9 +2,10 @@ role: hazard_final_assessor
 version: v1.0.0
 component: hazard_risk_reviewer
 authored: '2026-05-12'
+content_sha256: f048a2615dfeaf28
 status: published
 parent_version: null
-author: qaai-team
+author: autoqa-team
 required_template_vars: []
 output_pydantic_model: HazardAssessment
 target_models:

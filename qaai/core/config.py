@@ -42,12 +42,12 @@ class PromptConfig(BaseModel):
     single_test_prereqs: str = "single_test_prereqs/v3.0.0/template.jinja2"
     
     # Hazard reviewer prompts (H1-H7 + final assessor)
-    hazard_h1: str = "hazard_h1/v1.0.0/template.jinja2"
+    hazard_h1: str = "hazard_h1/v3.0.0/template.jinja2"
     hazard_h2: str = "hazard_h2/v1.0.0/template.jinja2"
-    hazard_h3: str = "hazard_h3/v1.0.0/template.jinja2"
+    hazard_h3: str = "hazard_h3/v3.0.0/template.jinja2"
     hazard_h4: str = "hazard_h4/v1.0.0/template.jinja2"
     hazard_h5: str = "hazard_h5/v1.0.0/template.jinja2"
-    hazard_h6: str = "hazard_h6/v1.0.0/template.jinja2"
+    hazard_h6: str = "hazard_h6/v2.0.0/template.jinja2"
     hazard_h7: str = "hazard_h7/v1.0.0/template.jinja2"
     hazard_final: str = "hazard_final_assessor/v1.0.0/template.jinja2"
     hazard_design_summarizer: str = "hazard_design_summarizer/v1.0.0/template.jinja2"

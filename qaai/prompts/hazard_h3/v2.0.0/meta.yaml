@@ -1,0 +1,14 @@
+role: hazard_h3
+version: v2.0.0
+component: hazard_risk_reviewer
+authored: '2026-05-26'
+content_sha256: 
+status: published
+parent_version: null
+author: autoqa-team
+required_template_vars: []
+output_pydantic_model: H3Finding
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Pre-exploitability mitigation may be not-applicable even if software-related causes are indicated; removed requirement of harm_severity_rationale column.
