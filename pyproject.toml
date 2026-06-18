@@ -1,0 +1,48 @@
+# pyproject.toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyjama"
+version = "1.0.0"
+description = "Tools to transform py-jama-rest-client outputs to pandas dataframes"
+authors = [
+    {name = "Daniel Sobczynski", email = "daniel_sobczynski@baxter.com"},
+]
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "pyyaml",
+    "flatdict",
+    "pyinstaller",
+    "markdown-pdf",
+    "beautifulsoup4",
+    "pip-system-certs",
+    "python-dotenv",
+    "py-jama-rest-client",
+    "openpyxl",
+    "tqdm",
+    "numpy",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyjama"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: mark test as an integration test (requires Jama credentials and host)",
+]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_tests.py"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+]

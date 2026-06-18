@@ -1,0 +1,3 @@
+{"test_name": "gid_bidirectional_basic", "project_name": "Medical Device Platform", "identifiers": ["GID-2634456"], "identifier_type": "gid"}
+{"test_name": "prq_bidirectional_basic", "project_name": "Medical Device Platform", "identifiers": ["PRQ-001", "PRQ-002"], "identifier_type": "prq"}
+{"test_name": "mixed_bidirectional", "project_name": "Medical Device Platform", "identifiers": ["GID-2634456", "PRQ-001"]}
