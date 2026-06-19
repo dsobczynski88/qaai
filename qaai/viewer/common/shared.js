@@ -27,6 +27,61 @@ function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(feedback));
 }
 
+// ── Shared right-pane + modal + navigation ──
+// renderLeft() is reviewer-specific and defined in each script.js; everything
+// below is identical across the three viewers. Function declarations hoist
+// across the concatenated shared.js + script.js block, but initViewer() is
+// only *called* from the end of each script.js — after RECORDS / idx /
+// feedback (declared with const/let in script.js) are initialized.
+function renderRight() {
+  const rec = RECORDS[idx];
+  const key = (typeof feedbackKey === "function" ? feedbackKey(rec, idx) : null) || `rec-${idx}`;
+  const saved = feedback[key] || {};
+  document.getElementById("notes").value = saved.notes || "";
+  document.querySelectorAll('input[name="rating"]').forEach(el => el.checked = false);
+  if (saved.rating) {
+    const el = document.querySelector(`input[name="rating"][value="${saved.rating}"]`);
+    if (el) el.checked = true;
+  }
+  document.getElementById("progress").textContent = `Progress: ${idx+1} / ${RECORDS.length}`;
+  document.getElementById("prev-btn").disabled = idx === 0;
+  document.getElementById("next-btn").textContent = idx === RECORDS.length - 1 ? "Save" : "Save & Next";
+}
+
+function render() { renderLeft(); renderRight(); }
+
+function openModal(bodyHTML) {
+  document.getElementById("modal-body").innerHTML = bodyHTML;
+  document.getElementById("modal").classList.add("open");
+}
+function closeModal() { document.getElementById("modal").classList.remove("open"); }
+
+// Wire the nav/export/modal controls and paint the first record. Each
+// reviewer's script.js calls this once, at the end, after defining renderLeft.
+function initViewer() {
+  document.getElementById("prev-btn").addEventListener("click", () => {
+    save();
+    if (idx > 0) { idx -= 1; render(); }
+  });
+  document.getElementById("next-btn").addEventListener("click", () => {
+    save();
+    if (idx < RECORDS.length - 1) { idx += 1; render(); }
+  });
+  document.getElementById("export-btn").addEventListener("click", () => {
+    save();
+    const blob = new Blob([JSON.stringify(feedback, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `feedback_{{REVIEW_TYPE}}_{{RUN_KEY}}.json`;
+    a.click();
+  });
+  document.getElementById("modal").addEventListener("click", e => {
+    if (e.target.id === "modal") closeModal();
+  });
+  renderRatings();
+  render();
+}
+
 // ── Run log ("View log") ──
 // The run's problem notes (errored / incomplete / missing-input items) are
 // embedded as a JSON array in <script id="LOG">; the button echoes exactly the

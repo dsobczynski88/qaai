@@ -5,8 +5,11 @@ let idx = 0;
 const feedback = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
 
 // === UTILITIES ===
-// save(), escapeHTML(), renderRatings() live in common/shared.js (concatenated
-// ahead of this file). Define how this viewer extracts a record's feedback key.
+// Shared helpers live in common/shared.js (concatenated ahead of this file):
+// save(), escapeHTML(), renderRatings(), renderRight(), render(), openModal(),
+// closeModal(), and initViewer(). This file defines only the reviewer-specific
+// renderLeft(), the detail modals, and feedbackKey() (how to extract a record's
+// feedback key).
 function feedbackKey(rec, idx) {
   return rec.test_case?.test_id;
 }
@@ -76,30 +79,7 @@ function renderLeft() {
   `;
 }
 
-function renderRight() {
-  const rec = RECORDS[idx];
-  const key = rec.test_case?.test_id || `rec-${idx}`;
-  const saved = feedback[key] || {};
-  document.getElementById("notes").value = saved.notes || "";
-  document.querySelectorAll('input[name="rating"]').forEach(el => el.checked = false);
-  if (saved.rating) {
-    const el = document.querySelector(`input[name="rating"][value="${saved.rating}"]`);
-    if (el) el.checked = true;
-  }
-  document.getElementById("progress").textContent = `Progress: ${idx+1} / ${RECORDS.length}`;
-  document.getElementById("prev-btn").disabled = idx === 0;
-  document.getElementById("next-btn").textContent = idx === RECORDS.length - 1 ? "Save" : "Save & Next";
-}
-
-function render() { renderLeft(); renderRight(); }
-
 // === MODAL HELPERS ===
-function openModal(bodyHTML) {
-  document.getElementById("modal-body").innerHTML = bodyHTML;
-  document.getElementById("modal").classList.add("open");
-}
-function closeModal() { document.getElementById("modal").classList.remove("open"); }
-
 function openAxes() {
   const rec = RECORDS[idx];
   // Flatten specs across all decomposed_requirements, attaching parent req_id.
@@ -165,26 +145,5 @@ function openCriteriaHelp() {
   `);
 }
 
-// === EVENT LISTENERS ===
-document.getElementById("prev-btn").addEventListener("click", () => {
-  save();
-  if (idx > 0) { idx -= 1; render(); }
-});
-document.getElementById("next-btn").addEventListener("click", () => {
-  save();
-  if (idx < RECORDS.length - 1) { idx += 1; render(); }
-});
-document.getElementById("export-btn").addEventListener("click", () => {
-  save();
-  const blob = new Blob([JSON.stringify(feedback, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `feedback_{{REVIEW_TYPE}}_{{RUN_KEY}}.json`;
-  a.click();
-});
-document.getElementById("modal").addEventListener("click", e => {
-  if (e.target.id === "modal") closeModal();
-});
-
-renderRatings();
-render();
+// === BOOTSTRAP ===
+initViewer();
