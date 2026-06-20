@@ -23,7 +23,7 @@ Typical for standard OpenAI accounts. Check your account's TPM limit and
 adjust accordingly. Premium accounts may support higher values.
 """
 
-DEFAULT_MAX_OUTPUT_TOKENS = 64_000
+DEFAULT_MAX_OUTPUT_TOKENS = 16_000 # 64_000
 """Default maximum output tokens per single request.
 
 Haiku and similar models support up to 16K output tokens. This ensures the
