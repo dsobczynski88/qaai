@@ -57,21 +57,21 @@
               <span
                 class="cache-info"
                 tabindex="0"
-                title="'Use results to update cache' (default): reuse cached interim analysis, regenerate the final assessment fresh, and save all results to the cache. 'Use cached results': reuse everything in the cache including the final assessment. 'Off': recompute everything and save nothing. Results from a run that errors or comes out incomplete are purged, never reused."
+                title="'On' (default): reuse the newest cached interim analysis and only re-run the final assessment fresh, saving a new timestamped result. 'Test': recreate the report entirely from cached results with no LLM calls (and JAMA read from cache) — fails if any node result is missing. 'Off': re-run every node and save a new timestamped result, reusing nothing. Files are kept as immutable, timestamped history under ./shared/runs; a run that errors or comes out incomplete purges only the files it just wrote."
                 >i</span
               >
             </div>
             <label class="cache-check">
-              <input type="radio" name="rtm-cache" value="partial" checked />
-              <span>Use results to update cache</span>
+              <input type="radio" name="rtm-cache" value="on" checked />
+              <span>On (reuse cached, fresh final)</span>
             </label>
             <label class="cache-check">
-              <input type="radio" name="rtm-cache" value="full" />
-              <span>Use cached results</span>
+              <input type="radio" name="rtm-cache" value="test" />
+              <span>Test (recreate from cache, no LLM)</span>
             </label>
             <label class="cache-check">
               <input type="radio" name="rtm-cache" value="off" />
-              <span>Off (recompute, don't cache)</span>
+              <span>Off (re-run all, save timestamped)</span>
             </label>
           </div>
           <div class="cache-toggle">
@@ -138,21 +138,21 @@
               <span
                 class="cache-info"
                 tabindex="0"
-                title="'Use results to update cache' (default): reuse cached interim analysis, regenerate the final assessment fresh, and save all results to the cache. 'Use cached results': reuse everything in the cache including the final assessment. 'Off': recompute everything and save nothing. Results from a run that errors or comes out incomplete are purged, never reused."
+                title="'On' (default): reuse the newest cached interim analysis and only re-run the final assessment fresh, saving a new timestamped result. 'Test': recreate the report entirely from cached results with no LLM calls (and JAMA read from cache) — fails if any node result is missing. 'Off': re-run every node and save a new timestamped result, reusing nothing. Files are kept as immutable, timestamped history under ./shared/runs; a run that errors or comes out incomplete purges only the files it just wrote."
                 >i</span
               >
             </div>
             <label class="cache-check">
-              <input type="radio" name="tc-cache" value="partial" checked />
-              <span>Use results to update cache</span>
+              <input type="radio" name="tc-cache" value="on" checked />
+              <span>On (reuse cached, fresh final)</span>
             </label>
             <label class="cache-check">
-              <input type="radio" name="tc-cache" value="full" />
-              <span>Use cached results</span>
+              <input type="radio" name="tc-cache" value="test" />
+              <span>Test (recreate from cache, no LLM)</span>
             </label>
             <label class="cache-check">
               <input type="radio" name="tc-cache" value="off" />
-              <span>Off (recompute, don't cache)</span>
+              <span>Off (re-run all, save timestamped)</span>
             </label>
           </div>
           <div class="cache-toggle">
@@ -242,27 +242,41 @@
               autocomplete="off"
             />
           </div>
+          <div class="field">
+            <label for="hz-identifier-pattern"
+              >Requirements Prefix
+              <span style="color: var(--muted); font-size: 10px"
+                >(optional)</span
+              ></label
+            >
+            <input
+              type="text"
+              id="hz-identifier-pattern"
+              placeholder="GID-\d+"
+              autocomplete="off"
+            />
+          </div>
           <div class="cache-toggle cache-radio">
             <div class="cache-radio-head">
               <span class="cache-radio-title">Cache mode</span>
               <span
                 class="cache-info"
                 tabindex="0"
-                title="'Use results to update cache' (default): reuse cached interim analysis (H1–H7, summarizers, embedded per-requirement test-suite review), regenerate the final hazard assessment fresh, and save all results to the cache. 'Use cached results': reuse everything in the cache including the final hazard assessment. 'Off': recompute everything and save nothing. Results from a hazard row that errors or comes out incomplete are purged, never reused."
+                title="'On' (default): reuse the newest cached interim analysis (H1–H7, summarizers, embedded per-requirement test-suite review) and only re-run the final hazard assessment fresh, saving a new timestamped result. 'Test': recreate the report entirely from cached results with no LLM calls (and JAMA read from cache) — fails if any node result is missing. 'Off': re-run every node and save a new timestamped result, reusing nothing. Files are kept as immutable, timestamped history under ./shared/runs; a hazard row that errors or comes out incomplete purges only the files it just wrote."
                 >i</span
               >
             </div>
             <label class="cache-check">
-              <input type="radio" name="hz-cache" value="partial" checked />
-              <span>Use results to update cache</span>
+              <input type="radio" name="hz-cache" value="on" checked />
+              <span>On (reuse cached, fresh final)</span>
             </label>
             <label class="cache-check">
-              <input type="radio" name="hz-cache" value="full" />
-              <span>Use cached results</span>
+              <input type="radio" name="hz-cache" value="test" />
+              <span>Test (recreate from cache, no LLM)</span>
             </label>
             <label class="cache-check">
               <input type="radio" name="hz-cache" value="off" />
-              <span>Off (recompute, don't cache)</span>
+              <span>Off (re-run all, save timestamped)</span>
             </label>
           </div>
           <div class="cache-toggle">

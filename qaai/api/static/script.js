@@ -393,6 +393,8 @@ async function submitBaseline(type) {
 async function submitHazard() {
   const project = document.getElementById("hz-project").value.trim();
   const sheet = document.getElementById("hz-sheet").value.trim() || "SHA Table";
+  const identifierPattern =
+    document.getElementById("hz-identifier-pattern").value.trim() || "GID-\\d+";
   const cacheMode = document.querySelector(
     'input[name="hz-cache"]:checked',
   ).value;
@@ -413,6 +415,7 @@ async function submitHazard() {
   form.append("project_name", project);
   form.append("file", fileInput.files[0]);
   form.append("sheet_name", sheet);
+  form.append("identifier_pattern", identifierPattern);
   form.append("cache_mode", cacheMode);
   form.append("test_mode", testMode);
   form.append("include_edge_case_analysis", edgeCase);

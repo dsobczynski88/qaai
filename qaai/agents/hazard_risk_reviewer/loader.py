@@ -1,3 +1,4 @@
+import logging
 import re
 import json
 import pandas as pd
@@ -9,6 +10,8 @@ from .core import (
     HazardTraceMatrix,
     HazardRowWithTraceMatrix,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def extract_gids(text: str, format: str = "GID-\\d+") -> List[str]:
@@ -69,8 +72,20 @@ def parse_sha_excel(
     df.columns = [' '.join(str(c).replace('\n', ' ').split()) for c in df.columns]
 
     rcm_columns = [col for col in df.columns if "Risk Control Measures" in col]
+    logger.info(
+        "parse_sha_excel: sheet=%r, %d rows, identifier pattern=%r, "
+        "Risk Control Measures columns matched=%s",
+        sheet_name, len(df), extract_gids_format, rcm_columns or "<none>",
+    )
+    if not rcm_columns:
+        logger.warning(
+            "parse_sha_excel: no column matched 'Risk Control Measures' in %s — "
+            "no requirement identifiers can be extracted",
+            [str(c) for c in df.columns],
+        )
 
     all_gids_set = set()
+    rows_with_text = 0
     results = []
 
     for _, row in df.iterrows():
@@ -79,7 +94,9 @@ def parse_sha_excel(
         
         # 2. Extract GIDs for this specific row using the provided format
         row_gids = extract_gids(rcm_text, extract_gids_format)
-        
+        if rcm_text.strip():
+            rows_with_text += 1
+
         # 3. Add to the global set of all unique GIDs
         all_gids_set.update(row_gids)
 
@@ -97,10 +114,30 @@ def parse_sha_excel(
         hazard_row = HazardRowFromExcel.model_validate(row_dict)
         results.append(hazard_row)
 
+    all_controls = sorted(all_gids_set)
+    logger.info(
+        "parse_sha_excel: extracted %d unique requirement identifier(s) from %d row(s) "
+        "with Risk Control Measures text",
+        len(all_controls), rows_with_text,
+    )
+    if rows_with_text and not all_controls:
+        # Text is present but the pattern matched nothing — the classic
+        # wrong-prefix mistake (e.g. pattern 'GID-\\d+' against 'REQ-PUMP-101' text).
+        sample = next(
+            (r.risk_control_measures for r in results
+             if getattr(r, "risk_control_measures", "").strip()),
+            "",
+        )
+        logger.warning(
+            "parse_sha_excel: %d row(s) have Risk Control Measures text but pattern %r "
+            "matched ZERO identifiers - check the 'Requirements Prefix' regex. Sample text: %r",
+            rows_with_text, extract_gids_format, sample[:200],
+        )
+
     # Return as HazardPackageFromExcel model
     return HazardPackageFromExcel(
         rows=results,
-        all_controls_references=sorted(list(all_gids_set))
+        all_controls_references=all_controls,
     )
 
 

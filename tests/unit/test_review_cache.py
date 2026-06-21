@@ -2,17 +2,22 @@
 cache_mode gating threaded through the node base classes and the per-spec
 evaluators of the test-suite / test-case reviewers.
 
+Disk files are immutable + timestamped ({node}_{version}_{ts}.json); reads select
+the newest. Cache modes are "off" | "on" (default) | "test".
+
 No live LLM calls — a counting mock client is used throughout so we can assert
 exactly how many times the LLM was invoked (i.e. whether a cache hit occurred).
 """
 import json
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import BaseModel
 
+import qaai.core.cache as cache_mod
 from qaai.core.cache import ReviewCacheManager, _sanitize
-from qaai.agents.shared.nodes import StandardLLMNode
+from qaai.agents.shared.nodes import CacheRequiredError, StandardLLMNode
 from qaai.agents.shared.core import DecomposedSpec, Requirement, TestCase
 from qaai.agents.test_suite_reviewer.core import EvaluatedSpec, TestSuite
 from qaai.agents.test_suite_reviewer.nodes import (
@@ -80,27 +85,54 @@ def make_dummy_node(cache, *, is_final=False):
     return node, client
 
 
+def _stamp_seq(monkeypatch, *stamps):
+    """Force _now_timestamp to yield the given timestamps in order."""
+    it = iter(stamps)
+    monkeypatch.setattr(cache_mod, "_now_timestamp", lambda: next(it))
+
+
 @pytest.fixture
 def cache(tmp_path):
     return ReviewCacheManager(cache_dir=tmp_path)
 
 
+def _only_file(directory, prefix):
+    matches = sorted(directory.glob(f"{prefix}*.json"))
+    assert matches, f"no file matching {prefix}* under {directory}"
+    return matches
+
+
 # ---------------------------------------------------------------------------
-# 1. ReviewCacheManager
+# 1. ReviewCacheManager — timestamped, append-only, newest-wins
 # ---------------------------------------------------------------------------
 
 
-async def test_set_get_roundtrip_one_folder_per_entity(cache, tmp_path):
+async def test_set_get_roundtrip_timestamped_file(cache, tmp_path):
     await cache.set(
         entity_id="REQ-1", node_name="decomposernode", prompt_version="v1.0.0",
         result_dict={"value": "hi"}, prompt_tokens=3, completion_tokens=2, model="m",
     )
-    # One level: cache_dir / entity_id / node_version.json
-    expected = tmp_path / "REQ-1" / "decomposernode_v1.0.0.json"
-    assert expected.exists()
+    # cache_dir / entity_id / {node}_{version}_{timestamp}.json
+    files = _only_file(tmp_path / "REQ-1", "decomposernode_v1.0.0_")
+    assert len(files) == 1
     got = await cache.get("REQ-1", "decomposernode", "v1.0.0")
     assert got["result"] == {"value": "hi"}
     assert got["meta"]["entity_id"] == "REQ-1"
+
+
+async def test_set_appends_new_file_newest_wins(cache, tmp_path, monkeypatch):
+    _stamp_seq(
+        monkeypatch,
+        "2026_01_01_00_00_00_000001",
+        "2026_01_01_00_00_00_000002",
+    )
+    await cache.set("REQ-1", "n", "v1.0.0", {"value": "a"}, 0, 0, "m")
+    await cache.set("REQ-1", "n", "v1.0.0", {"value": "b"}, 0, 0, "m")
+
+    files = sorted((tmp_path / "REQ-1").glob("n_v1.0.0_*.json"))
+    assert len(files) == 2  # append, not overwrite
+    got = await cache.get("REQ-1", "n", "v1.0.0")
+    assert got["result"] == {"value": "b"}  # newest timestamp wins
 
 
 async def test_version_bump_is_a_miss(cache):
@@ -121,19 +153,65 @@ async def test_prompt_set_namespaces_cache(cache, tmp_path):
         prompt_set="test_suite_reviewer_v4",
     )
     # Per-set subfolders under the entity, not a single clobbered file
-    assert (tmp_path / "REQ-1" / "test_suite_reviewer_v3" / "coverage_evaluator_v8.0.0.json").exists()
-    assert (tmp_path / "REQ-1" / "test_suite_reviewer_v4" / "coverage_evaluator_v8.0.0.json").exists()
+    _only_file(tmp_path / "REQ-1" / "test_suite_reviewer_v3", "coverage_evaluator_v8.0.0_")
+    _only_file(tmp_path / "REQ-1" / "test_suite_reviewer_v4", "coverage_evaluator_v8.0.0_")
 
     v3 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v3")
     v4 = await cache.get("REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4")
     assert v3["result"] == {"value": "v3"}
     assert v4["result"] == {"value": "v4"}
-    # The set name is recorded in the entry meta (regulatory provenance)
     assert v3["meta"]["prompt_set"] == "test_suite_reviewer_v3"
     assert v4["meta"]["prompt_set"] == "test_suite_reviewer_v4"
 
     # An un-namespaced read does not pick up a namespaced entry
     assert await cache.get("REQ-1", "coverage_evaluator", "v8.0.0") is None
+
+
+# --- run-scoped purge (success-gating) ------------------------------------
+
+
+async def test_purge_run_removes_only_this_runs_files(cache, tmp_path, monkeypatch):
+    """purge_run drops only files written at/after ``since``; earlier good runs
+    for the same entity survive and remain the newest readable result."""
+    _stamp_seq(
+        monkeypatch,
+        "2026_01_01_00_00_00_000000",  # old (good) run
+        "2026_06_15_00_00_00_000000",  # this (failed) run
+    )
+    await cache.set("REQ-1", "n", "v1.0.0", {"value": "old"}, 0, 0, "m")
+    since = datetime(2026, 6, 1)
+    await cache.set("REQ-1", "n", "v1.0.0", {"value": "new"}, 0, 0, "m")
+
+    await cache.purge_run("REQ-1", since)
+
+    files = sorted((tmp_path / "REQ-1").glob("n_v1.0.0_*.json"))
+    assert len(files) == 1  # only the recent file removed
+    got = await cache.get("REQ-1", "n", "v1.0.0")
+    assert got["result"] == {"value": "old"}  # earlier good run restored as newest
+
+
+async def test_purge_run_scoped_to_prompt_set(cache, tmp_path, monkeypatch):
+    _stamp_seq(monkeypatch, "2026_06_15_00_00_00_000000", "2026_06_15_00_00_00_000001")
+    since = datetime(2026, 6, 1)
+    await cache.set(
+        "REQ-1", "n", "v1.0.0", {"value": "v3"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3",
+    )
+    await cache.set(
+        "REQ-1", "n", "v1.0.0", {"value": "v4"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v4",
+    )
+    await cache.purge_run("REQ-1", since, "test_suite_reviewer_v3")
+
+    assert await cache.get("REQ-1", "n", "v1.0.0", "test_suite_reviewer_v3") is None
+    assert await cache.get("REQ-1", "n", "v1.0.0", "test_suite_reviewer_v4") is not None
+
+
+async def test_purge_run_missing_entity_is_noop(cache):
+    await cache.purge_run("REQ-DOES-NOT-EXIST", datetime(2026, 1, 1))
+
+
+# --- full-entity purge (manual clear) -------------------------------------
 
 
 async def test_purge_entity_removes_only_that_entity(cache, tmp_path):
@@ -145,39 +223,10 @@ async def test_purge_entity_removes_only_that_entity(cache, tmp_path):
 
     assert not (tmp_path / "REQ-1").exists()
     assert await cache.get("REQ-1", "decomposernode", "v1.0.0") is None
-    assert await cache.get("REQ-1", "synthesizer", "v8.0.0") is None
-    # The other entity is untouched
     assert await cache.get("REQ-2", "decomposernode", "v1.0.0") is not None
 
 
-async def test_purge_entity_scoped_to_prompt_set(cache, tmp_path):
-    """purge_entity(prompt_set=...) drops only that set's namespace, leaving the
-    other set and the legacy un-namespaced entry intact."""
-    await cache.set(
-        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v3"}, 0, 0, "m",
-        prompt_set="test_suite_reviewer_v3",
-    )
-    await cache.set(
-        "REQ-1", "coverage_evaluator", "v8.0.0", {"value": "v4"}, 0, 0, "m",
-        prompt_set="test_suite_reviewer_v4",
-    )
-    await cache.set("REQ-1", "decomposernode", "v1.0.0", {"value": "base"}, 0, 0, "m")
-
-    await cache.purge_entity("REQ-1", "test_suite_reviewer_v3")
-
-    assert not (tmp_path / "REQ-1" / "test_suite_reviewer_v3").exists()
-    assert await cache.get(
-        "REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v3"
-    ) is None
-    # The other set and the un-namespaced entry survive
-    assert await cache.get(
-        "REQ-1", "coverage_evaluator", "v8.0.0", "test_suite_reviewer_v4"
-    ) is not None
-    assert await cache.get("REQ-1", "decomposernode", "v1.0.0") is not None
-
-
 async def test_purge_missing_entity_is_noop(cache):
-    # Purging an entity that was never cached must not raise.
     await cache.purge_entity("REQ-DOES-NOT-EXIST")
 
 
@@ -185,10 +234,8 @@ async def test_entity_and_node_name_sanitized(cache, tmp_path):
     await cache.set("REQ/1:x", "node spec/1", "v1.0.0", {"value": "a"}, 0, 0, "m")
     files = list(tmp_path.rglob("*.json"))
     assert len(files) == 1
-    # No path separators or colons leaked into the folder or filename
     assert "/" not in files[0].name and ":" not in files[0].name
     assert files[0].parent.name == _sanitize("REQ/1:x")
-    # And it round-trips
     assert await cache.get("REQ/1:x", "node spec/1", "v1.0.0") is not None
 
 
@@ -202,29 +249,24 @@ async def test_redis_absent_disk_only(tmp_path):
 async def test_relative_cache_dir_anchored_to_project_root(tmp_path, monkeypatch):
     """A relative CACHE_DIR resolves against PROJECT_ROOT, not the process cwd —
     so a set() from one working directory is read back as a tier-3 HIT from
-    another. This is the regression guard for the phantom-MISS bug where a run
-    started from a different cwd read a *different* ./shared than it wrote to."""
-    import qaai.core.cache as cache_mod
-
+    another (regression guard for the phantom-MISS bug)."""
     anchor = tmp_path / "repo_root"
     anchor.mkdir()
     monkeypatch.setattr(cache_mod, "PROJECT_ROOT", anchor)
 
-    # Construct + write from cwd A using a *relative* cache dir.
     (tmp_path / "cwd_a").mkdir()
     monkeypatch.chdir(tmp_path / "cwd_a")
-    mgr = cache_mod.ReviewCacheManager(cache_dir="shared")
-    assert mgr.cache_dir == anchor / "shared"  # anchored, not cwd-relative
+    mgr = cache_mod.ReviewCacheManager(cache_dir="shared/runs")
+    assert mgr.cache_dir == anchor / "shared" / "runs"
     await mgr.set(
         "TEST-88", "singlespeccoveragenode_REQ_100-S3", "v3.0.0",
         {"value": "x"}, 0, 0, "m",
     )
 
-    # Move to a different cwd, fresh manager, same relative cache dir → HIT.
     (tmp_path / "cwd_b").mkdir()
     monkeypatch.chdir(tmp_path / "cwd_b")
-    mgr2 = cache_mod.ReviewCacheManager(cache_dir="shared")
-    assert mgr2.cache_dir == anchor / "shared"
+    mgr2 = cache_mod.ReviewCacheManager(cache_dir="shared/runs")
+    assert mgr2.cache_dir == anchor / "shared" / "runs"
     got = await mgr2.get("TEST-88", "singlespeccoveragenode_REQ_100-S3", "v3.0.0")
     assert got is not None  # cross-cwd HIT
     assert got["result"] == {"value": "x"}
@@ -232,26 +274,23 @@ async def test_relative_cache_dir_anchored_to_project_root(tmp_path, monkeypatch
 
 
 async def test_absolute_cache_dir_honored_unchanged(tmp_path):
-    """An absolute CACHE_DIR is used verbatim (no anchoring)."""
     mgr = ReviewCacheManager(cache_dir=tmp_path / "abs_cache")
     assert mgr.cache_dir == tmp_path / "abs_cache"
 
 
-def test_cache_dir_defaults_to_shared_not_cache():
-    """Regression guard: the reviewer cache and pyjama's JAMA source cache both
-    default under ./shared, never ./cache. A stale ./cache default is what made
-    runs write regulatory evidence to the wrong folder on older deployments —
-    this fails CI if either default is silently reverted to ./cache."""
+def test_cache_dir_defaults_to_shared_runs():
+    """Regression guard: the reviewer cache defaults under ./shared/runs and the
+    pyjama JAMA source cache under ./shared — never ./cache."""
     from qaai.core.config import Settings
     from pyjama.utils.jama_constants import CACHE_SOURCE_ROOT
 
-    assert Settings.model_fields["cache_dir"].default == "./shared"
+    assert Settings.model_fields["cache_dir"].default == "./shared/runs"
     assert CACHE_SOURCE_ROOT.startswith("./shared")
 
 
-async def test_disk_file_without_meta_still_hits(cache, tmp_path):
-    """An older-schema file lacking a 'meta' block must read as a HIT, not be
-    silently downgraded to a MISS by a KeyError on payload['meta']."""
+async def test_legacy_untimestamped_file_still_hits(cache, tmp_path):
+    """A legacy pre-timestamp file ({node}_{version}.json) lacking a 'meta' block
+    must still read as a HIT (fallback), not a MISS."""
     entity_dir = tmp_path / "TEST-1"
     entity_dir.mkdir()
     (entity_dir / "n_v1.0.0.json").write_text(
@@ -270,12 +309,12 @@ def test_extract_prompt_version():
 
 
 # ---------------------------------------------------------------------------
-# 2. Base-node cache_mode gating
+# 2. Base-node cache_mode gating (off | on | test)
 # ---------------------------------------------------------------------------
 
 
-async def test_partial_interim_node_caches(cache):
-    state = {"entity": "REQ-1", "cache_mode": "partial"}
+async def test_on_interim_node_caches(cache):
+    state = {"entity": "REQ-1", "cache_mode": "on"}
     node, client = make_dummy_node(cache)
     await node(state)
     assert client.chat_completion.call_count == 1  # miss → LLM ran
@@ -286,41 +325,52 @@ async def test_partial_interim_node_caches(cache):
     assert result["out"].value == "ok"
 
 
-async def test_partial_final_node_always_reruns(cache):
-    state = {"entity": "REQ-1", "cache_mode": "partial"}
+async def test_on_final_node_always_reruns(cache):
+    state = {"entity": "REQ-1", "cache_mode": "on"}
     node, client = make_dummy_node(cache, is_final=True)
     await node(state)
     assert client.chat_completion.call_count == 1
 
-    # File was written (write is allowed under partial) but a final node never
-    # reads under partial — it re-runs for a fresh result.
+    # Written through (on writes every node) but a final node never reads under
+    # "on" — it re-runs for a fresh result.
     node2, client2 = make_dummy_node(cache, is_final=True)
     await node2(state)
     assert client2.chat_completion.call_count == 1
 
 
-async def test_full_final_node_uses_cache(cache):
-    state = {"entity": "REQ-1", "cache_mode": "full"}
-    node, client = make_dummy_node(cache, is_final=True)
-    await node(state)
+async def test_test_mode_uses_cache_including_final(cache):
+    # Populate the cache with an "on" run (writes even the final node)...
+    node, _ = make_dummy_node(cache, is_final=True)
+    await node({"entity": "REQ-1", "cache_mode": "on"})
 
+    # ...then a "test" run reads it back with no LLM call (even for the final node).
     node2, client2 = make_dummy_node(cache, is_final=True)
-    await node2(state)
-    assert client2.chat_completion.call_count == 0  # hit under full
+    out = await node2({"entity": "REQ-1", "cache_mode": "test"})
+    assert client2.chat_completion.call_count == 0
+    assert out["out"].value == "ok"
 
 
-async def test_off_mode_neither_reads_nor_writes(cache, tmp_path):
+async def test_test_mode_miss_raises(cache):
+    state = {"entity": "REQ-1", "cache_mode": "test"}
+    node, client = make_dummy_node(cache)
+    with pytest.raises(CacheRequiredError):
+        await node(state)
+    assert client.chat_completion.call_count == 0  # never calls the LLM
+
+
+async def test_off_mode_writes_but_does_not_read(cache, tmp_path):
     state = {"entity": "REQ-1", "cache_mode": "off"}
     node, client = make_dummy_node(cache)
     await node(state)
+    assert list(tmp_path.rglob("*.json"))  # off DOES write (timestamped)
+
     node2, client2 = make_dummy_node(cache)
     await node2(state)
-    assert client2.chat_completion.call_count == 1  # no read
-    assert list(tmp_path.rglob("*.json")) == []  # no write
+    assert client2.chat_completion.call_count == 1  # off never reads → re-runs
 
 
-async def test_default_mode_is_partial(cache):
-    # No cache_mode in state → treated as "partial" (interim node caches).
+async def test_default_mode_is_on(cache):
+    # No cache_mode in state → treated as "on" (interim node caches).
     state = {"entity": "REQ-1"}
     node, client = make_dummy_node(cache)
     await node(state)
@@ -330,7 +380,7 @@ async def test_default_mode_is_partial(cache):
 
 
 async def test_no_cache_manager_means_no_caching(tmp_path):
-    state = {"entity": "REQ-1", "cache_mode": "partial"}
+    state = {"entity": "REQ-1", "cache_mode": "on"}
     client = make_counting_client(json.dumps({"value": "ok"}))
     node = _DummyNode(
         client=client, model="m", response_model=_Result, system_prompt="s",
@@ -346,7 +396,7 @@ async def test_no_cache_manager_means_no_caching(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _rtm_spec_state(spec_id: str, cache_mode="partial"):
+def _rtm_spec_state(spec_id: str, cache_mode="on"):
     req = Requirement(req_id="REQ-1", text="The system shall do X.")
     spec = DecomposedSpec(spec_id=spec_id, description="d", acceptance_criteria="a", rationale="r")
     suite = TestSuite(requirement=req, test_cases=[], summary=[])
@@ -367,11 +417,10 @@ async def test_rtm_per_spec_two_specs_distinct_files(cache, tmp_path):
     node, _ = _make_rtm_spec_node(cache)
     await node(_rtm_spec_state("S1"))
     await node(_rtm_spec_state("S2"))
-    files = sorted(p.name for p in (tmp_path / "REQ-1").glob("*.json"))
-    assert files == [
-        "singlespecevaluatornode_S1_v7.0.0.json",
-        "singlespecevaluatornode_S2_v7.0.0.json",
-    ]
+    names = sorted(p.name for p in (tmp_path / "REQ-1").glob("*.json"))
+    assert len(names) == 2
+    assert any(n.startswith("singlespecevaluatornode_S1_v7.0.0_") for n in names)
+    assert any(n.startswith("singlespecevaluatornode_S2_v7.0.0_") for n in names)
 
 
 async def test_rtm_per_spec_rerun_hits_cache(cache):
@@ -385,13 +434,13 @@ async def test_rtm_per_spec_rerun_hits_cache(cache):
     assert client2.chat_completion.call_count == 0  # cache hit
 
 
-async def test_rtm_per_spec_off_mode_no_cache(cache, tmp_path):
+async def test_rtm_per_spec_off_mode_reruns_but_writes(cache, tmp_path):
     node, client = _make_rtm_spec_node(cache)
     await node(_rtm_spec_state("S1", cache_mode="off"))
     node2, client2 = _make_rtm_spec_node(cache)
     await node2(_rtm_spec_state("S1", cache_mode="off"))
-    assert client2.chat_completion.call_count == 1
-    assert list(tmp_path.rglob("*.json")) == []
+    assert client2.chat_completion.call_count == 1  # off never reads
+    assert list(tmp_path.rglob("*.json"))  # but off DOES write
 
 
 async def test_rtm_per_spec_payload_includes_summarized_designs():
@@ -420,7 +469,7 @@ async def test_rtm_per_spec_payload_null_designs_when_absent():
     assert payload["summarized_designs"] is None
 
 
-def _tc_spec_state(spec_id: str, cache_mode="partial"):
+def _tc_spec_state(spec_id: str, cache_mode="on"):
     tc = TestCase(test_id="TEST-1", description="d", in_baseline=True)
     req = Requirement(req_id="REQ-1", text="The system shall do X.")
     spec = DecomposedSpec(spec_id=spec_id, description="d", acceptance_criteria="a", rationale="r")
@@ -441,7 +490,7 @@ async def test_tc_per_spec_caches_under_test_id(cache, tmp_path):
     node, client = _make_tc_spec_node(cache)
     out = await node(_tc_spec_state("S1"))
     assert isinstance(out["coverage_analysis"][0], SpecAnalysis)
-    assert (tmp_path / "TEST-1" / "singlespeccoveragenode_S1_v3.0.0.json").exists()
+    _only_file(tmp_path / "TEST-1", "singlespeccoveragenode_S1_v3.0.0_")
 
     node2, client2 = _make_tc_spec_node(cache)
     await node2(_tc_spec_state("S1"))
@@ -471,6 +520,19 @@ def test_rtm_dispatch_propagates_cache_mode():
     assert all(s.arg["cache_mode"] == "off" for s in sends)
 
 
+def test_rtm_dispatch_default_cache_mode_is_on():
+    from qaai.agents.test_suite_reviewer.core import DecomposedRequirement
+
+    req = Requirement(req_id="REQ-1", text="x")
+    specs = [DecomposedSpec(spec_id="S1", description="d", acceptance_criteria="a", rationale="r")]
+    decomposed = DecomposedRequirement(requirement=req, decomposed_specifications=specs)
+    suite = TestSuite(requirement=req, test_cases=[], summary=[])
+    sends = rtm_dispatch_coverage({
+        "requirement": req, "decomposed_requirement": decomposed, "test_suite": suite,
+    })
+    assert all(s.arg["cache_mode"] == "on" for s in sends)
+
+
 def test_rtm_dispatch_propagates_summarized_designs():
     from qaai.agents.test_suite_reviewer.core import (
         DecomposedRequirement,
@@ -493,7 +555,6 @@ def test_rtm_dispatch_propagates_summarized_designs():
             verification_hooks=["h1"],
         )
     ]
-    # Present: every Send carries the same design list.
     sends = rtm_dispatch_coverage({
         "requirement": req, "decomposed_requirement": decomposed,
         "test_suite": suite, "summarized_designs": designs,
@@ -501,7 +562,6 @@ def test_rtm_dispatch_propagates_summarized_designs():
     assert len(sends) == 2
     assert all(s.arg["summarized_designs"] == designs for s in sends)
 
-    # Absent: key still present (null-safe), set to None.
     sends_none = rtm_dispatch_coverage({
         "requirement": req, "decomposed_requirement": decomposed,
         "test_suite": suite,

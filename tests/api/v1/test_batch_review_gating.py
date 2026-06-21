@@ -33,7 +33,9 @@ class _FakeCache:
     def __init__(self):
         self.purged = []
 
-    async def purge_entity(self, entity_id, prompt_set=None):
+    async def purge_run(self, entity_id, since, prompt_set=None):
+        # Run-scoped purge: the batch loop drops only this run's files. The test
+        # only cares which entities were purged (and under which prompt set).
         self.purged.append((entity_id, prompt_set))
 
 

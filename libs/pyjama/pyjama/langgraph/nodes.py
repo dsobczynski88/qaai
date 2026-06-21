@@ -137,6 +137,7 @@ class PyJamaNodeConfig(BaseModel):
     client_secret: Optional[str] = Field(None, description="OAuth client secret")
     data_path: str = Field(default="./data", description="Path for data output")
     log_path: str = Field(default="logs", description="Path for log files")
+    log_file_name: str = Field(default="pyjama.log", description="Log file name")
     max_concurrent: int = Field(
         default=100,
         ge=1,
@@ -244,7 +245,7 @@ class PyJamaDataSourceNode:
         self._log_dir = make_output_directory(config.log_path)
         self._logger = ProjectLogger(
             name=PYJAMA_LOGGERNAME,
-            log_file=os.path.join(self._log_dir, "pyjama.log"),
+            log_file=os.path.join(self._log_dir, self.config.log_file_name),
         ).config().get_logger()
 
         self._logger.info("Initialized PyJamaDataSourceNode with config: %s", {

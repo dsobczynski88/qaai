@@ -3,12 +3,14 @@ import logging
 import os
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 
 from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.agents.shared.nodes import CacheRequiredError
 from qaai.core.cache import ReviewCacheManager
 from qaai.agents.hazard_risk_reviewer.core import HazardRowWithTraceMatrix
 from qaai.agents.shared.data_integration import PyJamaNodeConfig
@@ -173,17 +175,21 @@ async def _run_batch_review(
     outputs_path = run_dir / OUTPUT_JSONL_FILENAME
     outputs_path.write_text("", encoding="utf-8")
 
-    async def _purge(i: int, item, reason: str) -> None:
+    async def _purge(i: int, item, reason: str, since: datetime) -> None:
+        # Run-scoped: drop only the files THIS run wrote for the entity (those at
+        # or after ``since``), so a failed/incomplete run is never reused while
+        # earlier good runs for the same entity stay intact and auditable.
         if cache_manager is None or entity_id_fn is None:
             return
         entity_id = entity_id_fn(i, item)
         if not entity_id:
             return
         logger.warning(
-            "Purging cache for %s %s (%s) — not reusable", item_noun, entity_id, reason
+            "Purging this run's cache for %s %s (%s) — not reusable",
+            item_noun, entity_id, reason,
         )
         try:
-            await cache_manager.purge_entity(entity_id, prompt_set)
+            await cache_manager.purge_run(entity_id, since, prompt_set)
         except Exception as exc:  # purge is best-effort
             logger.warning("Cache purge failed for %s — %s", entity_id, exc)
 
@@ -215,8 +221,20 @@ async def _run_batch_review(
                 _log(item_id, "warning", note)
 
         config = {"configurable": {"thread_id": thread_id_fn(i, item)}}
+        item_start = datetime.now()  # boundary for run-scoped cache purge
         try:
             final_state = await graph.ainvoke(graph_input_fn(i, item), config)
+        except CacheRequiredError as exc:
+            # Cache "test" mode: a node had no cached result, so the report cannot
+            # be recreated offline. This is a hard, whole-job failure (not a skip)
+            # surfaced verbatim to the UI as a 400 by jobs.py.
+            logger.warning(
+                "[%d/%d] %s review aborted — test mode cache miss: %s",
+                i + 1, len(items), item_noun, exc,
+            )
+            raise ValueError(
+                "Test mode requires all node results to pre-exist in cache"
+            ) from exc
         except Exception as exc:
             failed += 1
             logger.error(
@@ -224,7 +242,7 @@ async def _run_batch_review(
                 i + 1, len(items), item_noun, exc, exc_info=True,
             )
             _log(item_id, "error", f"{item_noun.capitalize()} {label}: review errored — item skipped.")
-            await _purge(i, item, "run errored")
+            await _purge(i, item, "run errored", item_start)
             if progress is not None:
                 progress.record_item(ok=False)
             continue
@@ -238,7 +256,7 @@ async def _run_batch_review(
             )
             _log(item_id, "warning",
                  f"{item_noun.capitalize()} {label}: incomplete output (rubric/coverage missing).")
-            await _purge(i, item, "incomplete output")
+            await _purge(i, item, "incomplete output", item_start)
             if progress is not None:
                 progress.record_item(ok=False)
         else:
@@ -304,15 +322,16 @@ class RTMReviewService:
         )
 
     async def run_from_baseline(
-        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
+        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "on",
         test_mode: Optional[bool] = None, prompt_set: str = PROMPT_SET_BASELINE,
         progress=None,
     ) -> str:
         """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
-        with no live API calls when True. prompt_set selects the v3/v4 graph.
-        progress (the background Job) receives live per-requirement progress.
+        with no live API calls when True. Cache mode "test" recreates the report
+        entirely from cache, so it forces JAMA cache-only too. prompt_set selects
+        the v3/v4 graph. progress (the background Job) receives live progress.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -325,6 +344,10 @@ class RTMReviewService:
 
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
+
+        # Test mode recreates from cache only — no live LLM and no live JAMA fetch.
+        if cache_mode == "test":
+            test_mode = True
 
         runnable = self._select(prompt_set)
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
@@ -497,7 +520,7 @@ class HazardReviewService:
         project_name: str,
         thread_id_prefix: str,
         sheet_name: str = "SHA Table",
-        cache_mode: str = "partial",
+        cache_mode: str = "on",
         test_mode: Optional[bool] = None,
         prompt_set: str = PROMPT_SET_BASELINE,
         extract_gids_format: str = "GID-\\d+",
@@ -519,6 +542,10 @@ class HazardReviewService:
         from qaai.viewer.generator import write_viewer_hz
         from qaai.core.logging_config import start_new_run
         from qaai.agents.shared.data_integration import PYJAMA_AVAILABLE
+
+        # Test mode recreates from cache only — no live LLM and no live JAMA fetch.
+        if cache_mode == "test":
+            test_mode = True
 
         runnable = self._select(prompt_set)
         # Fresh run folder for THIS review, before the JAMA fetch so pyjama logs land here.
@@ -628,16 +655,17 @@ class TestCaseReviewService:
         )
 
     async def run_from_baseline(
-        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "partial",
+        self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "on",
         test_mode: Optional[bool] = None, include_decomposition_analysis: bool = True,
         progress=None,
     ) -> str:
         """Fetch a JAMA baseline, run the TC graph for every test case, return viewer_tc.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
-        with no live API calls when True. include_decomposition_analysis selects
-        the v2 (with decomposition) or v3 (without) graph. progress (the
-        background Job) receives live per-test-case progress.
+        with no live API calls when True. Cache mode "test" recreates the report
+        entirely from cache, so it forces JAMA cache-only too.
+        include_decomposition_analysis selects the v2 (with decomposition) or v3
+        (without) graph. progress (the background Job) receives live progress.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -650,6 +678,10 @@ class TestCaseReviewService:
 
         if not PYJAMA_AVAILABLE:
             raise ValueError("PyJama is not installed — JAMA baseline fetching unavailable.")
+
+        # Test mode recreates from cache only — no live LLM and no live JAMA fetch.
+        if cache_mode == "test":
+            test_mode = True
 
         prompt_set = resolve_tc_prompt_set(include_decomposition_analysis)
         runnable = self._select(prompt_set)

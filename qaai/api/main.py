@@ -9,6 +9,21 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from qaai.api.middleware import limit_request_size, log_requests
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles that disables blind browser caching of the UI assets.
+
+    Starlette already emits ``ETag``/``Last-Modified``; adding ``Cache-Control:
+    no-cache`` forces the browser to revalidate (cheap 304) instead of silently
+    reusing a stale ``index.html`` / ``script.js`` from a previous session — which
+    otherwise causes UI edits (new form fields, etc.) to never appear.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 from qaai.api.jobs import JobManager
 from qaai.api.routes import router
 from qaai.api.services import HazardReviewService, RTMReviewService, TestCaseReviewService
@@ -195,7 +210,7 @@ def create_app() -> FastAPI:
     # Must be mounted AFTER the API router so API routes take precedence.
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     os.makedirs(static_dir, exist_ok=True)
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    app.mount("/", NoCacheStaticFiles(directory=static_dir, html=True), name="static")
 
     logger.info("QAAI API created (environment: %s)", environment)
     return app

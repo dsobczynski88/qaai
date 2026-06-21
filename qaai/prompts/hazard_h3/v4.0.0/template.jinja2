@@ -9,7 +9,6 @@ You will receive a JSON payload with:
 - `exploitability_pre_mitigation`
 - `probability_of_harm_pre_mitigation`
 - `initial_risk_rating`
-- `sra_link`
 - optional contextual field:
   - `risk_acceptance_criteria_reference`
 
@@ -19,13 +18,12 @@ Evaluate whether the pre-mitigation risk profile is complete and internally cons
 - Verdict = **Yes** iff ALL of the following hold:
     1. `severity`, `probability_of_harm_pre_mitigation`, and `initial_risk_rating` are populated and non-placeholder.
     2. `exploitability_pre_mitigation` is handled correctly:
-       - If `sra_link` contains a valid document reference (e.g., citing a Security Risk Assessment), `exploitability_pre_mitigation` being "Not applicable", "N/A", or empty is strictly acceptable and correct.
-       - If there is no cybersecurity-related cause/contributing factor, `exploitability_pre_mitigation` may also be "Not applicable" or "N/A".
-       - If `software_related_causes` implies a cybersecurity factor, there must be either a populated `sra_link` OR a specific rating in `exploitability_pre_mitigation`.
+       - if `software_related_causes` includes or implies a cybersecurity-related cause/contributing factor, then the `SRA Link` field must cite the Security Risk Assessment;
+       - if there is no cybersecurity-related cause/contributing factor, `exploitability_pre_mitigation` may be "Not applicable".
     3. `initial_risk_rating` is consistent with the joint reading of severity, probability, and exploitability (when applicable), i.e. a reasonable reviewer would not reach a materially different rating from the inputs.
 
 - Verdict = **No** iff ANY of the following apply:
-    - Any required pre-mitigation risk field is empty, placeholder, or non-substantive. **Exception:** `exploitability_pre_mitigation` is permitted to be "Not applicable", "N/A", or empty AS LONG AS the `sra_link` field contains a valid document reference, or if cybersecurity is not in scope.
+    - Any required pre-mitigation risk field is empty, placeholder, or non-substantive; however, EXPLOITABILITY MAY BE EMPTY CHECK FIELD `SRA Link` for document reference.
     - The `initial_risk_rating` is inconsistent with the inputs.
 
 ### Output rules

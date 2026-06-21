@@ -11,9 +11,15 @@ Tier 3 (Disk): persistent JSON files keyed by entity_id/node/prompt_version;
                survives server restarts; primary regulatory evidence artifact.
 
 Cache key:  review:{entity_id}:{node_name}:{prompt_version}
-Disk path:  {cache_dir}/{entity_id}/{node_name}_{prompt_version}.json
+Disk path:  {cache_dir}/{entity_id}/{node_name}_{prompt_version}_{timestamp}.json
+
+Disk files are immutable and append-only: every write creates a NEW timestamped
+file (mirroring the JAMA source cache in libs/pyjama) and reads select the newest
+matching file. This preserves a full, auditable history of every node result and
+lets a failed run be purged by timestamp without destroying earlier good runs.
 """
 
+import glob
 import json
 import logging
 import re
@@ -26,6 +32,30 @@ if TYPE_CHECKING:
     from qaai.core.telemetry import TokenUsageTracker
 
 logger = logging.getLogger(__name__)
+
+# Filename-safe timestamp, e.g. 2026_05_26_22_11_45_006721. Matches the format
+# used by the JAMA source cache (libs/pyjama .../utils/jama_constants.py) so both
+# caches look identical on disk. The fixed-width zero-padded layout also sorts
+# lexicographically in chronological order.
+CACHE_TIMESTAMP_FORMAT = "%Y_%m_%d_%H_%M_%S_%f"
+# Matches a trailing _<timestamp> token in a cache filename stem.
+_TS_RE = re.compile(r"_(\d{4}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{6})$")
+
+
+def _now_timestamp() -> str:
+    """Return a filename-safe timestamp string for a new cache file."""
+    return datetime.now().strftime(CACHE_TIMESTAMP_FORMAT)
+
+
+def _parse_file_timestamp(path: Path) -> Optional[datetime]:
+    """Parse the trailing _<timestamp> token from a cache filename, or None."""
+    match = _TS_RE.search(path.stem)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), CACHE_TIMESTAMP_FORMAT)
+    except ValueError:
+        return None
 
 # Repo root (the directory that holds ./shared) — qaai/core/cache.py → parents[2].
 # Used to anchor a *relative* CACHE_DIR so every entrypoint (API startup, hazard
@@ -50,8 +80,10 @@ class ReviewCacheManager:
     """Write-through 3-tier cache for reviewer nodes.
 
     Check order on get(): Redis (Tier 2) → Disk (Tier 3) → None (miss).
-    On a disk hit, the entry is backfilled into Redis for subsequent requests.
-    On an LLM call (set()), the result is written to both disk and Redis.
+    On a disk hit, the newest timestamped file is selected and backfilled into
+    Redis for subsequent requests. On an LLM call (set()), the result is written
+    to a new timestamped disk file (never overwriting history) and to Redis
+    (which always holds the latest write under a timestamp-free key).
 
     Redis is entirely optional — if the `redis` package is absent or the
     server is unreachable, Tier 2 is silently disabled and only disk
@@ -112,7 +144,7 @@ class ReviewCacheManager:
         other. When None the legacy un-namespaced key/path is used.
         """
         redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set)
-        disk_path = self._file_path(entity_id, node_name, prompt_version, prompt_set)
+        disk_path = self._newest_file(entity_id, node_name, prompt_version, prompt_set)
 
         # --- Tier 2: Redis ---
         if self._redis is not None:
@@ -129,8 +161,8 @@ class ReviewCacheManager:
             except Exception as e:
                 logger.warning("ReviewCacheManager: Redis get error — %s", e)
 
-        # --- Tier 3: Disk ---
-        disk_existed = disk_path.exists()
+        # --- Tier 3: Disk (newest timestamped file for this node/version) ---
+        disk_existed = disk_path is not None and disk_path.exists()
         if disk_existed:
             try:
                 raw = disk_path.read_text(encoding="utf-8")
@@ -204,8 +236,8 @@ class ReviewCacheManager:
         }
         raw = json.dumps(payload, indent=2, default=str)
 
-        # Write to Disk (Tier 3)
-        disk_path = self._file_path(entity_id, node_name, prompt_version, prompt_set)
+        # Write to Disk (Tier 3) — a NEW timestamped file; never overwrite history.
+        disk_path = self._new_file_path(entity_id, node_name, prompt_version, prompt_set)
         try:
             disk_path.parent.mkdir(parents=True, exist_ok=True)
             disk_path.write_text(raw, encoding="utf-8")
@@ -220,6 +252,49 @@ class ReviewCacheManager:
                 await self._redis.set(redis_key, raw, ex=self._REDIS_TTL)
             except Exception as e:
                 logger.warning("ReviewCacheManager: Redis write failed — %s", e)
+
+    async def purge_run(
+        self, entity_id: str, since: datetime, prompt_set: Optional[str] = None
+    ) -> None:
+        """Remove only THIS run's cached files for an entity (those written at or
+        after ``since``), leaving earlier good history intact.
+
+        Used by the batch loop's success-gating: a run that errors or produces an
+        incomplete rubric has just the files it wrote this run deleted, so the
+        newest-wins read never selects a failed/partial result — but prior
+        successful runs for the same entity remain auditable.
+
+        Disk files carry an embedded ``_<timestamp>`` token (and, as a fallback,
+        an mtime); a file is purged when either is ≥ ``since``. The entity's Redis
+        keys are dropped wholesale (best-effort) since Redis only holds the latest
+        write and cannot be time-scoped — the next read falls back to disk-newest.
+        """
+        safe_id = _sanitize(entity_id)
+        target = self.cache_dir / safe_id
+        if prompt_set:
+            target = target / _sanitize(prompt_set)
+
+        removed = 0
+        if target.is_dir():
+            for path in target.glob("*.json"):
+                ts = _parse_file_timestamp(path)
+                try:
+                    written = ts or datetime.fromtimestamp(path.stat().st_mtime)
+                    if written >= since:
+                        path.unlink()
+                        removed += 1
+                except Exception as e:  # pragma: no cover - best-effort unlink
+                    logger.warning(
+                        "ReviewCacheManager: run purge failed for %s — %s", path, e
+                    )
+        if removed:
+            logger.info(
+                "Cache PURGE (run, disk): %d file(s) ≥ %s under %s",
+                removed, since.isoformat(), target,
+            )
+
+        # --- Tier 2: Redis (drop the entity's keys; not time-scopable) ---
+        await self._redis_purge_prefix(entity_id, prompt_set)
 
     async def purge_entity(
         self, entity_id: str, prompt_set: Optional[str] = None
@@ -245,15 +320,22 @@ class ReviewCacheManager:
             logger.warning("ReviewCacheManager: disk purge failed for %s — %s", target, e)
 
         # --- Tier 2: Redis (delete keys by prefix) ---
-        if self._redis is not None:
-            prefix = (
-                f"review:{entity_id}:{prompt_set}:" if prompt_set else f"review:{entity_id}:"
-            )
-            try:
-                async for key in self._redis.scan_iter(match=f"{prefix}*"):
-                    await self._redis.delete(key)
-            except Exception as e:
-                logger.warning("ReviewCacheManager: Redis purge failed — %s", e)
+        await self._redis_purge_prefix(entity_id, prompt_set)
+
+    async def _redis_purge_prefix(
+        self, entity_id: str, prompt_set: Optional[str] = None
+    ) -> None:
+        """Best-effort delete of an entity's Redis keys (optionally prompt-set scoped)."""
+        if self._redis is None:
+            return
+        prefix = (
+            f"review:{entity_id}:{prompt_set}:" if prompt_set else f"review:{entity_id}:"
+        )
+        try:
+            async for key in self._redis.scan_iter(match=f"{prefix}*"):
+                await self._redis.delete(key)
+        except Exception as e:
+            logger.warning("ReviewCacheManager: Redis purge failed — %s", e)
 
     # ------------------------------------------------------------------
     # Static helpers (usable without an instance)
@@ -298,16 +380,52 @@ class ReviewCacheManager:
             return f"review:{entity_id}:{prompt_set}:{node_name}:{prompt_version}"
         return f"review:{entity_id}:{node_name}:{prompt_version}"
 
-    def _file_path(
+    def _entity_dir(self, entity_id: str, prompt_set: Optional[str] = None) -> Path:
+        # Sanitize the folder (entity id). A prompt_set gets its own subfolder —
+        # auditable evidence and collision-proof across sets that share a node's
+        # prompt_version.
+        d = self.cache_dir / _sanitize(entity_id)
+        if prompt_set:
+            d = d / _sanitize(prompt_set)
+        return d
+
+    @staticmethod
+    def _file_prefix(node_name: str, prompt_version: str) -> str:
+        # Sanitize the node token — per-spec node names embed a spec_id which may
+        # contain unsafe chars. The stem layout is "{node}_{version}_{timestamp}".
+        return f"{_sanitize(node_name)}_{prompt_version}_"
+
+    def _new_file_path(
         self, entity_id: str, node_name: str, prompt_version: str,
         prompt_set: Optional[str] = None,
     ) -> Path:
-        # Sanitize both the folder (entity id) and the filename token (node name)
-        # — per-spec node names embed a spec_id which may contain unsafe chars.
-        safe_id = _sanitize(entity_id)
-        filename = f"{_sanitize(node_name)}_{prompt_version}.json"
-        if prompt_set:
-            # One subfolder per prompt set under the entity — auditable evidence
-            # and collision-proof across sets that share a node's prompt_version.
-            return self.cache_dir / safe_id / _sanitize(prompt_set) / filename
-        return self.cache_dir / safe_id / filename
+        """Path for a brand-new write: {entity}/[{set}/]{node}_{version}_{ts}.json."""
+        prefix = self._file_prefix(node_name, prompt_version)
+        filename = f"{prefix}{_now_timestamp()}.json"
+        return self._entity_dir(entity_id, prompt_set) / filename
+
+    def _newest_file(
+        self, entity_id: str, node_name: str, prompt_version: str,
+        prompt_set: Optional[str] = None,
+    ) -> Optional[Path]:
+        """Newest timestamped file for this node/version, or None on a miss.
+
+        Selection key is the embedded filename timestamp (falling back to mtime),
+        mirroring the JAMA source cache's newest-wins behavior. A legacy
+        un-timestamped ``{node}_{version}.json`` is matched as a last resort so
+        old caches still resolve.
+        """
+        directory = self._entity_dir(entity_id, prompt_set)
+        prefix = self._file_prefix(node_name, prompt_version)
+        candidates = [Path(p) for p in glob.glob(str(directory / f"{prefix}*.json"))]
+        if candidates:
+            candidates.sort(
+                key=lambda p: (
+                    _parse_file_timestamp(p) or datetime.fromtimestamp(p.stat().st_mtime)
+                ),
+                reverse=True,
+            )
+            return candidates[0]
+        # Legacy fallback: pre-timestamp filename (node_version.json).
+        legacy = directory / f"{_sanitize(node_name)}_{prompt_version}.json"
+        return legacy if legacy.exists() else None

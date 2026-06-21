@@ -44,7 +44,7 @@ class PromptConfig(BaseModel):
     # Hazard reviewer prompts (H1-H7 + final assessor)
     hazard_h1: str = "hazard_h1/v3.0.0/template.jinja2"
     hazard_h2: str = "hazard_h2/v1.0.0/template.jinja2"
-    hazard_h3: str = "hazard_h3/v3.0.0/template.jinja2"
+    hazard_h3: str = "hazard_h3/v4.0.0/template.jinja2"
     hazard_h4: str = "hazard_h4/v1.0.0/template.jinja2"
     hazard_h5: str = "hazard_h5/v1.0.0/template.jinja2"
     hazard_h6: str = "hazard_h6/v2.0.0/template.jinja2"
@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     # startup (create_app) and again at the start of every review request — which
     # updates this value to logs/run-<ts>/qaai.log.
     log_file_path: str = "./logs/qaai.log"
-
+    log_file_name: str = "qaai.log"
     # Base directory under which start_new_run() creates each run-<ts>/ folder.
     # Production/front-end uses ./logs; the test harness (conftest) overrides this
     # to ./logs/tests so test artifacts never mix with server runs.
@@ -126,12 +126,13 @@ class Settings(BaseSettings):
 
     # Reviewer cache, shared by all three reviewers (set ENABLE_CACHE=false to
     # disable entirely; CACHE_DIR holds one folder per entity id — e.g.
-    # shared/HAZ-PUMP-001, shared/REQ-PUMP-101, shared/TEST-PUMP-201).
-    # The default dir is ./shared to align with sibling org apps on this infra.
-    # NOTE: the pyjama JAMA test-mode source path (./cache/source/...) is owned by
-    # the pyjama package and is NOT derived from this setting — it is unaffected.
+    # shared/runs/HAZ-PUMP-001, shared/runs/REQ-PUMP-101, shared/runs/TEST-PUMP-201).
+    # Files are immutable + timestamped ({node}_{version}_{ts}.json); reads select
+    # the newest. The default dir is ./shared/runs, a sibling of the pyjama JAMA
+    # source cache at ./shared/source (which is owned by the pyjama package and is
+    # NOT derived from this setting — it is unaffected).
     redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
-    cache_dir: str = Field(default="./shared", alias="CACHE_DIR")
+    cache_dir: str = Field(default="./shared/runs", alias="CACHE_DIR")
     enable_cache: bool = Field(default=True, alias="ENABLE_CACHE")
 
     # Optional JAMA / Pyjama integration settings

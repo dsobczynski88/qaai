@@ -40,9 +40,13 @@ get_job_manager = _make_service_dep("job_manager", "job manager")
 def _resolve_cache_mode(cache_mode: str | None, use_cache: bool) -> str:
     """Prefer the explicit cache_mode (UI radio); fall back to the legacy boolean.
 
-    use_cache True → "partial", False → "off"; ignored once cache_mode is set.
+    Valid modes: "off" | "on" | "test". use_cache True → "on", False → "off";
+    ignored once cache_mode is set. Legacy "partial"/"full" map to "on"/"test".
     """
-    return cache_mode or ("partial" if use_cache else "off")
+    legacy = {"partial": "on", "full": "test"}
+    if cache_mode:
+        return legacy.get(cache_mode, cache_mode)
+    return "on" if use_cache else "off"
 
 
 @router.get("/health", tags=["System"])
@@ -128,8 +132,8 @@ async def hazard_risk_review(
     file: UploadFile = File(..., description="SHA Excel file (.xlsx) containing the hazard table"),
     sheet_name: str = Form(default="SHA Table", description="Sheet name containing the hazard table"),
     identifier_pattern: str = Form(default="GID-\\d+", description="Regex for control/requirement identifiers in the Risk Control Measures column; use 'REQ-PUMP-\\d+' for the sample workbook"),
-    cache_mode: str | None = Form(default=None, description="Explicit cache mode (UI radio): 'off' | 'partial' (update cache, fresh final) | 'full' (reuse cached final). Omit to fall back to the legacy use_cache boolean."),
-    use_cache: bool = Form(default=True, description="Deprecated; ignored when cache_mode is set. True maps to 'partial', False to 'off'"),
+    cache_mode: str | None = Form(default=None, description="Explicit cache mode (UI radio): 'off' (always re-run, save timestamped) | 'on' (reuse cached interim, fresh final) | 'test' (recreate from cache only, no LLM calls). Omit to fall back to the legacy use_cache boolean."),
+    use_cache: bool = Form(default=True, description="Deprecated; ignored when cache_mode is set. True maps to 'on', False to 'off'"),
     test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
     include_edge_case_analysis: bool = Form(default=False, description="Use the edge-case prompt set (test_suite_reviewer_v4) for the embedded RTM subgraph; default uses the baseline set (v3)"),
     service: HazardReviewService = Depends(get_hazard_service),

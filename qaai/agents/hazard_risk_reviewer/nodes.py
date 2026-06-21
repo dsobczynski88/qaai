@@ -22,7 +22,12 @@ from typing import Any, List, Optional
 from langgraph.types import Send
 
 from qaai.agents.clients import RateLimitOpenAIClient
-from qaai.agents.shared.nodes import BaseLLMNode, BatchedLLMNode, StandardLLMNode
+from qaai.agents.shared.nodes import (
+    BaseLLMNode,
+    BatchedLLMNode,
+    CacheRequiredError,
+    StandardLLMNode,
+)
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
 from qaai.utils import render_prompt
@@ -193,7 +198,7 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
         hazard.hazard_id, has_traceability, num_requirements
     )
     
-    cache_mode = state.get("cache_mode", "partial")
+    cache_mode = state.get("cache_mode", "on")
     return [
         Send("h1_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
         Send("h2_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
@@ -219,7 +224,7 @@ def dispatch_hazard_evaluators_late(state: HazardReviewState) -> List[Send]:
     
     logger.debug("dispatch_hazard_evaluators_late: dispatching H4, H5 with %d requirement_reviews", len(requirement_reviews))
     
-    cache_mode = state.get("cache_mode", "partial")
+    cache_mode = state.get("cache_mode", "on")
 
     # Build state dict with optional summarized data
     h4_state = {
@@ -261,7 +266,7 @@ def dispatch_requirement_reviews(state: HazardReviewState) -> List[Send]:
         logger.warning("dispatch_requirement_reviews: no requirements in traceability, skipping fan-out")
         return []
     
-    cache_mode = state.get("cache_mode", "partial")
+    cache_mode = state.get("cache_mode", "on")
     return [
         Send("requirement_reviewer", {"hazard": hazard, "requirement": req, "cache_mode": cache_mode})
         for req in requirements
@@ -305,13 +310,17 @@ class RequirementReviewerNode:
             return {"requirement_reviews": []}
 
         req_id = requirement.req_id
-        cache_mode = state.get("cache_mode", "partial")
-        cache_on = cache_mode != "off"
+        cache_mode = state.get("cache_mode", "on")
+        # This per-requirement blob behaves like a non-final cacheable node:
+        #   read  in "on"/"test" (skip the subgraph when a blob exists),
+        #   write in "off"/"on"  (a new timestamped blob each run).
+        read_allowed = cache_mode in ("on", "test")
+        write_allowed = cache_mode in ("off", "on")
 
         # --- Tier 2/3: cache check (keyed on req_id, not hazard_id) ---
         # The blob captures the WHOLE RTM subgraph result (incl. synthesizer),
         # so a hit means the test-suite review is "fully cached" for this req.
-        if self.cache_manager is not None and self.rtm_prompt_version and cache_on:
+        if self.cache_manager is not None and self.rtm_prompt_version and read_allowed:
             cached = await self.cache_manager.get(req_id, self._NODE_NAME, self.rtm_prompt_version, self.prompt_set)
             if cached is not None:
                 try:
@@ -326,6 +335,11 @@ class RequirementReviewerNode:
                         "RequirementReviewerNode: cache restore failed for req_id=%s, re-running — %s",
                         req_id, e,
                     )
+
+        # Test mode makes NO live LLM calls — a miss here means the embedded RTM
+        # review was never cached for this requirement, a hard failure for the run.
+        if cache_mode == "test":
+            raise CacheRequiredError(self._NODE_NAME, req_id)
 
         # Test cases come from requirements_traceability
         test_cases = []
@@ -373,7 +387,7 @@ class RequirementReviewerNode:
         )
 
         # --- Tier 2/3: write-through cache ---
-        if self.cache_manager is not None and self.rtm_prompt_version and cache_on:
+        if self.cache_manager is not None and self.rtm_prompt_version and write_allowed:
             prompt_tokens = getattr(tracker, "_total_prompt_tokens", 0) - tokens_before_prompt
             completion_tokens = (
                 getattr(tracker, "_total_completion_tokens", 0) - tokens_before_completion
@@ -742,9 +756,9 @@ class _FinalAssessorNode(StandardLLMNode):
         entity_id = self._get_cache_entity_id(state)
 
         # --- Tier 2/3: cache check ---
-        # This is the graph's final output node: under "partial" caching
+        # This is the graph's final output node: under "on" caching
         # _cache_read_allowed returns False so it always re-runs (fresh prose),
-        # while still writing through so a later "full" run can reuse it.
+        # while still writing through so a later "test" run can reuse it.
         if self._cache_read_allowed(state) and entity_id:
             cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
             if cached is not None:

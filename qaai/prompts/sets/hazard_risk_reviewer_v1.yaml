@@ -6,7 +6,7 @@ description: |
 prompts:
   hazard_h1: v3.0.0
   hazard_h2: v1.0.0
-  hazard_h3: v3.0.0
+  hazard_h3: v4.0.0
   hazard_h4: v1.0.0
   hazard_h5: v1.0.0
   hazard_h6: v2.0.0
@@ -14,5 +14,5 @@ prompts:
   hazard_final: v1.0.0
   shared_evaluator_conventions: v2.0.0
 status: production
-authored: '2025-05-05'
+authored: "2025-05-05"
 parent_set: null

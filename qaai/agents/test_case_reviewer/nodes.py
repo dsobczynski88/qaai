@@ -110,7 +110,7 @@ class TCDecomposerNode:
             logger.debug("TCDecomposerNode: skipping — no requirements in state")
             return {"decomposed_requirements": None}
 
-        cache_mode = state.get("cache_mode", "partial")
+        cache_mode = state.get("cache_mode", "on")
         reqs = state["requirements"]
         # Decompose all requirements concurrently (was a serial await-loop, the
         # main latency bottleneck on this path). Order is preserved by gather.
@@ -442,7 +442,7 @@ def dispatch_coverage(state: TCReviewState) -> List[Send]:
         logger.warning("dispatch_coverage: incomplete state, skipping fan-out")
         return []
 
-    cache_mode = state.get("cache_mode", "partial")
+    cache_mode = state.get("cache_mode", "on")
     return [
         Send("coverage_evaluator", {
             "test_case": test_case,
@@ -465,7 +465,7 @@ def dispatch_coverage_by_requirement(state: TCReviewState) -> List[Send]:
         logger.warning("dispatch_coverage_by_requirement: incomplete state, skipping fan-out")
         return []
 
-    cache_mode = state.get("cache_mode", "partial")
+    cache_mode = state.get("cache_mode", "on")
     return [
         Send("coverage_evaluator", {
             "test_case": test_case,
@@ -529,7 +529,7 @@ def make_aggregator_node(
 ) -> AggregatorNode:
     """Build the aggregator node.
 
-    This is the graph's FINAL output node: under "partial" caching it always
+    This is the graph's FINAL output node: under "on" caching it always
     re-runs so the user gets a fresh assessment from cached interim results.
 
     Args:

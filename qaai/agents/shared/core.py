@@ -20,7 +20,7 @@ class BaseReviewState(TypedDict, total=False):
     hazard state declares its own narrower types (typed PyJamaRequest, plus a
     pyjama_test_mode override) so it does not inherit this base.
     """
-    # Caching control: "off" | "partial" (default) | "full". Threaded from the
+    # Caching control: "off" | "on" (default) | "test". Threaded from the
     # API/service into every node; see qaai.core.cache.ReviewCacheManager.
     cache_mode: str
     # JAMA integration fields (Option 2 only)

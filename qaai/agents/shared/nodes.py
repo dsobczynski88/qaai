@@ -30,6 +30,24 @@ from .core import DecomposedRequirement
 logger = logging.getLogger(__name__)
 
 
+class CacheRequiredError(RuntimeError):
+    """Raised in cache mode "test" when a node would have to call the LLM.
+
+    Test mode strictly recreates a report from cached node results and makes no
+    new LLM calls, so a cache miss (or a non-caching LLM node) is a hard error.
+    The batch loop (qaai/api/services.py) translates this into the user-facing
+    "Test mode requires all node results to pre-exist in cache" failure.
+    """
+
+    def __init__(self, node_name: str, entity_id: Optional[str] = None):
+        self.node_name = node_name
+        self.entity_id = entity_id
+        super().__init__(
+            f"Test mode cache miss for node '{node_name}'"
+            + (f" (entity {entity_id})" if entity_id else "")
+        )
+
+
 def sanitize_requirement_text(text: str, max_length: int = 3000, req_id: Optional[str] = None) -> str:
     """
     Sanitize requirement text for safe JSON embedding.
@@ -115,30 +133,45 @@ class BaseLLMNode(ABC):
         # into the cache key so two sets pinning the same node version never alias.
         self.prompt_set = prompt_set
         # When True this node produces the graph's final assessment. Under the
-        # "partial" cache mode such a node always re-runs (skips cache read) so
-        # the user gets a fresh output while still reusing cached interim nodes.
+        # "on" cache mode such a node always re-runs (skips cache read) so the
+        # user gets a fresh output while still reusing cached interim nodes.
         self.is_final_output = is_final_output
 
     # ------------------------------------------------------------------
-    # Cache gating (driven by state["cache_mode"]: "off" | "partial" | "full")
+    # Cache gating (driven by state["cache_mode"]: "off" | "on" | "test")
+    #
+    #   off  — never read; always re-run nodes; always write a new timestamped
+    #          file (history is preserved, nothing is reused).
+    #   on   — read the newest cached result for interim nodes; the final-output
+    #          node always re-runs; misses compute live; always write.
+    #   test — read the newest cached result for ALL nodes (incl. final); make NO
+    #          LLM calls (a miss raises CacheRequiredError); never write.
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mode(state: Any) -> str:
+        return (state or {}).get("cache_mode", "on")
 
     def _cache_read_allowed(self, state: Any) -> bool:
         """Whether this node may read from cache for the given state."""
         if self.cache_manager is None or not self.prompt_version:
             return False
-        mode = (state or {}).get("cache_mode", "partial")
+        mode = self._mode(state)
         if mode == "off":
             return False
-        if mode == "partial" and self.is_final_output:
+        if mode == "on" and self.is_final_output:
             return False
-        return True
+        return True  # "on" (interim) and "test" (all nodes) may read
 
     def _cache_write_allowed(self, state: Any) -> bool:
-        """Whether this node may write to cache for the given state."""
+        """Whether this node may write to cache for the given state.
+
+        Both "off" and "on" persist every node result (as a new timestamped
+        file); "test" never writes — it only recreates a report from cache.
+        """
         if self.cache_manager is None or not self.prompt_version:
             return False
-        return (state or {}).get("cache_mode", "partial") != "off"
+        return self._mode(state) in ("off", "on")
 
     @abstractmethod
     def _validate_state(self, state: Any) -> bool:
@@ -396,6 +429,11 @@ class StandardLLMNode(BaseLLMNode, ABC):
                             self.__class__.__name__, e,
                         )
 
+        # Test mode makes NO live LLM calls — reaching here means the cache had
+        # no result for this node, which is a hard failure for the whole run.
+        if self._mode(state) == "test":
+            raise CacheRequiredError(node_name, self._get_cache_entity_id(state))
+
         try:
             payload = self._build_payload(state)
         except Exception as e:
@@ -538,6 +576,13 @@ class BatchedLLMNode(BaseLLMNode, ABC):
                 self.__class__.__name__, batch_num, num_batches, exc,
             )
             return [], 0, 0
+
+        # Test mode makes NO live LLM calls — a cache miss that reaches the batch
+        # fan-out is a hard failure for the whole run.
+        if self._mode(state) == "test":
+            raise CacheRequiredError(
+                self._get_cache_node_name(state), self._get_cache_entity_id(state)
+            )
 
         result = await self.client.chat_completion(
             model=self.model,

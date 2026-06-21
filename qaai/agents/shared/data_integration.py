@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from qaai.core.constants import INPUT_JSONL_FILENAME
+from qaai.core.config import settings
 
 # Import hazard-related models
 try:
@@ -214,6 +215,7 @@ class DataIntegrationNode:
                 max_concurrent=100,
                 cache_mode=CacheMode.USE,  # OFF / USE / REFRESH
                 test_mode=test_mode,
+                log_file_name=settings.log_file_name
             )
 
         if test_mode_override is not None and test_mode_override != config.test_mode:

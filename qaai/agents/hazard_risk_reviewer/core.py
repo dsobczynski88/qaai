@@ -396,7 +396,7 @@ class HazardReviewState(TypedDict, total=False):
     # Does NOT inherit shared.core.BaseReviewState: this state declares narrower
     # JAMA types (typed PyJamaRequest, jama_data/metadata as List[Any]/Any) and
     # adds pyjama_test_mode, so the fields are kept local by design.
-    # Caching control: "off" | "partial" (default) | "full". Threaded from the
+    # Caching control: "off" | "on" (default) | "test". Threaded from the
     # API/service into every node; see qaai.core.cache.ReviewCacheManager.
     cache_mode: str
     hazard: HazardRowWithTraceMatrix

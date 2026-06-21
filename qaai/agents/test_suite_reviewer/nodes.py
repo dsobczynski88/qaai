@@ -173,7 +173,7 @@ def dispatch_coverage(state: RTMReviewState) -> List[Send]:
     if not requirement or not decomposed or not test_suite:
         logger.warning("dispatch_coverage: incomplete state, skipping fan-out")
         return []
-    cache_mode = state.get("cache_mode", "partial")
+    cache_mode = state.get("cache_mode", "on")
     # summarized_designs joined at coverage_router (may be None when a
     # requirement has no design docs). Send only forwards the keys placed in
     # this dict, so it must be threaded through explicitly to reach spec_evaluator.
@@ -396,7 +396,7 @@ def make_synthesizer_node(
     Create a SynthesizerNode (MoA-inspired) that synthesizes coverage evaluations
     into a single holistic assessment of requirement coverage.
 
-    This is the graph's FINAL output node: under "partial" caching it always
+    This is the graph's FINAL output node: under "on" caching it always
     re-runs so the user gets a fresh assessment from cached interim results.
 
     Args:

@@ -90,7 +90,7 @@ def pytest_addoption(parser):
         "--cache-mode",
         action="store",
         default="off",
-        choices=["off", "partial", "full"],
+        choices=["off", "on", "test"],
         help="cache_mode threaded into reviewer graph state (default: off).",
     )
     parser.addoption(

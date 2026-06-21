@@ -27,7 +27,7 @@ def dummy_html(tmp_path):
 async def test_test_suite_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
@@ -43,10 +43,10 @@ async def test_test_suite_use_cache_false_maps_to_off(submit_and_wait, dummy_htm
     assert rec["cache_mode"] == "off"
 
 
-async def test_test_suite_use_cache_default_is_partial(submit_and_wait, dummy_html):
+async def test_test_suite_use_cache_default_is_on(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
@@ -55,16 +55,16 @@ async def test_test_suite_use_cache_default_is_partial(submit_and_wait, dummy_ht
 
     app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
 
-    # use_cache omitted → schema default True → cache_mode "partial"
+    # use_cache omitted → schema default True → cache_mode "on"
     resp = await submit_and_wait("/api/v1/test-suite-review", json={"baseline_id": "B"})
     assert resp.status_code == status.HTTP_200_OK
-    assert rec["cache_mode"] == "partial"
+    assert rec["cache_mode"] == "on"
 
 
 async def test_test_case_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        include_decomposition_analysis=True, progress=None):
         rec["cache_mode"] = cache_mode
         rec["test_mode"] = test_mode
@@ -86,7 +86,7 @@ async def test_hazard_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       sheet_name="SHA Table", cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
                        progress=None):
         rec["cache_mode"] = cache_mode
@@ -104,11 +104,11 @@ async def test_hazard_use_cache_false_maps_to_off(submit_and_wait, dummy_html):
     assert rec["cache_mode"] == "off"
 
 
-async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
+async def test_hazard_use_cache_default_is_on(submit_and_wait, dummy_html):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       sheet_name="SHA Table", cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
                        progress=None):
         rec["cache_mode"] = cache_mode
@@ -123,16 +123,16 @@ async def test_hazard_use_cache_default_is_partial(submit_and_wait, dummy_html):
         data={"project_name": "P"},  # use_cache omitted → Form default True
     )
     assert resp.status_code == status.HTTP_200_OK
-    assert rec["cache_mode"] == "partial"
+    assert rec["cache_mode"] == "on"
 
 
 # --- explicit cache_mode (the UI radio) → forwarded verbatim -----------------
 
-@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+@pytest.mark.parametrize("mode", ["off", "on", "test"])
 async def test_test_suite_explicit_cache_mode_forwarded(submit_and_wait, dummy_html, mode):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
@@ -146,11 +146,11 @@ async def test_test_suite_explicit_cache_mode_forwarded(submit_and_wait, dummy_h
     assert rec["cache_mode"] == mode
 
 
-@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+@pytest.mark.parametrize("mode", ["off", "on", "test"])
 async def test_test_case_explicit_cache_mode_forwarded(submit_and_wait, dummy_html, mode):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        include_decomposition_analysis=True, progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
@@ -164,12 +164,12 @@ async def test_test_case_explicit_cache_mode_forwarded(submit_and_wait, dummy_ht
     assert rec["cache_mode"] == mode
 
 
-@pytest.mark.parametrize("mode", ["off", "partial", "full"])
+@pytest.mark.parametrize("mode", ["off", "on", "test"])
 async def test_hazard_explicit_cache_mode_forwarded(submit_and_wait, dummy_html, mode):
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       sheet_name="SHA Table", cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
                        progress=None):
         rec["cache_mode"] = cache_mode
@@ -189,7 +189,7 @@ async def test_hazard_explicit_cache_mode_forwarded(submit_and_wait, dummy_html,
 async def test_explicit_cache_mode_overrides_use_cache(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["cache_mode"] = cache_mode
         return dummy_html
@@ -199,17 +199,36 @@ async def test_explicit_cache_mode_overrides_use_cache(submit_and_wait, dummy_ht
     # use_cache=False alone would map to "off", but an explicit cache_mode wins.
     resp = await submit_and_wait(
         "/api/v1/test-suite-review",
-        json={"baseline_id": "B", "use_cache": False, "cache_mode": "full"},
+        json={"baseline_id": "B", "use_cache": False, "cache_mode": "test"},
     )
     assert resp.status_code == status.HTTP_200_OK
-    assert rec["cache_mode"] == "full"
+    assert rec["cache_mode"] == "test"
+
+
+@pytest.mark.parametrize("legacy,expected", [("partial", "on"), ("full", "test")])
+async def test_legacy_cache_mode_aliases_mapped(submit_and_wait, dummy_html, legacy, expected):
+    """Legacy radio values still accepted: 'partial'→'on', 'full'→'test'."""
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3", progress=None):
+        rec["cache_mode"] = cache_mode
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/test-suite-review", json={"baseline_id": "B", "cache_mode": legacy}
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["cache_mode"] == expected
 
 
 @pytest.mark.parametrize("sent,expected", [(True, True), (False, False)])
 async def test_test_suite_test_mode_propagates(submit_and_wait, dummy_html, sent, expected):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["test_mode"] = test_mode
         return dummy_html
@@ -229,7 +248,7 @@ async def test_hazard_test_mode_propagates(submit_and_wait, dummy_html, sent, ex
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       sheet_name="SHA Table", cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
                        progress=None):
         rec["test_mode"] = test_mode
@@ -257,7 +276,7 @@ async def test_test_suite_edge_case_toggle_selects_prompt_set(
 ):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["prompt_set"] = prompt_set
         return dummy_html
@@ -275,7 +294,7 @@ async def test_test_suite_edge_case_toggle_selects_prompt_set(
 async def test_test_suite_edge_case_default_is_baseline(submit_and_wait, dummy_html):
     rec = {}
 
-    async def fake_run(baseline_id, thread_id, cache_mode="partial", test_mode=None,
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None):
         rec["prompt_set"] = prompt_set
         return dummy_html
@@ -298,7 +317,7 @@ async def test_hazard_edge_case_toggle_selects_prompt_set(
     rec = {}
 
     async def fake_run(*, file_bytes, filename, project_name, thread_id_prefix,
-                       sheet_name="SHA Table", cache_mode="partial", test_mode=None,
+                       sheet_name="SHA Table", cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", extract_gids_format="GID-\\d+",
                        progress=None):
         rec["prompt_set"] = prompt_set
