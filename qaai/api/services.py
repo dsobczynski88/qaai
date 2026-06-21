@@ -89,9 +89,9 @@ def tc_is_complete(state: dict) -> bool:
 
 
 def hazard_is_complete(state: dict) -> bool:
-    """A hazard item is complete iff the final assessor produced the full H1-H7 rubric.
-    (requirement_reviews may legitimately be empty for non-software hazards, so it is
-    not required here.)"""
+    """A hazard item is complete iff the final assessor produced the full rubric:
+    H1-H6 (mandatory) + R7 (recommended) = 7 findings. (requirement_reviews may
+    legitimately be empty for non-software hazards, so it is not required here.)"""
     assessment = state.get("hazard_assessment")
     findings = _field(assessment, "mandatory_findings")
     return assessment is not None and isinstance(findings, list) and len(findings) == 7
@@ -421,7 +421,7 @@ class HazardReviewService:
         # embedded test-suite subgraph stays internally uncached — the
         # whole-subgraph result is cached as one blob per requirement by
         # RequirementReviewerNode, namespaced by prompt set. The shared
-        # cache_manager still caches the hazard's own H1-H7 / summarizer nodes.
+        # cache_manager still caches the hazard's own H1-H6 / R7 / summarizer nodes.
         self.graphs = hazard_runnables or {
             ps: HazardReviewerRunnable(
                 client,

@@ -1,7 +1,7 @@
 name: hazard_risk_reviewer_v1
 component: hazard_risk_reviewer
 description: |
-  Production stack for hazard risk review (H1-H7 rubric).
+  Production stack for hazard risk review (H1-H6 mandatory + R7 recommended rubric).
   Evaluates hazard records against ISO 14971 / IEC 62304 / IEC 61508 requirements.
 prompts:
   hazard_h1: v3.0.0
@@ -10,7 +10,7 @@ prompts:
   hazard_h4: v1.0.0
   hazard_h5: v1.0.0
   hazard_h6: v2.0.0
-  hazard_h7: v1.0.0
+  hazard_r7: v1.0.0
   hazard_final: v1.0.0
   shared_evaluator_conventions: v2.0.0
 status: production

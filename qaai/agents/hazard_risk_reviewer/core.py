@@ -3,13 +3,15 @@
 A HazardRecord bundles a single hazard line item (per ISO 14971 / IEC 62304)
 with its traced requirements, test cases, and design documents. The pipeline
 evaluates whether the cited requirements + test cases provide reasonable
-assurance of safety against the hazard, applying the H1-H7 mandatory rubric
-defined by the review-hazard-mitigation-coverage skill.
+assurance of safety against the hazard, applying the H1-H6 mandatory rubric
+plus the R7 recommended criterion, defined by the
+review-hazard-mitigation-coverage skill.
 
 Verdicts are binary Yes/No (matching test_suite_reviewer's M1-M5 and
 test_case_reviewer's checklist conventions); H5 alone may be N-A when the
 hazard has no software_related_causes. overall_verdict is Yes iff every
-mandatory_findings[i].verdict is in {Yes, N-A}, else No.
+MANDATORY finding (H1-H6) verdict is in {Yes, N-A}, else No. R7 is recommended
+only and is excluded from the verdict (mirrors the RTM reviewer's R6).
 
 HazardAssessment mirrors SynthesizedAssessment from test_suite_reviewer.core:
 mandatory findings only, no advisories. Advisory items defined in
@@ -69,7 +71,7 @@ __all__ = [
 ]
 
 
-HazardCode = Literal["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
+HazardCode = Literal["H1", "H2", "H3", "H4", "H5", "H6", "R7"]
 HazardDimension = Literal[
     "Hazard Record Completeness and Semantic Integrity",
     "Software Contribution and Cause Coverage",
@@ -211,7 +213,7 @@ class HazardTraceMatrix(BaseModel):
 
     String fields mirror the standard hazard register columns. Traced
     artifacts (requirements, test_cases, design_docs) bundle everything the
-    pipeline needs to evaluate H1-H7 coverage in a single in-memory object.
+    pipeline needs to evaluate H1-H6 + R7 coverage in a single in-memory object.
     """
     requirements: List[Requirement] = Field(
         default_factory=list,
@@ -311,7 +313,7 @@ class RequirementReview(BaseModel):
 
 
 class HazardFinding(BaseModel):
-    """Single item in the H1-H7 SoP-gating rubric."""
+    """Single item in the H1-H6 (mandatory) + R7 (recommended) rubric."""
     code: HazardCode
     dimension: HazardDimension
     verdict: HazardVerdictNA = Field(
@@ -319,7 +321,8 @@ class HazardFinding(BaseModel):
         description=(
             "Yes / No / N-A. Only H5 may be N-A (when "
             "software_related_causes indicates no software cause). "
-            "H1, H2, H3, H4, H6, H7 must be Yes or No."
+            "H1, H2, H3, H4, H6 must be Yes or No. R7 is recommended "
+            "(Yes / No) and NEVER affects overall_verdict."
         ),
     )
     rationale: str = Field(
@@ -347,7 +350,7 @@ class HazardFinding(BaseModel):
 
 
 class HazardAssessment(BaseModel):
-    """Aggregated H1-H7 SoP-gating rubric for a single hazard."""
+    """Aggregated H1-H6 (mandatory) + R7 (recommended) rubric for a single hazard."""
     hazard_id: str = Field(
         ...,
         description="Back-reference to the HazardRecord this assessment evaluates.",
@@ -355,14 +358,15 @@ class HazardAssessment(BaseModel):
     overall_verdict: HazardVerdict = Field(
         ...,
         description=(
-            "Yes iff every mandatory_findings[i].verdict ∈ {Yes, N-A}. "
-            "No otherwise. Computed deterministically by the final_assessor "
+            "Yes iff every MANDATORY finding (H1-H6) verdict ∈ {Yes, N-A}. "
+            "No otherwise. R7 is recommended only and is EXCLUDED from this "
+            "computation. Computed deterministically by the final_assessor "
             "node, never by the LLM."
         ),
     )
     mandatory_findings: List[HazardFinding] = Field(
         ...,
-        description="Exactly 7 items, in order: H1-H7.",
+        description="Exactly 7 items, in order: H1-H6 (mandatory) + R7 (recommended).",
     )
     comments: str = Field(
         default="",
@@ -384,7 +388,7 @@ class FinalAssessorProse(BaseModel):
     """LLM output of the final_assessor node — only the prose fields.
 
     The deterministic verdict aggregation (mandatory_findings list and
-    overall_verdict) is computed in node code from the upstream H1-H7
+    overall_verdict) is computed in node code from the upstream H1-H6 + R7
     findings, not by the LLM. The LLM is only responsible for the
     cross-cutting comments and clarification questions.
     """

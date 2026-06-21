@@ -1,4 +1,4 @@
-"""Hazard risk reviewer — H1-H7 SoP-gating rubric over a HazardRecord."""
+"""Hazard risk reviewer — H1-H6 mandatory + R7 recommended rubric over a HazardRecord."""
 
 from .core import (
     DesignDocument,

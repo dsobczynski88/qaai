@@ -139,7 +139,7 @@ hazard semantics, and unsupported residual-risk or verification claims.</li>
   <td>One Software Hazard Analysis hazard record</td>
   <td>Does the hazard record and traced evidence provide reasonable assurance of safety?</td>
   <td>ISO 14971:2007(E)</td>
-  <td>Evaluate H1&ndash;H7 dimensions spanning semantic completeness, causes, initial risk, controls, verification, residual risk, and newly identified hazards &rarr; calculate deterministic overall verdict</td>
+  <td>Evaluate H1&ndash;H6 mandatory dimensions (semantic completeness, causes, initial risk, controls, verification, residual risk) plus R7 recommended (newly identified hazards) &rarr; calculate deterministic overall verdict (R7 excluded)</td>
 </tr>
 </tbody>
 </table>
@@ -193,8 +193,9 @@ dashboards, audit packages, and downstream remediation workflows.</p>
 the traced suite adequately covers the requirement; R6 is advisory.</li>
 <li><strong>Test Case Reviewer:</strong> checklist rows roll up by deterministic AND logic;
 Partial Yes remains visible but does not fail the overall verdict.</li>
-<li><strong>Hazard Risk Reviewer:</strong> H1&ndash;H7 findings produce a binary
-safety-review disposition, with narrowly controlled N-A behavior only where justified.</li>
+<li><strong>Hazard Risk Reviewer:</strong> H1&ndash;H6 mandatory findings produce a binary
+safety-review disposition, with narrowly controlled N-A behavior only where justified;
+R7 is a recommended finding that is excluded from the verdict.</li>
 </ul>
 
 <h2 id="ts">Test Suite Reviewer &mdash; ISO/IEC/IEEE 29148 + BS ISO/IEC/IEEE 29119-3</h2>
@@ -294,7 +295,7 @@ closure is justified.</p>
 <tr><td><strong>H4</strong> Risk-Control Identification, Allocation, and Coverage</td><td>Confirms controls cover material hazardous-path steps and causes, and that software controls trace to requirements.</td></tr>
 <tr><td><strong>H5</strong> Verification Depth and Hazard-Path Effectiveness</td><td>Confirms tests verify risk-control effectiveness against the hazardous path, not merely nominal functionality.</td></tr>
 <tr><td><strong>H6</strong> Residual Risk Closure and Acceptability Decision</td><td>Confirms post-mitigation risk fields, acceptability basis, and upstream H4/H5 support for risk reduction.</td></tr>
-<tr><td><strong>H7</strong> HSHA Update and Newly Identified Hazard Capture</td><td>Checks whether the review reveals new hazards or hazardous situations that require linked updates.</td></tr>
+<tr><td><strong>R7</strong> HSHA Update and Newly Identified Hazard Capture <em>(recommended)</em></td><td>Checks whether the review reveals new hazards or hazardous situations that require linked updates. Recommended only — excluded from the overall verdict.</td></tr>
 </tbody>
 </table>
 
@@ -313,7 +314,7 @@ on control allocation and verification evidence.</p>
 <tr><td>Evidence rule</td><td>Protocol + expected results must verify spec</td><td>Setup, steps, expected results, and traced specs must support adequacy</td><td>Requirements and tests must support controls and residual risk</td></tr>
 <tr><td>Trace outputs</td><td><code>spec_id</code>, <code>test_case_id</code>, uncovered specs</td><td><code>req_id</code>, <code>spec_id</code>, step/expectedResult references</td><td><code>cited_req_ids</code>, <code>cited_test_case_ids</code>, unblocked items</td></tr>
 <tr><td>Main failure prevention</td><td>False RTM coverage from semantic similarity</td><td>Good-looking but unreproducible or non-verifying test cases</td><td>Unsupported safety closure or malformed hazard semantics</td></tr>
-<tr><td>Aggregation style</td><td>M1&ndash;M5 mandatory findings plus R6 advisory</td><td>Five checklist rows plus deterministic overall verdict</td><td>H1&ndash;H7 dimension findings plus deterministic overall verdict</td></tr>
+<tr><td>Aggregation style</td><td>M1&ndash;M5 mandatory findings plus R6 advisory</td><td>Five checklist rows plus deterministic overall verdict</td><td>H1&ndash;H6 mandatory findings plus R7 advisory, plus deterministic overall verdict</td></tr>
 </tbody>
 </table>
 
@@ -431,8 +432,8 @@ is implemented.</p>
 <tr><td>ISO 14971 &mdash; Clauses 6.1, 6.2, 6.3, 6.7</td><td>H4 Risk-Control Identification and Allocation</td><td>Hazard Risk Reviewer</td><td>Confirms controls cover material hazardous-path steps and software causes and trace to software requirements when software-implemented.</td></tr>
 <tr><td>ISO 14971 &mdash; Clauses 2.10, 2.28, 3.4(e), 6.3</td><td>H5 Verification Depth and Hazard-Path Effectiveness</td><td>Hazard Risk Reviewer</td><td>Requires objective evidence that controls work for the hazardous scenario, including negative, fault, boundary, timing, integration, security, alarm, or degraded-mode evidence where needed.</td></tr>
 <tr><td>ISO 14971 &mdash; Clauses 3.2, 3.4(d), 3.5, 6.4, 6.5, 7</td><td>H6 Residual Risk Closure</td><td>Hazard Risk Reviewer</td><td>Requires post-mitigation risk fields, acceptability criteria, final rating rationale, and upstream H4/H5 support.</td></tr>
-<tr><td>ISO 14971 &mdash; Clauses 6.6, 6.7, 9, Annex E, Annex G</td><td>H7 HSHA Update and New Hazard Capture</td><td>Hazard Risk Reviewer</td><td>Checks whether analysis reveals new hazards or hazardous situations and requires concrete <code>new_hs_reference</code> linkage when applicable.</td></tr>
-<tr><td>ISO 14971 &mdash; Risk Management File Traceability</td><td>Shared H1&ndash;H7 Output Schema</td><td>Hazard Risk Reviewer</td><td>Outputs evidence identifiers, cited requirements, cited tests, unblocked items, concise rationales, and deterministic verdicts.</td></tr>
+<tr><td>ISO 14971 &mdash; Clauses 6.6, 6.7, 9, Annex E, Annex G</td><td>R7 HSHA Update and New Hazard Capture (recommended)</td><td>Hazard Risk Reviewer</td><td>Checks whether analysis reveals new hazards or hazardous situations and requires concrete <code>new_hs_reference</code> linkage when applicable.</td></tr>
+<tr><td>ISO 14971 &mdash; Risk Management File Traceability</td><td>Shared H1&ndash;H6 + R7 Output Schema</td><td>Hazard Risk Reviewer</td><td>Outputs evidence identifiers, cited requirements, cited tests, unblocked items, concise rationales, and deterministic verdicts.</td></tr>
 <tr><td>ISO 14971 &mdash; Documentation Completeness Expectations</td><td>Placeholder Detection Rule</td><td>Hazard Risk Reviewer</td><td>Treats empty, null, TBD, TBC, Unknown, ?, and inappropriate N/A values as non-substantive.</td></tr>
 </tbody>
 </table>

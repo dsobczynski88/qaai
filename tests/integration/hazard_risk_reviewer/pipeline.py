@@ -6,7 +6,7 @@ writes hazard_pipeline_state.json under the active run directory for
 manual inspection (and downstream review via the
 review-hazard-mitigation-coverage skill).
 
-Includes parallelism verification test to confirm H1, H2, H3, H7 run
+Includes parallelism verification test to confirm H1, H2, H3, R7 run
 concurrently with requirement_reviewer, H4, H5 wait for requirement_reviews,
 and H6 waits for H3, H4, H5.
 """
@@ -61,7 +61,7 @@ def _load_enhanced_rows():
 
 _ENHANCED_ROWS = _load_enhanced_rows()
 
-_EXPECTED_HAZARD_CODES = ["H1", "H2", "H3", "H4", "H5", "H6", "H7"]
+_EXPECTED_HAZARD_CODES = ["H1", "H2", "H3", "H4", "H5", "H6", "R7"]
 _EXPECTED_DIMENSIONS = [
     "Hazard Record Completeness and Semantic Integrity",
     "Software Contribution and Cause Coverage",
@@ -88,7 +88,7 @@ def _validate_hazard_assessment(output_state: dict, row_index) -> dict:
 
     num_findings = len(assessment.mandatory_findings)
     assert num_findings == 7, \
-        f"[Row {row_index}] Expected 7 findings (H1-H7), got {num_findings}"
+        f"[Row {row_index}] Expected 7 findings (H1-H6 + R7), got {num_findings}"
 
     for finding in assessment.mandatory_findings:
         if finding.code == "H5":
@@ -98,9 +98,13 @@ def _validate_hazard_assessment(output_state: dict, row_index) -> dict:
             assert finding.verdict in ("Yes", "No"), \
                 f"[Row {row_index}] {finding.code} verdict must be Yes or No, got {finding.verdict}"
 
-    # overall_verdict invariant: Yes iff every finding is Yes or N-A.
+    # overall_verdict invariant: Yes iff every MANDATORY finding (H1-H6) is Yes or
+    # N-A. R7 is recommended only and is EXCLUDED from the verdict — an R7 = No
+    # never flips overall_verdict.
     expected_overall = "Yes" if all(
-        f.verdict in ("Yes", "N-A") for f in assessment.mandatory_findings
+        f.verdict in ("Yes", "N-A")
+        for f in assessment.mandatory_findings
+        if f.code != "R7"
     ) else "No"
     assert assessment.overall_verdict == expected_overall, \
         f"[Row {row_index}] overall_verdict={assessment.overall_verdict} contradicts findings"
@@ -119,7 +123,7 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_full_traceab
 
     Tests the all-fields path: requirements, test_cases, design_docs, user_needs,
     and system_requirements all populated — produces M1-M5 + R6 verdicts per
-    requirement and H1-H7 at the hazard level.
+    requirement and H1-H6 + R7 at the hazard level.
 
     Records input/output to inputs.jsonl and outputs.jsonl for hazard viewer generation.
     """
@@ -179,7 +183,7 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_full_traceab
         assert len(summarized_user_needs) > 0, "Expected at least one summarized user need"
         print(f"Produced {len(summarized_user_needs)} summarized user needs from {len(hazard.requirements_traceability.user_needs)} user needs")
 
-    # Hazard-level H1-H7 verdict (binary Yes/No; H5 may also be N-A).
+    # Hazard-level H1-H6 + R7 verdict (binary Yes/No; H5 may also be N-A).
     _validate_hazard_assessment(result, hazard.hazard_id)
     assessment = result.get("hazard_assessment")
     assert assessment.hazard_id == hazard.hazard_id

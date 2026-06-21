@@ -50,7 +50,7 @@
   <a href="#staging">Why it is staged</a>
   <a href="#subgraph">Embedded RTM subgraph</a>
   <a href="#nodes">Nodes &amp; prompts</a>
-  <a href="#rubric">Rubric (H1–H7)</a>
+  <a href="#rubric">Rubric (H1–H6 + R7)</a>
   <a href="#verdict">Verdict logic</a>
   <a href="#cache">Caching &amp; prompt sets</a>
   <a href="#output">Output</a>
@@ -73,7 +73,7 @@
 Hazard Analysis (SHA) and asks whether its traced requirements, test cases, and
 design controls provide <strong>reasonable assurance of safety</strong> against
 that hazard, per ISO&nbsp;14971 / IEC&nbsp;62304. It applies a seven-dimension
-rubric (H1–H7) and emits a binary Yes/No <code>overall_verdict</code> computed
+rubric (H1–H6 mandatory + R7 recommended) and emits a binary Yes/No <code>overall_verdict</code> computed
 deterministically from the seven findings.</p>
 <p>Its defining feature: for every requirement traced from the hazard, it
 <strong>invokes the entire Test Suite (RTM) reviewer as a subgraph</strong> — so
@@ -99,18 +99,18 @@ SHA Excel file into one <code>HazardRowWithTraceMatrix</code> per row:</p>
 <h2 id="graph">Graph topology</h2>
 <figure>
   <img src="img/hazard_risk_reviewer.png" alt="Hazard Risk Reviewer LangGraph diagram" width="1098" height="829" loading="lazy">
-  <figcaption>Compiled <code>HazardReviewerRunnable</code> graph (rendered from the live pipeline). H1/H2/H3/H7 run early; H4/H5 after the requirement reviews; H6 after H4/H5; the final assessor joins all seven.</figcaption>
+  <figcaption>Compiled <code>HazardReviewerRunnable</code> graph (rendered from the live pipeline). H1/H2/H3/R7 run early; H4/H5 after the requirement reviews; H6 after H4/H5; the final assessor joins all seven.</figcaption>
 </figure>
 <pre class="diagram"><code>START
   -> data_integration -> transform
-       |-- dispatch_hazard_evaluators_early --> [ h1 | h2 | h3 | h7 ]   (parallel, immediate)
+       |-- dispatch_hazard_evaluators_early --> [ h1 | h2 | h3 | r7 ]   (parallel, immediate)
        |-- dispatch_requirement_reviews -- Send xN --> requirement_reviewer  (each runs the RTM subgraph)
        |-- design_summarizer                                            (parallel)
        |-- needs_summarizer                                             (parallel)
                  \--> late_evaluator_router (joins req-reviews + summarizers)
                           -- dispatch_hazard_evaluators_late --> [ h4 | h5 ]  (parallel)
                                    \--> h6_evaluator   (waits for h4 + h5; H3 finding arrives via reducer)
-  -> final_assessment   (joins h1, h2, h6, h7; H3/H4/H5 already reduced)  -> END</code></pre>
+  -> final_assessment   (joins h1, h2, h6, r7; H3/H4/H5 already reduced)  -> END</code></pre>
 <p>Findings accumulate into <code>hazard_findings</code> via an
 <code>Annotated[List[HazardFinding], operator.add]</code> reducer; per-requirement
 RTM results accumulate into <code>requirement_reviews</code> the same way.
@@ -118,7 +118,7 @@ RTM results accumulate into <code>requirement_reviews</code> the same way.
 
 <h2 id="staging">Why the graph is staged by data dependency</h2>
 <ul>
-<li><strong>H1, H2, H3, H7</strong> only read hazard fields, so they fire
+<li><strong>H1, H2, H3, R7</strong> only read hazard fields, so they fire
 immediately from <code>transform</code>, in parallel with the requirement reviews.</li>
 <li><strong>H4 (risk-control coverage)</strong> and <strong>H5 (verification
 depth)</strong> need the per-requirement RTM results <em>and</em> the design/needs
@@ -154,11 +154,11 @@ review (v4 edge-case decomposer when ON, v3 baseline when OFF).</div>
 <tr><td><code>h4_evaluator</code></td><td><code>HazardEvaluatorNode</code></td><td><code>hazard_h4</code></td><td>Risk-control identification, allocation &amp; coverage (uses req-reviews + designs).</td><td><code>HazardFinding</code></td></tr>
 <tr><td><code>h5_evaluator</code></td><td><code>HazardEvaluatorNode</code></td><td><code>hazard_h5</code></td><td>Verification depth &amp; hazard-path effectiveness. <em>N-A</em> when there is no software cause.</td><td><code>HazardFinding</code></td></tr>
 <tr><td><code>h6_evaluator</code></td><td><code>H6EvaluatorNode</code></td><td><code>hazard_h6</code></td><td>Residual-risk closure &amp; acceptability (joins H3/H4/H5).</td><td><code>HazardFinding</code></td></tr>
-<tr><td><code>h7_evaluator</code></td><td><code>HazardEvaluatorNode</code></td><td><code>hazard_h7</code></td><td>HSHA update &amp; newly identified hazard capture.</td><td><code>HazardFinding</code></td></tr>
+<tr><td><code>r7_evaluator</code></td><td><code>HazardEvaluatorNode</code></td><td><code>hazard_r7</code></td><td>HSHA update &amp; newly identified hazard capture (recommended; non-gating).</td><td><code>HazardFinding</code></td></tr>
 <tr><td><code>final_assessment</code></td><td><code>_FinalAssessorNode</code> (final)</td><td><code>hazard_final_assessor</code></td><td>Assembles the seven findings; the verdict is computed in code, the LLM writes the prose.</td><td><code>HazardAssessment</code></td></tr>
 </tbody></table>
 
-<h2 id="rubric">Rubric — H1–H7</h2>
+<h2 id="rubric">Rubric — H1–H6 (mandatory) + R7 (recommended)</h2>
 <table>
 <thead><tr><th>Code</th><th>Dimension</th><th>Verdict</th><th>N-A rule</th></tr></thead>
 <tbody>
@@ -168,21 +168,23 @@ review (v4 edge-case decomposer when ON, v3 baseline when OFF).</div>
 <tr><td><strong>H4</strong></td><td>Risk-control identification, allocation &amp; coverage</td><td>Yes / No</td><td>—</td></tr>
 <tr><td><strong>H5</strong></td><td>Verification depth &amp; hazard-path effectiveness</td><td>Yes / No / N-A</td><td><em>N-A</em> when <code>software_related_causes</code> is empty (no software contribution).</td></tr>
 <tr><td><strong>H6</strong></td><td>Residual-risk closure &amp; acceptability decision</td><td>Yes / No</td><td>—</td></tr>
-<tr><td><strong>H7</strong></td><td>HSHA update &amp; newly identified hazard capture</td><td>Yes / No</td><td>—</td></tr>
+<tr><td><strong>R7</strong> <em>(recommended)</em></td><td>HSHA update &amp; newly identified hazard capture</td><td>Yes / No</td><td>Recommended only — excluded from <code>overall_verdict</code>.</td></tr>
 </tbody></table>
 
 <h2 id="verdict">Verdict logic</h2>
 <p>The <code>final_assessment</code> node returns exactly seven
-<code>HazardFinding</code> items (H1–H7). The verdict is computed
+<code>HazardFinding</code> items (H1–H6 mandatory + R7 recommended). The verdict is computed
 <strong>deterministically in code</strong>, not by the LLM:
-<code>overall_verdict</code> is <strong>Yes</strong> iff every finding's verdict is
-in <code>{Yes, N-A}</code>, else <strong>No</strong>. The LLM is used only to write
+<code>overall_verdict</code> is <strong>Yes</strong> iff every <strong>mandatory</strong>
+finding (H1–H6) verdict is in <code>{Yes, N-A}</code>, else <strong>No</strong>.
+<strong>R7 is recommended only and is excluded from the verdict</strong> — an R7 = No
+never flips it (mirrors the RTM reviewer's R6 advisory criterion). The LLM is used only to write
 the accompanying <code>comments</code> and <code>clarification_questions</code>; if
 the prose call fails, the deterministic assessment is still produced.
 <span class="src">hazard_risk_reviewer/nodes.py</span></p>
 
 <h2 id="cache">Caching &amp; prompt sets</h2>
-<p>The hazard reviewer's own nodes (H1–H7, summarizers) and the per-requirement
+<p>The hazard reviewer's own nodes (H1–H6, R7, summarizers) and the per-requirement
 RTM blobs use the shared <code>ReviewCacheManager</code> — the H-nodes partition by
 <code>hazard_id</code> (<code>HAZ-*</code>), the RTM blobs by <code>req_id</code>
 (<code>REQ-*</code>).</p>
@@ -196,7 +198,7 @@ at startup and selected per request.</div>
 
 <h2 id="output">Output</h2>
 <p>The endpoint returns a self-contained HTML viewer rendered from
-<code>outputs.jsonl</code>, one record per hazard row, showing the H1–H7 rubric,
+<code>outputs.jsonl</code>, one record per hazard row, showing the H1–H6 + R7 rubric,
 the per-requirement RTM reviews, and the deterministic overall verdict.</p>
 
 <footer class="doc">Generated from the QAAI (qaai) codebase on 2026-06-14.</footer>

@@ -76,7 +76,7 @@ pipeline that emits a structured, SoP-gating rubric with a binary Yes/No verdict
 <tbody>
 <tr><td>Test Suite (RTM)</td><td><code>qaai.agents.test_suite_reviewer</code></td><td>M1–M5 + R6</td><td><code>SynthesizedAssessment</code></td></tr>
 <tr><td>Test Case</td><td><code>qaai.agents.test_case_reviewer</code></td><td>5 review objectives</td><td><code>TestCaseAssessment</code></td></tr>
-<tr><td>Hazard Risk</td><td><code>qaai.agents.hazard_risk_reviewer</code></td><td>H1–H7</td><td><code>HazardAssessment</code></td></tr>
+<tr><td>Hazard Risk</td><td><code>qaai.agents.hazard_risk_reviewer</code></td><td>H1–H6 + R7</td><td><code>HazardAssessment</code></td></tr>
 </tbody></table>
 <p>The hazard reviewer <strong>embeds the full RTM reviewer as a subgraph</strong>: each
 requirement traced from a hazard record is reviewed by invoking the RTM graph.</p>
@@ -137,14 +137,14 @@ logical and prereqs axes are single test-case-level nodes
 The graph is staged by data dependency
 <span class="src">hazard_risk_reviewer/pipeline.py:70-282</span>:</p>
 <pre class="diagram"><code>START -> data_integration -> transform
-  transform --Send--> [ h1 | h2 | h3 | h7 ]            (early evaluators)
+  transform --Send--> [ h1 | h2 | h3 | r7 ]            (early evaluators)
   transform --Send xN--> requirement_reviewer          (each runs the RTM SUBGRAPH)
   transform -> design_summarizer ,  needs_summarizer
         \\ (all of the above join) //
   -> late_evaluator_router
   -> dispatch_late --Send--> [ h4 | h5 ]
   -> h6                       (joins after H4/H5; H3 reaches it via the reducer)
-  -> final_assessment         (deterministic; waits on h1,h2,h6,h7)
+  -> final_assessment         (deterministic; waits on h1,h2,h6,r7)
   -> END</code></pre>
 <p>The <code>final_assessment</code> node computes <code>overall_verdict</code>
 <strong>deterministically</strong> from the seven Yes/No/N-A findings (never by the LLM).

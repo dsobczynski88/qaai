@@ -107,7 +107,9 @@ function renderLeft() {
     if (f.cited_test_case_ids?.length) extras.push(`TCs: ${f.cited_test_case_ids.map(escapeHTML).join(", ")}`);
     if (f.unblocked_items?.length) extras.push(`unblocked: ${f.unblocked_items.map(escapeHTML).join(" · ")}`);
     const chipClass = f.verdict;
-    return `<tr>
+    const isRecommended = f.code === "R7";
+    const rowClass = isRecommended ? ' class="recommended"' : '';
+    return `<tr${rowClass}>
       <td><strong>${escapeHTML(f.code)}</strong> ${escapeHTML(f.dimension)}</td>
       <td><span class="chip chip-${chipClass}">${escapeHTML(f.verdict)}</span></td>
       <td>${escapeHTML(f.rationale)}${extras.length ? `<div class="cited">${extras.join(" · ")}</div>` : ""}</td>
@@ -133,7 +135,7 @@ function renderLeft() {
       <span class="link-like" onclick="openCoverageIndex()">Coverage analysis (per requirement) →</span>
     </div>
     <table class="findings">
-      <thead><tr><th>Dimension <span class="help-icon" onclick="openCriteriaHelp()" title="What do H1-H5 mean?">?</span></th><th>Verdict</th><th>Rationale</th></tr></thead>
+      <thead><tr><th>Dimension <span class="help-icon" onclick="openCriteriaHelp()" title="What do H1-H6 and R7 mean?">?</span></th><th>Verdict</th><th>Rationale</th></tr></thead>
       <tbody>${findingsRows || "<tr><td colspan=\"3\"><em>(no findings — pipeline did not produce a hazard_assessment)</em></td></tr>"}</tbody>
     </table>
     ${comments ? `<div class="comments"><h2>Comments</h2><div>${escapeHTML(comments)}</div></div>` : ""}
@@ -215,7 +217,7 @@ function openReqCoverage(reviewIdx) {
 
 function openCriteriaHelp() {
   openModal(`
-    <h3>Mandatory rubric — H1 to H5</h3>
+    <h3>Mandatory rubric — H1 to H6 + Recommended R7</h3>
     <dl class="criteria-help">
       <dt>H1 Hazard Statement Completeness</dt>
       <dd>Hazard, hazardous situation, sequence of events, function, and harm are populated and form an internally consistent chain; severity is justified. Never N-A.</dd>
@@ -227,8 +229,12 @@ function openCriteriaHelp() {
       <dd>Every controlling requirement has BOTH M2 (Negative) and M3 (Boundary) verdicts in {Yes, N-A} — happy-path-only verification is insufficient. N-A is allowed only when software_related_causes is empty / "no software cause".</dd>
       <dt>H5 Residual Risk Closure</dt>
       <dd>Post-mitigation severity / exploitability / probability / final risk rating / residual acceptability are populated, traceability fields (sw_fmea_trace, sra_link, urra_item) are populated, and any probability downgrade is supported by H3 = Yes and H4 = Yes/N-A. Never N-A.</dd>
+      <dt>H6 Residual Risk Acceptability Decision</dt>
+      <dd>The residual-risk acceptability decision is internally consistent with the H3 control adequacy, H4 verification depth, and H5 residual-risk closure findings. Never N-A.</dd>
+      <dt>ℹ️ R7 HSHA Update &amp; Newly Identified Hazard Capture (Recommended)</dt>
+      <dd>Newly identified hazards / hazardous situations are captured and linked, and the review shows evidence of checking against prior HSHA / standards-derived sources. <strong>Recommended only — an R7 = No never affects overall_verdict.</strong></dd>
     </dl>
-    <div class="legend">overall_verdict = Yes iff every dimension is Yes or N-A; otherwise No.</div>
+    <div class="legend">overall_verdict = Yes iff every <strong>mandatory</strong> dimension (H1–H6) is Yes or N-A; otherwise No. <strong>R7 is recommended only and never affects overall_verdict.</strong></div>
   `);
 }
 

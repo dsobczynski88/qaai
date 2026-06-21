@@ -1,12 +1,12 @@
 """LangGraph pipeline for the hazard risk reviewer.
 
-Per-dimension graph with binary Yes/No verdicts (H1-H7):
+Per-dimension graph with binary Yes/No verdicts (H1-H6 mandatory + R7 recommended):
 
     START
       ├──→ h1_evaluator ────────────────────────┐
       ├──→ h2_evaluator ────────────────────────┤
       ├──→ h3_evaluator ────────────────────────┤  (finding accumulated via reducer)
-      ├──→ h7_evaluator ────────────────────────┤
+      ├──→ r7_evaluator ────────────────────────┤
       └──→ dispatch_requirement_reviews         │
               ↓                                 │
           requirement_reviewer × N              │
@@ -21,15 +21,16 @@ Per-dimension graph with binary Yes/No verdicts (H1-H7):
                   END
 
 Key improvements:
-- H1, H2, H3, H7 run immediately (parallel with requirement_reviewer)
+- H1, H2, H3, R7 run immediately (parallel with requirement_reviewer)
 - H4, H5 run after requirement_reviews complete
 - H6 runs after H4 and H5 complete (2-way fan-in, same superstep); H3's finding
   is already in the hazard_findings reducer by that point — no direct H3→H6 edge
   is needed and adding one would cause H6 to fire prematurely (before H4/H5 exist)
-- Final assessor waits for all 7 findings
+- Final assessor waits for all 7 findings (H1-H6 + R7)
 
-overall_verdict is computed deterministically: Yes iff every
-mandatory_findings[i].verdict ∈ {Yes, N-A} (only H5 may be N-A).
+overall_verdict is computed deterministically: Yes iff every MANDATORY
+finding (H1-H6) verdict ∈ {Yes, N-A} (only H5 may be N-A). R7 is recommended
+only and is excluded from the verdict — an R7 = No never flips the verdict.
 """
 
 import logging
@@ -73,18 +74,20 @@ class HazardReviewerRunnable:
     """
     LangGraph-based hazard reviewer. Evaluates whether a HazardRecord's
     traced requirements + test cases provide reasonable assurance of safety
-    against the hazard, applying the H1-H7 rubric defined by the
+    against the hazard, applying the H1-H6 mandatory rubric plus the R7
+    recommended criterion, defined by the
     review-hazard-mitigation-coverage skill.
 
-    Graph runs seven per-dimension LLM evaluators (one per H1..H7) plus a
-    deterministic final_assessor. H1, H2, H3, H7 evaluate hazard fields in
+    Graph runs seven per-dimension LLM evaluators (H1..H6 + R7) plus a
+    deterministic final_assessor. H1, H2, H3, R7 evaluate hazard fields in
     isolation and run from START in parallel with the requirement-review
     fan-out. H4 and H5 fire after every Send-fanned requirement_reviewer
     completes — they evaluate the *list* of per-requirement
     SynthesizedAssessment outputs at the requirement level (not spec-by-
     spec). H6 joins on H3, H4, H5 for residual-risk closure validation.
-    Each H1..H7 finding is binary Yes/No (H5 may also be N-A). overall_verdict
-    is computed in code as Yes iff every dimension's verdict is in {Yes, N-A}.
+    Each finding is binary Yes/No (H5 may also be N-A). overall_verdict is
+    computed in code as Yes iff every MANDATORY dimension (H1-H6) verdict is
+    in {Yes, N-A}; R7 is recommended only and excluded from the verdict.
     """
 
     def __init__(
@@ -180,9 +183,9 @@ class HazardReviewerRunnable:
             prompt_template=self.prompt_config.hazard_h6,
             cache_manager=cm, prompt_set=ps,
         )
-        h7 = make_hazard_evaluator_node(
-            "H7", self.client, self.model, self.model_kwargs,
-            prompt_template=self.prompt_config.hazard_h7,
+        r7 = make_hazard_evaluator_node(
+            "R7", self.client, self.model, self.model_kwargs,
+            prompt_template=self.prompt_config.hazard_r7,
             cache_manager=cm, prompt_set=ps,
         )
         final_assessor = make_final_assessor_node(
@@ -225,7 +228,7 @@ class HazardReviewerRunnable:
         sg.add_node("h4_evaluator", h4)
         sg.add_node("h5_evaluator", h5)
         sg.add_node("h6_evaluator", h6)
-        sg.add_node("h7_evaluator", h7)
+        sg.add_node("r7_evaluator", r7)
         sg.add_node("requirement_reviewer", requirement_reviewer)
         sg.add_node("design_summarizer", design_summarizer)
         sg.add_node("needs_summarizer", needs_summarizer)
@@ -246,11 +249,11 @@ class HazardReviewerRunnable:
             ["work_router", END],
         )
 
-        # Early evaluators (H1, H2, H3, H7) run after the gate
+        # Early evaluators (H1, H2, H3, R7) run after the gate
         sg.add_conditional_edges(
             "work_router",
             dispatch_hazard_evaluators_early,
-            ["h1_evaluator", "h2_evaluator", "h3_evaluator", "h7_evaluator"],
+            ["h1_evaluator", "h2_evaluator", "h3_evaluator", "r7_evaluator"],
         )
 
         # Requirement reviews also flow from work_router
@@ -283,11 +286,11 @@ class HazardReviewerRunnable:
         sg.add_edge("h4_evaluator", "h6_evaluator")
         sg.add_edge("h5_evaluator", "h6_evaluator")
 
-        # Final assessment waits for all 7 evaluators
+        # Final assessment waits for all 7 evaluators (H1-H6 + R7)
         sg.add_edge("h1_evaluator", "final_assessment")
         sg.add_edge("h2_evaluator", "final_assessment")
         sg.add_edge("h6_evaluator", "final_assessment")  # H6 already waited for H3, H4, H5
-        sg.add_edge("h7_evaluator", "final_assessment")
+        sg.add_edge("r7_evaluator", "final_assessment")
 
         sg.add_edge("final_assessment", END)
 

@@ -252,7 +252,7 @@ parametrized item (id = <code>req_id</code> / <code>test_id</code>) by the
 <td>One <code>TestCaseAssessment</code> per test case; 5-item <code>evaluated_checklist</code>; spec-align verdict derived from coverage count</td>
 <td><code>inputs.jsonl</code>, <code>outputs.jsonl</code>, <code>viewer_tc.html</code></td></tr>
 <tr><td><code>hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer</code></td>
-<td>One <code>RequirementReview</code> per traced requirement (each embeds a <code>SynthesizedAssessment</code>); <code>HazardAssessment</code> with 7 findings (H1–H7); only H5 may be <code>N-A</code></td>
+<td>One <code>RequirementReview</code> per traced requirement (each embeds a <code>SynthesizedAssessment</code>); <code>HazardAssessment</code> with 7 findings (H1–H6 mandatory + R7 recommended); only H5 may be <code>N-A</code>; R7 is excluded from the verdict</td>
 <td>+ <code>hazard_pipeline_state.json</code></td></tr>
 <tr><td><code>test_data_integration_backward_compat.py</code></td>
 <td>RTM &amp; TC graphs still run on local data input (no <code>pyjama_request</code>): full state is produced and the JAMA fields stay <code>None</code> <span class="src">tests/integration/test_data_integration_backward_compat.py:14-107</span></td>

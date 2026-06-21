@@ -2,7 +2,7 @@ role: hazard_final_assessor
 version: v1.0.0
 component: hazard_risk_reviewer
 authored: '2026-05-12'
-content_sha256: f048a2615dfeaf28
+content_sha256: eb328ccea43473d7
 status: published
 parent_version: null
 author: autoqa-team
@@ -11,7 +11,7 @@ output_pydantic_model: HazardAssessment
 target_models:
 - gpt-4o-mini
 - gpt-4o
-changelog: Initial migration from flat structure.
+changelog: Renamed H7 -> R7 (recommended) in payload key and prose; R7 excluded from overall_verdict.
 rubric:
 - H1
 - H2
@@ -19,4 +19,4 @@ rubric:
 - H4
 - H5
 - H6
-- H7
+- R7

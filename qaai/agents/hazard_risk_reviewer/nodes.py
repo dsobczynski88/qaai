@@ -1,6 +1,6 @@
 """Node implementations for the hazard risk reviewer.
 
-Per-dimension graph: H1, H2, H3, H7 evaluate independent hazard fields and run
+Per-dimension graph: H1, H2, H3, R7 evaluate independent hazard fields and run
 in parallel from START with `dispatch_requirement_reviews`. After every
 parallel `requirement_reviewer` Send fans in, H4 and H5 evaluate the
 resulting list of per-requirement SynthesizedAssessment outputs at the
@@ -179,7 +179,7 @@ class HazardNeedsSummarizerNode(BatchedLLMNode):
 
 def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
     """
-    Dispatch H1, H2, H3, H7 immediately (they only need hazard fields).
+    Dispatch H1, H2, H3, R7 immediately (they only need hazard fields).
     These run in parallel with requirement_reviewer fan-out.
     """
     hazard = state.get("hazard")
@@ -203,7 +203,7 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
         Send("h1_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
         Send("h2_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
         Send("h3_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
-        Send("h7_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
+        Send("r7_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
     ]
 
 
@@ -411,7 +411,7 @@ class RequirementReviewerNode:
 
 
 
-# --- per-dimension evaluator nodes (H1-H7) -------------------------------
+# --- per-dimension evaluator nodes (H1-H6 + R7) --------------------------
 
 
 _H1_FIELDS = (
@@ -477,7 +477,7 @@ _H6_FIELDS = (
     "new_hs_reference",
 )
 
-_H7_FIELDS = (
+_R7_FIELDS = (
     "hazard_id",
     "hazard",
     "hazardous_situation",
@@ -495,7 +495,7 @@ _DIMENSION_CONFIGS: dict[str, tuple] = {
     "H3": _H3_FIELDS,
     "H4": _H4_FIELDS,
     "H5": _H5_FIELDS,
-    "H7": _H7_FIELDS,
+    "R7": _R7_FIELDS,
 }
 
 
@@ -542,10 +542,10 @@ def _summarise_reviews(reviews: List[RequirementReview]) -> List[dict]:
 
 class HazardEvaluatorNode(StandardLLMNode):
     """
-    Generic evaluator for a single hazard dimension (H1-H7).
+    Generic evaluator for a single hazard dimension (H1-H6 + R7).
     Invoked in parallel via LangGraph Send API.
-    
-    H1, H2, H3, H7 only need hazard fields (run early from START).
+
+    H1, H2, H3, R7 only need hazard fields (run early from START).
     H4, H5 need hazard + requirement_reviews (run after requirement_reviewer completes).
     H6 is special-cased in H6EvaluatorNode (needs H3, H4, H5 findings).
     """
@@ -574,7 +574,7 @@ class HazardEvaluatorNode(StandardLLMNode):
         return hazard.hazard_id if hazard else None
 
     def _get_cache_node_name(self, state: Any = None) -> str:
-        # H1..H7 are all instances of this one class — disambiguate by
+        # H1..H6 + R7 are all instances of this one class — disambiguate by
         # dimension so they don't share (and clobber) one cache key.
         return f"hazardevaluatornode_{self.dimension_code.lower()}"
 
@@ -678,7 +678,7 @@ class _FinalAssessorNode(StandardLLMNode):
     the LLM cannot accidentally re-grade or drop a dimension.
     """
 
-    _CODES = ("H1", "H2", "H3", "H4", "H5", "H6", "H7")
+    _CODES = ("H1", "H2", "H3", "H4", "H5", "H6", "R7")
 
     def _validate_state(self, state: HazardReviewState) -> bool:
         findings = state.get("hazard_findings", [])
@@ -693,12 +693,13 @@ class _FinalAssessorNode(StandardLLMNode):
         findings = state.get("hazard_findings", [])
         assert hazard is not None
         
-        # Sort findings by code to ensure H1-H7 order
+        # Sort findings by code to ensure H1-H6 + R7 order
         findings_dict = {f.code: f for f in findings}
-        
+
         return {
             "hazard_id": hazard.hazard_id,
-            **{f"h{i}_finding": findings_dict[f"H{i}"].model_dump() for i in range(1, 8)},
+            **{f"h{i}_finding": findings_dict[f"H{i}"].model_dump() for i in range(1, 7)},
+            "r7_finding": findings_dict["R7"].model_dump(),
         }
 
     def _format_response(self, parsed_result: Optional[FinalAssessorProse]) -> HazardReviewState:
@@ -708,7 +709,7 @@ class _FinalAssessorNode(StandardLLMNode):
         return {"hazard_assessment": self._latest_assessment(prose)}
 
     def _get_skip_response(self) -> HazardReviewState:
-        # Validation failed (one of H1-H7 missing). Return None so callers
+        # Validation failed (one of H1-H6 + R7 missing). Return None so callers
         # can detect that the pipeline did not produce a final assessment.
         return {"hazard_assessment": None}
 
@@ -734,15 +735,23 @@ class _FinalAssessorNode(StandardLLMNode):
 
     @staticmethod
     def _aggregate_verdict(findings: List[HazardFinding]) -> str:
-        """Yes iff every finding's verdict is in {Yes, N-A}; else No."""
-        return "Yes" if all(f.verdict in ("Yes", "N-A") for f in findings) else "No"
+        """Yes iff every MANDATORY finding's verdict is in {Yes, N-A}; else No.
+
+        R7 is a recommended (advisory) criterion and is excluded from the
+        aggregation — an R7 = No never flips overall_verdict.
+        """
+        return (
+            "Yes"
+            if all(f.verdict in ("Yes", "N-A") for f in findings if f.code != "R7")
+            else "No"
+        )
 
     def _get_cache_entity_id(self, state: Any) -> Optional[str]:
         hazard = state.get("hazard")
         return hazard.hazard_id if hazard else None
 
     async def __call__(self, state: Any) -> Any:
-        # Custom flow: when the upstream H1-H7 findings are all present we
+        # Custom flow: when the upstream H1-H6 + R7 findings are all present we
         # always produce a HazardAssessment, even if the LLM prose call
         # fails or returns unparseable JSON (deterministic verdict
         # aggregation does not depend on the LLM). The base StandardLLMNode
@@ -821,7 +830,7 @@ def _make_hazard_evaluator(
     prompt_set: Optional[str] = None,
     **template_vars,
 ) -> HazardEvaluatorNode:
-    """Factory for generic HazardEvaluatorNode (H1-H5, H7)."""
+    """Factory for generic HazardEvaluatorNode (H1-H5, R7)."""
     system_prompt = render_prompt(prompt_template, **template_vars)
     return HazardEvaluatorNode(
         client=client,
@@ -869,7 +878,7 @@ def make_hazard_evaluator_node(
     prompt_set: Optional[str] = None,
     **template_vars,
 ) -> HazardEvaluatorNode:
-    """Create a HazardEvaluatorNode for the given dimension (H1-H5, H7)."""
+    """Create a HazardEvaluatorNode for the given dimension (H1-H5, R7)."""
     fields = _DIMENSION_CONFIGS[dimension_code]
     return _make_hazard_evaluator(
         client, model, model_kwargs, prompt_template,

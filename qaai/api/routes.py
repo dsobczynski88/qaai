@@ -142,7 +142,7 @@ async def hazard_risk_review(
     """Submit a hazard risk review for every row of an uploaded SHA Excel file.
 
     Runs asynchronously: returns 202 + job_id; poll GET /jobs/{job_id} and
-    download GET /jobs/{job_id}/result (viewer_hz.html, H1-H7 rubric) when
+    download GET /jobs/{job_id}/result (viewer_hz.html, H1-H6 + R7 rubric) when
     completed. The uploaded file is read fully before returning, so the job runs
     independently of the request.
     """
