@@ -631,6 +631,12 @@ class HazardEvaluatorNode(StandardLLMNode):
                 ]
             else:
                 payload["summarized_designs"] = None
+            logger.debug(
+                "%s (%s): attached %d summarized_designs to payload",
+                self.__class__.__name__,
+                self.dimension_code,
+                len(payload["summarized_designs"]) if payload["summarized_designs"] else 0,
+            )
 
         # H4, H5 need requirement_reviews
         if self.dimension_code in ["H4", "H5"]:
