@@ -213,7 +213,11 @@ class BaseLLMNode(ABC):
         for i in range(start_idx, len(text)):
             char = text[i]
             
-            # Handle string escaping
+            # FIX 2: Handle string escaping. This prevents escaped quotes and backslashes
+            # from being misinterpreted as JSON structure delimiters.
+            # - If escape_next=True, skip this char (it's escaped) and clear the flag
+            # - If we see '\', set escape_next so the next char is skipped
+            # - Only then can we process unescaped quotes as string delimiters
             if escape_next:
                 escape_next = False
                 continue
@@ -222,7 +226,8 @@ class BaseLLMNode(ABC):
                 escape_next = True
                 continue
             
-            # Track string boundaries (ignore brackets inside strings)
+            # Track string boundaries (ignore brackets inside strings).
+            # Only unescaped quotes toggle in_string state.
             if char == '"':
                 in_string = not in_string
                 continue
@@ -252,6 +257,13 @@ class BaseLLMNode(ABC):
         
         # If we didn't find a balanced closing, try to repair
         extracted = text[start_idx:].strip()
+        
+        # FIX 1: Check if we exited the loop while still inside a string.
+        # This catches LLM outputs that end mid-string (e.g., "EOF while parsing a string").
+        # The `in_string` flag will be True if the last quote we saw had no matching closing quote.
+        if in_string:
+            logger.warning("JSON repair: detected unclosed string at EOF, adding closing quote")
+            extracted += '"'
         
         # Repair: Add missing closing braces/brackets
         # This handles Llama-3.3's tendency to omit final closing delimiters

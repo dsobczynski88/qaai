@@ -419,11 +419,9 @@ _H1_FIELDS = (
     "hazard",
     "hazardous_situation",
     "hazardous_sequence_of_events",
-    "software_related_causes",
     "function",
     "harm",
     "severity",
-    "harm_severity_rationale",
 )
 
 _H2_FIELDS = (
@@ -434,6 +432,7 @@ _H2_FIELDS = (
     "software_related_causes",
     "function",
     "ots_software",
+    "risk_control_measures"
 )
 
 _H3_FIELDS = (
@@ -442,8 +441,7 @@ _H3_FIELDS = (
     "severity",
     "exploitability_pre_mitigation",
     "probability_of_harm_pre_mitigation",
-    "initial_risk_rating",
-    "harm_severity_rationale",
+    "sra_link",
 )
 
 _H4_FIELDS = (
@@ -474,7 +472,6 @@ _H6_FIELDS = (
     "sw_fmea_trace",
     "sra_link",
     "urra_item",
-    "new_hs_reference",
 )
 
 _R7_FIELDS = (
