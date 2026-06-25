@@ -1,8 +1,10 @@
 """Node implementations for the hazard risk reviewer.
 
-Per-dimension graph: H1, H2, H3, R7 evaluate independent hazard fields and run
-in parallel from START with `dispatch_requirement_reviews`. After every
-parallel `requirement_reviewer` Send fans in, H4 and H5 evaluate the
+Per-dimension graph: H1 and R7 evaluate independent hazard fields and run in
+parallel from START with `dispatch_requirement_reviews`. H2 and H3 dispatch
+after the design_summarizer so they can reason over `summarized_designs`
+(`dispatch_hazard_evaluators_design`). After every parallel
+`requirement_reviewer` Send fans in, H4 and H5 evaluate the
 resulting list of per-requirement SynthesizedAssessment outputs at the
 requirement level (not spec-by-spec). H6 joins on H3, H4, H5 and grades
 residual risk closure. The final_assessor assembles the structured
@@ -179,14 +181,17 @@ class HazardNeedsSummarizerNode(BatchedLLMNode):
 
 def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
     """
-    Dispatch H1, H2, H3, R7 immediately (they only need hazard fields).
-    These run in parallel with requirement_reviewer fan-out.
+    Dispatch H1, R7 immediately (they only need hazard fields).
+    These run in parallel with the requirement_reviewer fan-out and the
+    summarizers. H2 and H3 are dispatched separately, after the
+    design_summarizer completes, because their prompts reason over
+    `summarized_designs` (see dispatch_hazard_evaluators_design).
     """
     hazard = state.get("hazard")
     if not hazard:
         logger.warning("dispatch_hazard_evaluators_early: no hazard, skipping")
         return []
-    
+
     # Log traceability presence for debugging
     has_traceability = hazard.requirements_traceability is not None
     num_requirements = (
@@ -197,13 +202,45 @@ def dispatch_hazard_evaluators_early(state: HazardReviewState) -> List[Send]:
         "dispatch_hazard_evaluators_early: hazard=%s, has_traceability=%s, num_requirements=%d",
         hazard.hazard_id, has_traceability, num_requirements
     )
-    
+
     cache_mode = state.get("cache_mode", "on")
     return [
         Send("h1_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
-        Send("h2_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
-        Send("h3_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
         Send("r7_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
+    ]
+
+
+def dispatch_hazard_evaluators_design(state: HazardReviewState) -> List[Send]:
+    """
+    Dispatch H2, H3 after design_summarizer completes so they receive
+    `summarized_designs` in their payload. Both prompts (hazard_h2,
+    hazard_h3) reason over the cited design summaries — and flag a
+    limitation when none exist — so they must run downstream of the
+    summarizer rather than from START. `summarized_designs` may be None
+    (no design_docs / summarizer skipped); the prompts handle that case.
+    """
+    hazard = state.get("hazard")
+    if not hazard:
+        logger.warning("dispatch_hazard_evaluators_design: no hazard, skipping")
+        return []
+
+    summarized_designs = state.get("summarized_designs")
+    cache_mode = state.get("cache_mode", "on")
+
+    h2_state = {
+        "hazard": hazard,
+        "summarized_designs": summarized_designs,
+        "cache_mode": cache_mode,
+    }
+    h3_state = {
+        "hazard": hazard,
+        "summarized_designs": summarized_designs,
+        "cache_mode": cache_mode,
+    }
+
+    return [
+        Send("h2_evaluator", h2_state),
+        Send("h3_evaluator", h3_state),
     ]
 
 
@@ -542,7 +579,8 @@ class HazardEvaluatorNode(StandardLLMNode):
     Generic evaluator for a single hazard dimension (H1-H6 + R7).
     Invoked in parallel via LangGraph Send API.
 
-    H1, H2, H3, R7 only need hazard fields (run early from START).
+    H1, R7 only need hazard fields (run early from START).
+    H2, H3 need hazard + summarized_designs (run after design_summarizer).
     H4, H5 need hazard + requirement_reviews (run after requirement_reviewer completes).
     H6 is special-cased in H6EvaluatorNode (needs H3, H4, H5 findings).
     """
@@ -581,7 +619,19 @@ class HazardEvaluatorNode(StandardLLMNode):
     def _build_payload(self, state: Any) -> dict:
         hazard = state["hazard"]
         payload = _slice_hazard(hazard, self.required_fields)
-        
+
+        # H2, H3 reason over the design summaries (dispatched after the
+        # design_summarizer). Their prompts flag a limitation when none exist,
+        # so always include the key — None when absent.
+        if self.dimension_code in ["H2", "H3"]:
+            summarized_designs = state.get("summarized_designs")
+            if summarized_designs:
+                payload["summarized_designs"] = [
+                    sd.model_dump() for sd in summarized_designs
+                ]
+            else:
+                payload["summarized_designs"] = None
+
         # H4, H5 need requirement_reviews
         if self.dimension_code in ["H4", "H5"]:
             reviews = state.get("requirement_reviews", [])
@@ -971,6 +1021,7 @@ def make_hazard_needs_summarizer_node(
 __all__ = [
     "dispatch_requirement_reviews",
     "dispatch_hazard_evaluators_early",
+    "dispatch_hazard_evaluators_design",
     "dispatch_hazard_evaluators_late",
     "RequirementReviewerNode",
     "make_hazard_evaluator_node",
