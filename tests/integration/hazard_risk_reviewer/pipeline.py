@@ -134,14 +134,40 @@ async def test_hazard_risk_reviewer(real_client, real_model, hazard_full_traceab
     
     graph = HazardReviewerRunnable(client=real_client, model=real_model)
     initial_state: HazardReviewState = {"hazard": hazard}
-    
+
     # Record input
     record_input({"hazard": hazard.model_dump()})
-    
-    result: HazardReviewState = await graph.graph.ainvoke(initial_state)
-    
+
+    # Drive the graph with astream so we can verify execution ORDER, not just
+    # the final state: H2/H3 must run after design_summarizer (they consume
+    # summarized_designs). "updates" yields {node_name: delta} per superstep —
+    # we record the order nodes first emit; "values" yields the running full
+    # state, whose last emission is the final result.
+    node_emit_order: list[str] = []
+    result: HazardReviewState = {}
+    async for mode, chunk in graph.graph.astream(
+        initial_state, stream_mode=["updates", "values"]
+    ):
+        if mode == "updates":
+            for node_name in chunk:
+                if node_name not in node_emit_order:
+                    node_emit_order.append(node_name)
+        elif mode == "values":
+            result = chunk
+
     # Record output
     record_output(serialize_state(result))
+
+    # Ordering invariant: design_summarizer emits before H2 and H3, confirming
+    # they no longer evaluate immediately from START but consume the summary.
+    assert "design_summarizer" in node_emit_order, \
+        f"design_summarizer never ran; node order was {node_emit_order}"
+    ds_idx = node_emit_order.index("design_summarizer")
+    for late_node in ("h2_evaluator", "h3_evaluator"):
+        assert late_node in node_emit_order, \
+            f"{late_node} never ran; node order was {node_emit_order}"
+        assert ds_idx < node_emit_order.index(late_node), \
+            f"{late_node} ran before design_summarizer; order was {node_emit_order}"
 
     # Per-requirement RTM evidence — one review per traced requirement.
     reviews = result.get("requirement_reviews", [])

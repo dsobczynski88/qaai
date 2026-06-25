@@ -4,9 +4,9 @@ Per-dimension graph with binary Yes/No verdicts (H1-H6 mandatory + R7 recommende
 
     START
       ├──→ h1_evaluator ────────────────────────┐
-      ├──→ h2_evaluator ────────────────────────┤
-      ├──→ h3_evaluator ────────────────────────┤  (finding accumulated via reducer)
       ├──→ r7_evaluator ────────────────────────┤
+      ├──→ design_summarizer ───┬──→ h2_evaluator┤  (finding accumulated via reducer)
+      │                         └──→ h3_evaluator┤
       └──→ dispatch_requirement_reviews         │
               ↓                                 │
           requirement_reviewer × N              │
@@ -21,7 +21,8 @@ Per-dimension graph with binary Yes/No verdicts (H1-H6 mandatory + R7 recommende
                   END
 
 Key improvements:
-- H1, H2, H3, R7 run immediately (parallel with requirement_reviewer)
+- H1, R7 run immediately (parallel with requirement_reviewer)
+- H2, H3 run after design_summarizer (they consume summarized_designs)
 - H4, H5 run after requirement_reviews complete
 - H6 runs after H4 and H5 complete (2-way fan-in, same superstep); H3's finding
   is already in the hazard_findings reducer by that point — no direct H3→H6 edge
@@ -56,6 +57,7 @@ from qaai.utils import render_graph_png, write_graph_png_bytes
 from .core import HazardReviewState
 from .nodes import (
     dispatch_hazard_evaluators_early,
+    dispatch_hazard_evaluators_design,
     dispatch_hazard_evaluators_late,
     dispatch_requirement_reviews,
     make_final_assessor_node,
@@ -249,11 +251,12 @@ class HazardReviewerRunnable:
             ["work_router", END],
         )
 
-        # Early evaluators (H1, H2, H3, R7) run after the gate
+        # Early evaluators (H1, R7) run after the gate. H2/H3 are deferred to
+        # the design_summarizer (they consume summarized_designs).
         sg.add_conditional_edges(
             "work_router",
             dispatch_hazard_evaluators_early,
-            ["h1_evaluator", "h2_evaluator", "h3_evaluator", "r7_evaluator"],
+            ["h1_evaluator", "r7_evaluator"],
         )
 
         # Requirement reviews also flow from work_router
@@ -262,6 +265,16 @@ class HazardReviewerRunnable:
         # Summarizers also flow from work_router
         sg.add_edge("work_router", "design_summarizer")
         sg.add_edge("work_router", "needs_summarizer")
+
+        # H2, H3 dispatch off the design_summarizer so they receive
+        # summarized_designs (their prompts reason over it). The summarizer
+        # also feeds late_evaluator_router below for H4/H5 — a source with both
+        # a conditional and a static edge mirrors work_router above.
+        sg.add_conditional_edges(
+            "design_summarizer",
+            dispatch_hazard_evaluators_design,
+            ["h2_evaluator", "h3_evaluator"],
+        )
 
         # Late evaluators (H4, H5) wait for requirement_reviews AND summarizers
         # We need a join node to synchronize requirement_reviewer + design_summarizer + needs_summarizer
@@ -280,9 +293,11 @@ class HazardReviewerRunnable:
         )
 
         # H6 waits for H4 and H5 (2-way join, same superstep).
-        # H3 runs early and its finding reaches H6 via the hazard_findings
-        # reducer — a direct h3→h6 edge would fire H6 a full superstep early,
-        # before H4/H5 exist, causing a spurious "validation failed" skip.
+        # H3 runs after the design_summarizer — which completes no later than
+        # late_evaluator_router (it is one of that router's inputs) — so H3's
+        # finding is already in the hazard_findings reducer before H4/H5, and
+        # therefore before H6. A direct h3→h6 edge would fire H6 a full
+        # superstep early, before H4/H5 exist, causing a spurious skip.
         sg.add_edge("h4_evaluator", "h6_evaluator")
         sg.add_edge("h5_evaluator", "h6_evaluator")
 
