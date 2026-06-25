@@ -9,14 +9,14 @@ their purpose and typical use cases.
 # Rate Limiting Defaults
 # ============================================================================
 
-DEFAULT_MAX_REQUESTS_PER_MINUTE = 1000 #orig: 490
+DEFAULT_MAX_REQUESTS_PER_MINUTE = 5000 #orig: 490
 """Default maximum API requests per minute.
 
 Set to 490 to provide a buffer under typical 500 RPM limits. Adjust based on
 your API tier and account limits.
 """
 
-DEFAULT_MAX_TOKENS_PER_MINUTE = 500_000 #orig: 200_000
+DEFAULT_MAX_TOKENS_PER_MINUTE = 5_000_000 #orig: 200_000
 """Default maximum tokens per minute across all requests.
 
 Typical for standard OpenAI accounts. Check your account's TPM limit and

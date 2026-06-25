@@ -126,7 +126,7 @@ function openCriteriaHelp() {
       <dt>M2 Negative</dt>
       <dd>At least one test case exercises invalid input, an error condition, or a failure mode. N-A only when the requirement has no validation surface.</dd>
       <dt>M3 Boundary</dt>
-      <dd>At least one test case probes a threshold, numeric limit, or role/tag transition. N-A when the requirement has no such surface (e.g. a passive UI-presence check).</dd>
+      <dd>At least one test case probes a threshold, edge case, or numeric limit. N-A when the requirement has no such surface (e.g. a passive UI-presence check).</dd>
       <dt>M4 Spec Coverage</dt>
       <dd>Every decomposed spec has at least one covering test case. Never N-A.</dd>
       <dt>M5 Terminology</dt>
