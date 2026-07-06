@@ -4,9 +4,10 @@ description: |
   Production stack for single test case review with mandatory vs. recommended objectives.
   Evaluates individual test cases against requirements using a 4-node pipeline.
   Version 2 introduces the mandatory/recommended distinction: test_case_setup_clarity
-  is now recommended-only and does NOT affect overall_verdict.
+  is now recommended-only and does NOT affect overall_verdict. The aggregator (v8)
+  embeds the five review objectives directly in the prompt (no review_objectives input).
 prompts:
-  single_test_aggregator: v6.0.0
+  single_test_aggregator: v8.0.0
   single_test_coverage_eval: v3.0.0
   single_test_logical_steps: v3.0.0
   single_test_prereqs: v3.0.0

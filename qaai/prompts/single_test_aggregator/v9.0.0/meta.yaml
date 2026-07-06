@@ -1,0 +1,18 @@
+role: single_test_aggregator
+version: v9.0.0
+component: test_case_reviewer
+authored: '2026-07-06'
+status: published
+parent_version: v7.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: TestCaseAssessment
+changelog: |
+  Embedded-rubric variant of the no-decomposition aggregator (v7.0.0). The five
+  review objectives (expected_result_support, expected_result_spec_align,
+  test_case_achieves, test_case_logical_sequence — mandatory; test_case_setup_clarity
+  — recommended) are now baked into the template rather than supplied via the
+  `review_objectives` input. This brings the test_case_reviewer in line with the
+  test_suite (M1-M5) and hazard (H1-H6) reviewers, which embed their rubrics in the
+  prompt. Output schema and verdict semantics are unchanged. Used by the
+  test_case_reviewer_v3 prompt set (decomposition toggle OFF).

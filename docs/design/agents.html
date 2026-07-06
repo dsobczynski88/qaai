@@ -128,7 +128,7 @@ logical and prereqs axes are single test-case-level nodes
        |-- (direct edge) -------------->  prereqs_evaluator
   -> aggregator                   (5-row evaluated_checklist)
   -> END</code></pre>
-<p>The five review objectives are loaded from <code>review_objectives.yaml</code>.</p>
+<p>The five review objectives are embedded directly in the <code>single_test_aggregator</code> prompt (v8/v9).</p>
 
 <h2 id="hazard">Hazard Risk Reviewer</h2>
 <p>State: <code>HazardReviewState</code> with two fan-in fields —

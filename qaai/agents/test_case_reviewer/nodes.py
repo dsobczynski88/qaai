@@ -13,10 +13,8 @@ Pipeline shape (v3 prompts onwards — only the coverage axis fans out per spec)
 import asyncio
 import json
 import logging
-from pathlib import Path
 from typing import Any, List, Optional
 
-import yaml
 from langgraph.types import Send
 
 from qaai.agents.clients import RateLimitOpenAIClient
@@ -32,7 +30,6 @@ from qaai.utils import render_prompt
 from .core import (
     DecomposedRequirement,
     OverallAnalysis,
-    ReviewObjective,
     SpecAnalysis,
     TCReviewState,
     TestCaseAssessment,
@@ -57,33 +54,6 @@ def validate_tc_inputs(state: TCReviewState) -> List[str]:
     if not (steps and str(steps).strip()):
         missing.append("test_case_steps")
     return missing
-
-
-# ---------------------------------------------------------------------------
-# Review objectives loader
-# ---------------------------------------------------------------------------
-
-_DEFAULT_OBJECTIVES_PATH = Path(__file__).parent / "review_objectives.yaml"
-
-
-def load_default_review_objectives(path: Optional[Path] = None) -> List[ReviewObjective]:
-    """
-    Load the default review-objectives checklist from review_objectives.yaml.
-
-    Returns ReviewObjective instances with empty `assessment` strings; the
-    aggregator populates them.
-    """
-    yaml_path = Path(path) if path is not None else _DEFAULT_OBJECTIVES_PATH
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return [
-        ReviewObjective(
-            id=item["id"],
-            description=" ".join(item["description"].split()),
-            mandatory=item.get("mandatory", True),  # Default to True for backward compatibility
-        )
-        for item in data
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +460,6 @@ class AggregatorNode(StandardLLMNode):
         return all([
             state.get("test_case") is not None,
             state.get("requirements") is not None,
-            state.get("review_objectives") is not None,
         ])
 
     def _get_cache_entity_id(self, state: TCReviewState) -> Optional[str]:
@@ -509,7 +478,6 @@ class AggregatorNode(StandardLLMNode):
             "coverage_analysis": [a.model_dump() for a in state.get("coverage_analysis", [])],
             "logical_structure_analysis": logical.model_dump() if logical is not None else None,
             "prereqs_analysis": prereqs.model_dump() if prereqs is not None else None,
-            "review_objectives": [o.model_dump() for o in state["review_objectives"]],
         }
 
     def _format_response(self, parsed_result: Optional[TestCaseAssessment]) -> dict:

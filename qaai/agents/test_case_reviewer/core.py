@@ -5,8 +5,9 @@ Shared models (Requirement, DecomposedSpec, DecomposedRequirement, TestCase)
 live in qaai.agents.shared.core. This module adds test-case-specific
 shapes:
 
-- ReviewObjective — input row of the review-objectives checklist (id +
-  description, loaded from review_objectives.yaml).
+- ReviewObjective — one row of the review-objectives checklist (id +
+  description + mandatory); the objectives are embedded in the aggregator
+  prompt (v8/v9), not supplied as graph input.
 - EvaluatedReviewObjective — aggregator-populated row carrying a binary
   Yes/No verdict plus a `partial` flag that drives Yellow rendering in the
   viewer (mirrors test_suite_reviewer's MandatoryFinding).
@@ -63,8 +64,11 @@ __all__ = [
 
 class ReviewObjective(BaseModel):
     """
-    Input row of the standardized review-objectives checklist. Loaded from
-    review_objectives.yaml and passed into the graph as initial state.
+    One row of the standardized review-objectives checklist (id + description +
+    mandatory flag). Serves as the base shape for EvaluatedReviewObjective. The
+    five objectives are embedded directly in the single_test_aggregator prompt
+    (v8/v9) rather than supplied as graph input, matching how the test_suite
+    (M1-M5) and hazard (H1-H6) reviewers embed their rubrics.
     """
     id: str = Field(..., description="Stable identifier, e.g. 'expected_result_support'.")
     description: str = Field(..., description="What this objective evaluates.")
@@ -204,7 +208,6 @@ class TCReviewState(BaseReviewState, total=False):
     test_case: TestCase
     requirements: List[Requirement]
     design_docs: List[DesignDocument]
-    review_objectives: List[ReviewObjective]
     # Pipeline state fields
     decomposed_requirements: Optional[List[DecomposedRequirement]]
     # Coverage stays per-spec — Send fan-out emits one SpecAnalysis per spec.

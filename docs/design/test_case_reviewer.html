@@ -95,8 +95,7 @@ review-objectives checklist into a <code>TestCaseAssessment</code>.</li>
 <tr><td><code>test_case</code></td><td><code>TestCase</code></td><td>Yes</td><td>The single test case under review (id, description, setup, steps, expected results). <code>test_id</code> is the cache partition.</td></tr>
 <tr><td><code>requirements</code></td><td><code>List[Requirement]</code></td><td>Yes</td><td>One or more requirements the test case traces to.</td></tr>
 <tr><td><code>design_docs</code></td><td><code>List[DesignDocument]</code></td><td>Accepted (unused)</td><td>Accepted on the state and defaulted to empty by the service, but <strong>not consumed by any node or prompt</strong> in this reviewer &mdash; it does not affect the verdict. (Design context <em>is</em> used by the test-suite and hazard reviewers, not here.)</td></tr>
-<tr><td><code>review_objectives</code></td><td><code>List[ReviewObjective]</code></td><td>Defaulted</td><td>The checklist (loaded from <code>review_objectives.yaml</code> when omitted).</td></tr>
-<tr><td><code>cache_mode</code></td><td><code>"off" | "partial" | "full"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>partial</code>.</td></tr>
+<tr><td><code>cache_mode</code></td><td><code>"off" | "on" | "test"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>on</code>. Legacy <code>partial</code>/<code>full</code> map to <code>on</code>/<code>test</code>.</td></tr>
 </tbody></table>
 
 <div class="note warn"><strong>Note &mdash; <code>design_docs</code> is currently inert here.</strong> Although the field is on <code>TCReviewState</code> and the service passes it through, no test-case-reviewer node reads it and none of its prompts reference design specifications. It is retained as a placeholder aligned with the test-suite and hazard reviewers (which <em>do</em> consume design context).</div>
@@ -145,9 +144,11 @@ properties of the whole test case, so each is a single LLM call returning one
 </ul>
 
 <h2 id="rubric">Review objectives (the 5-row checklist)</h2>
-<p>Loaded from <code>review_objectives.yaml</code> — treated as data, not schema, so
-entries can be added/edited freely. The <code>mandatory</code> flag decides whether
-a "No" gates the verdict.</p>
+<p>Embedded directly in the <code>single_test_aggregator</code> prompt (v8 for the
+decomposition set, v9 for the no-decomposition set) rather than supplied as graph
+input &mdash; matching how the test-suite (M1-M5) and hazard (H1-H6) reviewers carry
+their rubrics in-prompt. The <code>mandatory</code> flag decides whether a "No" gates
+the verdict.</p>
 <table>
 <thead><tr><th>id</th><th>Checks</th><th>Mandatory?</th></tr></thead>
 <tbody>

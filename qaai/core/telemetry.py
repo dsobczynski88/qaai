@@ -1,10 +1,11 @@
 """Token usage tracking for LLM calls across all reviewer pipelines.
 
 Cost rates are configurable via environment variables or at construction time:
-    TOKEN_COST_INPUT_PER_M  - USD per million input tokens  (default: 0.15)
-    TOKEN_COST_OUTPUT_PER_M - USD per million output tokens (default: 0.60)
+    TOKEN_COST_INPUT_PER_M  - USD per million input tokens
+    TOKEN_COST_OUTPUT_PER_M - USD per million output tokens
 
-Set these in .env to match your model endpoint's published pricing.
+Defaults live in qaai/core/constants.py (Claude Haiku 4.5 cost basis). Set the env
+vars in .env to match your model endpoint's published pricing.
 """
 
 import json
@@ -12,6 +13,11 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from qaai.core.constants import (
+    DEFAULT_TOKEN_COST_INPUT_PER_M,
+    DEFAULT_TOKEN_COST_OUTPUT_PER_M,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +33,16 @@ class TokenUsageTracker:
     A final summary record with "type": "summary" is appended when log_summary()
     is called (typically at session teardown).
 
-    Cost rates default to gpt-4o-mini pricing and can be overridden per-instance
-    or via TOKEN_COST_INPUT_PER_M / TOKEN_COST_OUTPUT_PER_M environment variables
-    (read through Settings).
+    Cost rates default to the values in constants.py (Claude Haiku 4.5 cost basis)
+    and can be overridden per-instance or via TOKEN_COST_INPUT_PER_M /
+    TOKEN_COST_OUTPUT_PER_M environment variables (read through Settings).
     """
 
     def __init__(
         self,
         file_path: Optional[str] = None,
-        input_cost_per_million: float = 1.00,
-        output_cost_per_million: float = 5.00,
+        input_cost_per_million: float = DEFAULT_TOKEN_COST_INPUT_PER_M,
+        output_cost_per_million: float = DEFAULT_TOKEN_COST_OUTPUT_PER_M,
     ):
         # When file_path is None the tracker resolves its write target from
         # settings.telemetry_file_path at each write, so a single start_new_run()

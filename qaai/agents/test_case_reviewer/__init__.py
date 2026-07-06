@@ -20,7 +20,6 @@ from .nodes import (
     SingleSpecCoverageNode,
     TCDecomposerNode,
     dispatch_coverage,
-    load_default_review_objectives,
     make_aggregator_node,
     make_coverage_single_node,
     make_logical_single_node,
@@ -56,8 +55,6 @@ __all__ = [
     "make_aggregator_node",
     # dispatcher (only coverage fans out per spec from v3 onwards)
     "dispatch_coverage",
-    # helpers
-    "load_default_review_objectives",
     # runnable
     "TCReviewerRunnable",
 ]

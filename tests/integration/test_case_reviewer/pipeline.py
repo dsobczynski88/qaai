@@ -13,15 +13,23 @@ from qaai.agents.test_case_reviewer.core import (
     DesignDocument,
     TestCaseAssessment,
 )
-from qaai.agents.test_case_reviewer.nodes import load_default_review_objectives
 from tests.helpers import serialize_state
 
 
 # The `row` argument is parametrized at collection time by pytest_generate_tests
 # in tests/conftest.py, over the rows of the fixture selected via --input-file
 # (default: test_case_review_all_fields.jsonl).
-_REVIEW_OBJECTIVES = load_default_review_objectives()
-REVIEW_OBJECTIVE_IDS = {o.id for o in _REVIEW_OBJECTIVES}
+#
+# The five review objectives are embedded in the single_test_aggregator prompt
+# (v8/v9), not passed as graph input, so the expected checklist ids are pinned
+# here as the prompt contract.
+REVIEW_OBJECTIVE_IDS = {
+    "expected_result_support",
+    "expected_result_spec_align",
+    "test_case_achieves",
+    "test_case_logical_sequence",
+    "test_case_setup_clarity",
+}
 
 
 def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None:
@@ -29,7 +37,7 @@ def _assert_tc_verdict_invariants(asmt: TestCaseAssessment, state: dict) -> None
     assert len(checklist) == 5, f"expected 5 checklist items, got {len(checklist)}"
     assert {o.id for o in checklist} == REVIEW_OBJECTIVE_IDS, (
         f"checklist ids {sorted(o.id for o in checklist)} != "
-        f"review_objectives.yaml ids {sorted(REVIEW_OBJECTIVE_IDS)}"
+        f"embedded aggregator objective ids {sorted(REVIEW_OBJECTIVE_IDS)}"
     )
 
     for o in checklist:
@@ -111,7 +119,6 @@ async def test_test_case_reviewer(real_client, real_model, jsonl_recorders_tc, r
     state = {
         "test_case": test_case,
         "requirements": requirements,
-        "review_objectives": _REVIEW_OBJECTIVES,
     }
     if design_docs:
         state["design_docs"] = design_docs

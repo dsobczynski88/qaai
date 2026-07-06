@@ -17,17 +17,21 @@ from qaai.agents.shared.data_integration import PyJamaNodeConfig
 from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
-from qaai.agents.test_case_reviewer.nodes import load_default_review_objectives
-from qaai.core.config import PromptConfig
+from qaai.core.config import (
+    PromptConfig,
+    PROMPT_SET_EDGE_CASE,
+    PROMPT_SET_BASELINE,
+    PROMPT_SETS,
+    TC_PROMPT_SET_DECOMP,
+    TC_PROMPT_SET_NO_DECOMP,
+)
 from qaai.core.constants import INPUT_JSONL_FILENAME, OUTPUT_JSONL_FILENAME
 
 
-# Prompt sets selected by the "Include Edge Case Analysis" toggle. v4 enables the
-# edge-case decomposer (v6); v3 is the baseline (decomposer v5). The selection is
-# applied to both the test-suite reviewer and the hazard reviewer's embedded RTM.
-PROMPT_SET_EDGE_CASE = "test_suite_reviewer_v4"
-PROMPT_SET_BASELINE = "test_suite_reviewer_v3"
-PROMPT_SETS = (PROMPT_SET_BASELINE, PROMPT_SET_EDGE_CASE)
+# The prompt-set name constants (PROMPT_SET_BASELINE/_EDGE_CASE/PROMPT_SETS and the
+# TC_PROMPT_SET_* pair) are defined in qaai/core/config.py alongside PromptConfig and
+# re-exported here for the service layer and existing importers. The toggle→set
+# resolvers stay in the service layer.
 
 
 def resolve_prompt_set(include_edge_case_analysis: bool) -> str:
@@ -35,17 +39,21 @@ def resolve_prompt_set(include_edge_case_analysis: bool) -> str:
     return PROMPT_SET_EDGE_CASE if include_edge_case_analysis else PROMPT_SET_BASELINE
 
 
-# Prompt sets selected by the test-case reviewer's "Include requirement
-# decomposition analysis" toggle. v2 (default) decomposes each requirement into
-# specs; v3 skips decomposition and reviews the test case directly against the
-# original requirement text (coverage v4 + aggregator v7, no decomposed_spec).
-TC_PROMPT_SET_DECOMP = "test_case_reviewer_v2"
-TC_PROMPT_SET_NO_DECOMP = "test_case_reviewer_v3"
-
-
 def resolve_tc_prompt_set(include_decomposition_analysis: bool) -> str:
     """Map the test-case reviewer's decomposition toggle to a prompt-set name."""
     return TC_PROMPT_SET_DECOMP if include_decomposition_analysis else TC_PROMPT_SET_NO_DECOMP
+
+
+def _select_graph(graphs: dict, prompt_set: Optional[str], default_key: str):
+    """Resolve the runnable for a prompt set, falling back to ``default_key`` then any.
+
+    Shared by all three reviewer services, which differ only in ``default_key``.
+    """
+    return (
+        graphs.get(prompt_set)
+        or graphs.get(default_key)
+        or next(iter(graphs.values()))
+    )
 
 
 def _json_default(obj):
@@ -315,11 +323,7 @@ class RTMReviewService:
 
     def _select(self, prompt_set: Optional[str]) -> RTMReviewerRunnable:
         """Resolve the runnable for a prompt set, defaulting to the baseline set."""
-        return (
-            self.graphs.get(prompt_set)
-            or self.graphs.get(PROMPT_SET_BASELINE)
-            or next(iter(self.graphs.values()))
-        )
+        return _select_graph(self.graphs, prompt_set, PROMPT_SET_BASELINE)
 
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "on",
@@ -437,11 +441,7 @@ class HazardReviewService:
 
     def _select(self, prompt_set: Optional[str]) -> HazardReviewerRunnable:
         """Resolve the hazard runnable for a prompt set, defaulting to baseline."""
-        return (
-            self.graphs.get(prompt_set)
-            or self.graphs.get(PROMPT_SET_BASELINE)
-            or next(iter(self.graphs.values()))
-        )
+        return _select_graph(self.graphs, prompt_set, PROMPT_SET_BASELINE)
 
     @staticmethod
     def _build_bidirectional_request(project_name: str, identifiers: List[str]):
@@ -648,11 +648,7 @@ class TestCaseReviewService:
 
     def _select(self, prompt_set: Optional[str]) -> TCReviewerRunnable:
         """Resolve the runnable for a prompt set, defaulting to the decomposition set."""
-        return (
-            self.graphs.get(prompt_set)
-            or self.graphs.get(TC_PROMPT_SET_DECOMP)
-            or next(iter(self.graphs.values()))
-        )
+        return _select_graph(self.graphs, prompt_set, TC_PROMPT_SET_DECOMP)
 
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "on",
@@ -712,8 +708,6 @@ class TestCaseReviewService:
         state_dicts = transform_test_case_review_to_state(jama_data)
         self._logger.info("Baseline %s: %d test cases to review", baseline_id, len(state_dicts))
 
-        default_objectives = load_default_review_objectives()
-
         return await _run_batch_review(
             logger=self._logger,
             run_dir=run_dir,
@@ -722,7 +716,6 @@ class TestCaseReviewService:
             thread_id_fn=lambda i, _item: f"{thread_id_prefix}-{i:03d}",
             graph_input_fn=lambda _i, state_dict: {
                 **state_dict,
-                "review_objectives": state_dict.get("review_objectives") or default_objectives,
                 "design_docs": state_dict.get("design_docs") or [],
                 "cache_mode": cache_mode,
             },

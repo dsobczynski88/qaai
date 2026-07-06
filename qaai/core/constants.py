@@ -9,25 +9,23 @@ their purpose and typical use cases.
 # Rate Limiting Defaults
 # ============================================================================
 
-DEFAULT_MAX_REQUESTS_PER_MINUTE = 5000 #orig: 490
+DEFAULT_MAX_REQUESTS_PER_MINUTE = 5000
 """Default maximum API requests per minute.
 
-Set to 490 to provide a buffer under typical 500 RPM limits. Adjust based on
-your API tier and account limits.
+Provides headroom under a high-tier RPM limit. Adjust based on your API tier
+and account limits.
 """
 
-DEFAULT_MAX_TOKENS_PER_MINUTE = 5_000_000 #orig: 200_000
+DEFAULT_MAX_TOKENS_PER_MINUTE = 5_000_000
 """Default maximum tokens per minute across all requests.
 
-Typical for standard OpenAI accounts. Check your account's TPM limit and
-adjust accordingly. Premium accounts may support higher values.
+Check your account's TPM limit and adjust accordingly.
 """
 
-DEFAULT_MAX_OUTPUT_TOKENS = 16_000 # 64_000
+DEFAULT_MAX_OUTPUT_TOKENS = 16_000
 """Default maximum output tokens per single request.
 
-Haiku and similar models support up to 16K output tokens. This ensures the
-summarizer can process 100+ test cases without truncation.
+16K output tokens lets the summarizer process 100+ test cases without truncation.
 """
 
 # ============================================================================
@@ -78,6 +76,24 @@ DEFAULT_BACKOFF_FACTOR = 2.0
 
 Each retry waits (delay * factor^attempt) seconds. Factor of 2.0 provides
 reasonable spacing: 60s, 120s, 240s, 480s, 960s.
+"""
+
+# ============================================================================
+# Token Cost Defaults
+# ============================================================================
+
+DEFAULT_TOKEN_COST_INPUT_PER_M = 1.00
+"""Default USD cost per million input (prompt) tokens.
+
+Claude Haiku 4.5 cost basis. Override per-endpoint via the TOKEN_COST_INPUT_PER_M
+environment variable (read through Settings).
+"""
+
+DEFAULT_TOKEN_COST_OUTPUT_PER_M = 5.00
+"""Default USD cost per million output (completion) tokens.
+
+Claude Haiku 4.5 cost basis. Override per-endpoint via the TOKEN_COST_OUTPUT_PER_M
+environment variable (read through Settings).
 """
 
 # ============================================================================

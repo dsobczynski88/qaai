@@ -10,7 +10,6 @@ import pytest
 from langgraph.types import Send
 
 from qaai.agents.shared.core import Requirement, TestCase
-from qaai.agents.test_case_reviewer.core import ReviewObjective
 from qaai.agents.test_case_reviewer.nodes import (
     SingleReqCoverageNode,
     dispatch_coverage_by_requirement,
@@ -98,12 +97,12 @@ def test_req_coverage_node_validation_and_payload(stub_llm_client):
 def test_aggregator_payload_handles_missing_decomposed_requirements(stub_llm_client):
     node = make_aggregator_node(
         stub_llm_client, "stub-model", {},
-        prompt_template="single_test_aggregator/v7.0.0/template.jinja2",
+        prompt_template="single_test_aggregator/v9.0.0/template.jinja2",
     )
     state = {
         "test_case": _tc(),
         "requirements": _reqs(),
-        "review_objectives": [ReviewObjective(id="o1", description="d")],
+        # review_objectives are embedded in the aggregator prompt (v8/v9), not passed as state.
         # decomposed_requirements intentionally absent (no-decomposition mode)
         "coverage_analysis": [],
     }

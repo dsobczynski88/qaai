@@ -4,12 +4,13 @@ description: |
   No-decomposition stack for single test case review. Skips requirement
   decomposition entirely: the coverage axis judges each test case directly
   against the original requirement text (single_test_coverage_eval v4) and the
-  aggregator (single_test_aggregator v7) drops all decomposed_spec references.
+  aggregator (single_test_aggregator v9) drops all decomposed_spec references and
+  embeds the five review objectives directly in the prompt (no review_objectives input).
   Selected when the "Include requirement decomposition analysis" toggle is OFF.
   Logical-steps and prereqs prompts are unchanged from test_case_reviewer_v2
   (they never used decomposed specs).
 prompts:
-  single_test_aggregator: v7.0.0
+  single_test_aggregator: v9.0.0
   single_test_coverage_eval: v4.0.0
   single_test_logical_steps: v3.0.0
   single_test_prereqs: v3.0.0

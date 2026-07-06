@@ -178,10 +178,10 @@ prompt-set namespacing (per-set subfolders that never alias), scoped/whole-entit
 relative <code>CACHE_DIR</code> anchored to <code>PROJECT_ROOT</code> (the phantom-MISS regression
 guard), legacy meta-less files still reading as a HIT, and
 <code>extract_prompt_version</code> <span class="src">tests/unit/test_review_cache.py:93-257</span></li>
-<li><strong>Base-node gating</strong> — <code>partial</code> caches interim nodes but always
-re-runs a <code>is_final_output</code> node; <code>full</code> caches the final node too;
+<li><strong>Base-node gating</strong> — <code>on</code> caches interim nodes but always
+re-runs a <code>is_final_output</code> node; <code>test</code> reuses the final node too;
 <code>off</code> neither reads nor writes; missing <code>cache_mode</code> defaults to
-<code>partial</code>; <code>cache_manager=None</code> disables caching
+<code>on</code>; <code>cache_manager=None</code> disables caching
 <span class="src">tests/unit/test_review_cache.py:265-329</span></li>
 <li><strong>Per-spec evaluators</strong> — RTM/TC single-spec nodes write distinct files per
 <code>spec_id</code>, hit cache on rerun, and the RTM payload carries
@@ -310,7 +310,7 @@ The hazard test assembles its <code>HazardRowWithTraceMatrix</code> input
 <tbody>
 <tr><td><code>--input-file</code></td><td>per-reviewer (above)</td><td>Bare fixture filename — JSONL for RTM/TC, the <code>.xlsx</code> SHA workbook for hazard</td></tr>
 <tr><td><code>--pyjama-file</code></td><td><code>pyjama_response_unified.jsonl</code></td><td>Hazard only: traceability JSONL</td></tr>
-<tr><td><code>--cache-mode</code></td><td><code>off</code></td><td><code>cache_mode</code> threaded into graph state (<code>off</code>/<code>partial</code>/<code>full</code>), surfaced by <code>review_settings</code></td></tr>
+<tr><td><code>--cache-mode</code></td><td><code>off</code></td><td><code>cache_mode</code> threaded into graph state (<code>off</code>/<code>on</code>/<code>test</code>), surfaced by <code>review_settings</code></td></tr>
 <tr><td><code>--test-mode</code></td><td><code>true</code></td><td>When true, tests use the call-counting stub client instead of a real LLM client</td></tr>
 <tr><td><code>--include-edge-case-analysis</code></td><td><code>false</code></td><td>Selects the edge-case prompt set for the test-suite / hazard reviewers</td></tr>
 </tbody></table>
@@ -330,8 +330,8 @@ uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite
 uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_risk_reviewer \
   --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl
 
-# Override the graph knobs (e.g. run the unit input-gates under partial caching)
-uv run pytest -m unit --cache-mode partial</code></pre>
+# Override the graph knobs (e.g. run the unit input-gates with interim caching on)
+uv run pytest -m unit --cache-mode on</code></pre>
 <h3>Adding your own fixture</h3>
 <ol>
 <li>Drop the file into a fixtures subdir — <code>tests/fixtures/local/</code> is recommended
