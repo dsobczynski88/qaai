@@ -1,0 +1,103 @@
+{
+  "test_case": {
+    "test_id": "PRJ01713-TEST-2085",
+    "description": "POS - Update Care Team with one or more participants",
+    "setup": "Refer the Module (GID-2465912) containing the Pre-Requisite steps. 1. Add role1..role4 and retrieve role codes. 2-5. Create Practitioner P1/P2 and PractitionerRole PR1/PR2 as participant members. 6. Create a CareTeam Resource with only required content (no Participant) and note the ID.",
+    "steps": "Step 1. Update CareTeam adding Participant PTP1 (Practitioner P1, Role1, period). Step 2. Add PTP2 (PractitionerRole PR1, Role2). Step 3. Add PTP3 (Practitioner P2, Role2). Step 4. Add PTP4 (PractitionerRole PR2, Role1). Step 5. Update PTP1 to Role3/Period3. Step 6. Update PTP1 and PTP3 to Role4/Period4.",
+    "expectedResults": "ExpectedResult 1-4. Update success=true; resource contains PTP1..PTP4 cumulatively. ExpectedResult 5. Only four participants remain; PTP1 role/period replaced with Role3/Period3; others unchanged. ExpectedResult 6. PTP1 and PTP3 updated to Role4/Period4; PTP2/PTP4 unchanged.",
+    "requirements": [
+      {
+        "req_id": "PRJ01713-PRQ-834",
+        "text": "The Directory service shall support managing care team participant. Optional. One or more participants per care team. Support Practitioner and PractitionerRole references, optional role(s), and a UTC ISO-8601 start/end period. Support adding/deleting participants to a new or existing care team. Directory does NOT validate the existence of an associated resource during creation and update."
+      },
+      {
+        "req_id": "PRJ01713-PRQ-827",
+        "text": "The Directory service shall provide the ability to update an existing care team resource's attributes regardless of status or creator. Updated resource contains the information provided. Update requests adhere to resource requirements (required fields, supported list values)."
+      }
+    ],
+    "decomposed_requirements": [
+      {
+        "requirement": {
+          "req_id": "PRJ01713-PRQ-834",
+          "text": "The Directory service shall support managing care team participant."
+        },
+        "decomposed_specifications": [
+          {
+            "spec_id": "PRJ01713-PRQ-834-S1",
+            "description": "The Directory service shall support managing care team participant.",
+            "acceptance_criteria": "Given a valid participant management request, the service accepts it as a supported capability.",
+            "rationale": "Explicit: preserves 'shall support managing care team participant'."
+          },
+          {
+            "spec_id": "PRJ01713-PRQ-834-S4",
+            "description": "Participant association shall reference resources as Practitioner or PractitionerRole.",
+            "acceptance_criteria": "Given a participant association, the reference is one of Practitioner or PractitionerRole.",
+            "rationale": "Explicit: anchored to the supported reference forms."
+          }
+        ]
+      },
+      {
+        "requirement": {
+          "req_id": "PRJ01713-PRQ-827",
+          "text": "The Directory service shall provide the ability to update an existing care team resource's attributes."
+        },
+        "decomposed_specifications": [
+          {
+            "spec_id": "PRJ01713-PRQ-827-S1",
+            "description": "The service shall update an existing care team resource's attributes.",
+            "acceptance_criteria": "Given an existing resource and a valid update, the resource's attributes are updated.",
+            "rationale": "Explicit: preserves the update obligation."
+          }
+        ]
+      }
+    ],
+    "evaluated_checklist": [
+      {
+        "id": "expected_result_support",
+        "description": "Check that expected results include sufficient evidence to prove outcomes; flag gaps where evidence is incomplete.",
+        "mandatory": true,
+        "verdict": "Yes",
+        "partial": true,
+        "assessment": "ExpectedResults 1-6 support PRQ-834 and PRQ-827 with success=true and participant counts, but PRQ-834 lacks deletion and no-existence-validation evidence."
+      },
+      {
+        "id": "expected_result_spec_align",
+        "description": "Verify results reflect all conditions in the requirement; flag gaps where outcomes are vague or incomplete.",
+        "mandatory": true,
+        "verdict": "Yes",
+        "partial": true,
+        "assessment": "Results verify adding participants and role/period updates but miss deletion and property-bag behavior from the requirement text."
+      },
+      {
+        "id": "test_case_achieves",
+        "description": "Ensure final steps verify intended outcomes; flag gaps where validation is missing.",
+        "mandatory": true,
+        "verdict": "Yes",
+        "partial": true,
+        "assessment": "Step 6 verifies PTP1/PTP3 update to Role4/Period4 while PTP2/PTP4 remain unchanged, reaching PRQ-827; delete behavior remains untested."
+      },
+      {
+        "id": "test_case_logical_sequence",
+        "description": "Verify steps follow a logical flow from setup to verification; flag gaps where flow is inconsistent.",
+        "mandatory": true,
+        "verdict": "Yes",
+        "partial": false,
+        "assessment": "Setup creates roles, practitioners, and an empty CareTeam; Steps 1-4 add participants; Steps 5-6 update them; ExpectedResults verify each state change."
+      },
+      {
+        "id": "test_case_setup_clarity",
+        "description": "Ensure environment and prerequisites are clearly documented; flag ambiguity that may prevent repeatable execution.",
+        "mandatory": false,
+        "verdict": "Yes",
+        "partial": true,
+        "assessment": "Setup names roles, Practitioner P1/P2, PractitionerRole PR1/PR2, and an empty CareTeam, but leaves Module GID-2465912 prereq details implicit."
+      }
+    ],
+    "overall_verdict": "Yes",
+    "comments": "The test covers participant add/update flows and reference-type handling but does not exercise deletion or the no-existence-validation clause.",
+    "clarification_questions": [
+      "Is Module GID-2465912 sufficient to reproduce all prerequisite data including role codes and resource IDs?",
+      "Should this test also verify deletion and non-existence validation for PRJ01713-PRQ-834, or are those intentionally out of scope?"
+    ]
+  }
+}

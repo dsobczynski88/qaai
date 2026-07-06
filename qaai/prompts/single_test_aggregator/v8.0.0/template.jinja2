@@ -145,6 +145,8 @@ In `assessment` (1-2 sentences, ≤40 words): name the specific documented preco
 - Do NOT wrap the output in backticks
 - Return ONLY the raw JSON object matching the schema below
 
+**🚫 TOP-LEVEL KEYS ONLY — DO NOT NEST UNDER `test_case`**: `test_case`, `requirements`, `decomposed_requirements`, `evaluated_checklist`, `overall_verdict`, `comments`, and `clarification_questions` are ALL **siblings at the root of the JSON object**. `test_case` is a leaf that contains ONLY `test_id`, `description`, `setup`, `steps`, `expectedResults`. NEVER place `requirements`, `decomposed_requirements`, `evaluated_checklist`, `overall_verdict`, `comments`, or `clarification_questions` inside `test_case` — doing so will cause validation failure.
+
 **✅ MANDATORY FIELD COMPLETENESS**: Your JSON response MUST include ALL fields for EVERY item in the `evaluated_checklist` array:
 - `id` (string) ← REQUIRED, never omit
 - `description` (string) ← REQUIRED, never omit (from the embedded objective list above)
