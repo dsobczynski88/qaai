@@ -209,7 +209,11 @@ class TCReviewState(BaseReviewState, total=False):
     requirements: List[Requirement]
     design_docs: List[DesignDocument]
     # Pipeline state fields
-    decomposed_requirements: Optional[List[DecomposedRequirement]]
+    # Reduced channel: in decomposition mode the graph fans out one
+    # requirement_pipeline Send per requirement, each returning its single
+    # DecomposedRequirement, so concurrent writes accumulate instead of clobbering.
+    # In no-decomposition mode nothing writes this key (aggregator falls back to []).
+    decomposed_requirements: Annotated[List[DecomposedRequirement], operator.add]
     # Coverage stays per-spec — Send fan-out emits one SpecAnalysis per spec.
     coverage_analysis: Annotated[List[SpecAnalysis], operator.add]
     # Logical-structure and prereqs are TEST-CASE-LEVEL from v3 onwards. Each is

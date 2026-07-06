@@ -114,18 +114,20 @@ per decomposed spec and copies <code>cache_mode</code> into each payload
 <span class="src">test_suite_reviewer/nodes.py:147-173</span>.</p>
 
 <h2 id="tc">Test Case Reviewer</h2>
-<p>State: <code>TCReviewState</code>; coverage fans out per spec
-(<code>coverage_analysis: Annotated[List[SpecAnalysis], operator.add]</code>) while the
-logical and prereqs axes are single test-case-level nodes
-<span class="src">test_case_reviewer/core.py:209-214</span>. Built by
-<code>TCReviewerRunnable.build()</code> <span class="src">test_case_reviewer/pipeline.py:41-151</span>:</p>
+<p>State: <code>TCReviewState</code>; in decomposition mode the requirement axis fans
+out per requirement to a fused decompose→coverage node, with both
+<code>decomposed_requirements</code> and
+<code>coverage_analysis</code> as <code>Annotated[List[...], operator.add]</code>
+channels, while the logical and prereqs axes are single test-case-level nodes
+<span class="src">test_case_reviewer/core.py</span>. Built by
+<code>TCReviewerRunnable.build()</code> <span class="src">test_case_reviewer/pipeline.py</span>:</p>
 <pre class="diagram"><code>START
-  -> data_integration -> transform
-  -> decomposer                   (sequential over requirements)
+  -> data_integration -> transform -> validation_gate
   -> coverage_router
-       |-- dispatch_coverage --Send xN--> coverage_evaluator
-       |-- (direct edge) -------------->  logical_evaluator
-       |-- (direct edge) -------------->  prereqs_evaluator
+       |-- dispatch_requirement_pipeline --Send xN--> requirement_pipeline
+       |        (decompose one requirement, then cover its specs concurrently)
+       |-- (direct edge) --------------------------->  logical_evaluator
+       |-- (direct edge) --------------------------->  prereqs_evaluator
   -> aggregator                   (5-row evaluated_checklist)
   -> END</code></pre>
 <p>The five review objectives are embedded directly in the <code>single_test_aggregator</code> prompt (v8/v9).</p>

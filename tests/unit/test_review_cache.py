@@ -27,7 +27,7 @@ from qaai.agents.test_suite_reviewer.nodes import (
 from qaai.agents.test_case_reviewer.core import SpecAnalysis
 from qaai.agents.test_case_reviewer.nodes import (
     SingleSpecCoverageNode,
-    dispatch_coverage as tc_dispatch_coverage,
+    dispatch_requirement_pipeline as tc_dispatch_requirement_pipeline,
 )
 
 
@@ -570,16 +570,15 @@ def test_rtm_dispatch_propagates_summarized_designs():
 
 
 def test_tc_dispatch_propagates_cache_mode():
-    from qaai.agents.test_case_reviewer.core import DecomposedRequirement
-
     req = Requirement(req_id="REQ-1", text="x")
-    specs = [DecomposedSpec(spec_id="S1", description="d", acceptance_criteria="a", rationale="r")]
-    decomposed = DecomposedRequirement(requirement=req, decomposed_specifications=specs)
     tc = TestCase(test_id="TEST-1", description="d", in_baseline=True)
-    sends = tc_dispatch_coverage({
-        "test_case": tc, "decomposed_requirements": [decomposed], "cache_mode": "off",
+    # Decomposition mode fans out one Send per requirement to requirement_pipeline;
+    # the dispatcher must thread cache_mode through to each Send payload.
+    sends = tc_dispatch_requirement_pipeline({
+        "test_case": tc, "requirements": [req], "cache_mode": "off",
     })
     assert len(sends) == 1
+    assert sends[0].node == "requirement_pipeline"
     assert sends[0].arg["cache_mode"] == "off"
 
 

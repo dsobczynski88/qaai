@@ -106,28 +106,34 @@ review-objectives checklist into a <code>TestCaseAssessment</code>.</li>
   <figcaption>Compiled <code>TCReviewerRunnable</code> graph (rendered from the live pipeline).</figcaption>
 </figure>
 <pre class="diagram"><code>START
-  -> data_integration -> transform
-  -> decomposer                   (sequential over requirements)
-  -> coverage_router              (join barrier)
-       |-- dispatch_coverage --Send xN--> coverage_evaluator   (parallel, per spec)
-       |-- (direct edge) ---------------> logical_evaluator     (test-case-level)
-       |-- (direct edge) ---------------> prereqs_evaluator     (test-case-level)
+  -> data_integration -> transform -> validation_gate
+  -> coverage_router
+       |-- dispatch_requirement_pipeline --Send xN--> requirement_pipeline  (parallel, per requirement)
+       |        each: decompose one requirement, then cover its specs concurrently
+       |-- (direct edge) ----------------------------> logical_evaluator     (test-case-level)
+       |-- (direct edge) ----------------------------> prereqs_evaluator     (test-case-level)
   -> aggregator                   (reduces all three axes)
   -> END</code></pre>
-<p>From <code>coverage_router</code> the graph fans out three ways at once: the
-coverage axis fans <em>per spec</em> via <code>Send</code> (accumulated by
-<code>operator.add</code>), while the logical and prereqs axes are single
-test-case-level nodes reached by direct edges. All three converge on the
-aggregator. <span class="src">test_case_reviewer/pipeline.py</span></p>
+<p>From <code>coverage_router</code> the graph fans out three ways at once. In
+<strong>decomposition mode</strong> the requirement axis fans <em>per requirement</em>
+via <code>Send</code> to the fused <code>requirement_pipeline</code> node, which
+decomposes that one requirement and then runs coverage for its specs — so
+requirement A's coverage overlaps requirement B's decomposition (no barrier on the
+slowest decomposition). Both <code>decomposed_requirements</code> and
+<code>coverage_analysis</code> are accumulated by <code>operator.add</code>. The
+logical and prereqs axes are single test-case-level nodes reached by direct edges.
+All converge on the aggregator. (No-decomposition mode instead fans out per
+requirement to a single <code>coverage_evaluator</code> with no decomposition
+stage.) <span class="src">test_case_reviewer/pipeline.py</span></p>
 
 <h2 id="nodes">Nodes &amp; prompts</h2>
 <table>
 <thead><tr><th>Node</th><th>Class</th><th>Prompt role</th><th>Does</th><th>Output</th></tr></thead>
 <tbody>
 <tr><td><code>data_integration</code> / <code>transform</code></td><td><code>DataIntegrationNode</code> / fn</td><td>—</td><td>Conditional JAMA fetch + map to state (no-ops locally).</td><td>state fields</td></tr>
-<tr><td><code>decomposer</code></td><td><code>TCDecomposerNode</code> (wraps <code>DecomposerNode</code>)</td><td><code>decomposer</code></td><td>Decomposes each requirement into atomic specs, sequentially.</td><td><code>DecomposedRequirement[]</code></td></tr>
-<tr><td><code>coverage_router</code></td><td><code>lambda</code></td><td>—</td><td>Join barrier before the 3-way fan-out.</td><td>—</td></tr>
-<tr><td><code>coverage_evaluator</code></td><td><code>SingleSpecCoverageNode</code></td><td><code>single_test_coverage_eval</code></td><td>Per-spec: does this test case exercise the spec? Runs N× in parallel via <code>Send</code>.</td><td><code>SpecAnalysis</code> (accumulated)</td></tr>
+<tr><td><code>coverage_router</code></td><td><code>lambda</code></td><td>—</td><td>Single named source for the 3-way fan-out.</td><td>—</td></tr>
+<tr><td><code>requirement_pipeline</code> <em>(decomp mode)</em></td><td><code>RequirementCoveragePipelineNode</code> (composes <code>DecomposerNode</code> + <code>SingleSpecCoverageNode</code>)</td><td><code>decomposer</code> + <code>single_test_coverage_eval</code></td><td>Per requirement (parallel via <code>Send</code>): decompose that requirement into specs, then cover its specs concurrently. Fusing the two stages overlaps coverage with the other requirements' decomposition.</td><td><code>DecomposedRequirement</code> + <code>SpecAnalysis[]</code> (both accumulated)</td></tr>
+<tr><td><code>coverage_evaluator</code> <em>(no-decomp mode)</em></td><td><code>SingleReqCoverageNode</code></td><td><code>single_test_coverage_eval</code></td><td>Per requirement: does this test case exercise the requirement? Runs N× in parallel via <code>Send</code>.</td><td><code>SpecAnalysis</code> (accumulated)</td></tr>
 <tr><td><code>logical_evaluator</code></td><td><code>OverallLogicalNode</code></td><td><code>single_test_logical_steps</code></td><td>Test-case-level: do steps follow a logical setup→verification flow?</td><td><code>OverallAnalysis</code></td></tr>
 <tr><td><code>prereqs_evaluator</code></td><td><code>OverallPrereqsNode</code></td><td><code>single_test_prereqs</code></td><td>Test-case-level: are environment/prerequisites clear and sufficient?</td><td><code>OverallAnalysis</code></td></tr>
 <tr><td><code>aggregator</code></td><td><code>AggregatorNode</code> (final)</td><td><code>single_test_aggregator</code></td><td>Reduces the three axes against the review objectives into the 5-row checklist. <code>is_final_output=True</code>.</td><td><code>TestCaseAssessment</code></td></tr>

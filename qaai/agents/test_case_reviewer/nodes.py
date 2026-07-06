@@ -1,14 +1,16 @@
 """
 Node implementations for the single-test-case reviewer.
 
-Pipeline shape (v3 prompts onwards — only the coverage axis fans out per spec):
+Pipeline shape (decomposition mode — per-requirement decompose→coverage pipelining):
 
-    decomposer (sequential loop over requirements)
-        -> coverage_router (sync no-op)
-            -> dispatch_coverage    -> coverage_evaluator   x N (per spec)
-            -> (direct edge)        -> logical_evaluator    x 1 (test-case-level)
-            -> (direct edge)        -> prereqs_evaluator    x 1 (test-case-level)
-                -> aggregator
+    coverage_router (sync no-op)
+        -> dispatch_requirement_pipeline -> requirement_pipeline x N (per requirement)
+             each: decompose one requirement, then cover its specs concurrently
+        -> (direct edge)                 -> logical_evaluator    x 1 (test-case-level)
+        -> (direct edge)                 -> prereqs_evaluator    x 1 (test-case-level)
+            -> aggregator
+
+No-decomposition mode instead fans out dispatch_coverage_by_requirement -> coverage_evaluator.
 """
 import asyncio
 import json
@@ -28,7 +30,6 @@ from qaai.core.config import settings
 from qaai.utils import render_prompt
 
 from .core import (
-    DecomposedRequirement,
     OverallAnalysis,
     SpecAnalysis,
     TCReviewState,
@@ -57,77 +58,105 @@ def validate_tc_inputs(state: TCReviewState) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Decomposer (sequential loop over requirements)
+# Per-requirement decompose → coverage pipeline (Send fan-out target)
 # ---------------------------------------------------------------------------
 
 
-class TCDecomposerNode:
-    """
-    Wraps the shared DecomposerNode with a sequential loop over the
-    `requirements` list on TCReviewState. One LLM call per requirement;
-    results accumulated into a single list before returning to the graph.
+class RequirementCoveragePipelineNode:
+    """Decompose ONE requirement, then immediately run the coverage axis for
+    each of that requirement's decomposed specs.
+
+    Fusing the two stages into a single node is what lets coverage overlap
+    decomposition ACROSS requirements: the graph fans out one Send per
+    requirement (see :func:`dispatch_requirement_pipeline`), LangGraph runs the
+    Send targets concurrently, and each instance runs its own decompose→cover
+    chain — so requirement A's coverage proceeds while requirement B is still
+    decomposing (vs. the old single-node barrier that waited for the slowest
+    decomposition before any coverage began).
+
+    Both ``decomposed_requirements`` and ``coverage_analysis`` are reduced
+    channels (``operator.add`` on TCReviewState), so the per-requirement returns
+    accumulate instead of clobbering. Composes the shared DecomposerNode and a
+    SingleSpecCoverageNode; their per-node caching (decomposer keyed by req_id,
+    coverage keyed by test_id + spec_id) is reused unchanged.
     """
 
-    def __init__(self, inner: DecomposerNode):
-        self._inner = inner
-
-    def _validate_state(self, state: TCReviewState) -> bool:
-        reqs = state.get("requirements")
-        return reqs is not None and len(reqs) > 0
+    def __init__(self, decomposer: DecomposerNode, coverage_node: "_SingleSpecAxisNode"):
+        self._decomposer = decomposer
+        self._coverage = coverage_node
 
     async def __call__(self, state: TCReviewState) -> dict:
-        if not self._validate_state(state):
-            logger.debug("TCDecomposerNode: skipping — no requirements in state")
-            return {"decomposed_requirements": None}
+        test_case = state.get("test_case")
+        requirement = state.get("requirement")
+        if test_case is None or requirement is None:
+            logger.warning("RequirementCoveragePipelineNode: incomplete Send payload, skipping")
+            return {"decomposed_requirements": [], "coverage_analysis": []}
 
         cache_mode = state.get("cache_mode", "on")
-        reqs = state["requirements"]
-        # Decompose all requirements concurrently (was a serial await-loop, the
-        # main latency bottleneck on this path). Order is preserved by gather.
-        inner_updates = await asyncio.gather(*(
-            self._inner({"requirement": req, "cache_mode": cache_mode})
-            for req in reqs
+        dec_update = await self._decomposer(
+            {"requirement": requirement, "cache_mode": cache_mode}
+        )
+        decomposed = dec_update.get("decomposed_requirement")
+        if decomposed is None:
+            logger.warning(
+                "RequirementCoveragePipelineNode: decomposition failed for requirement %s",
+                getattr(requirement, "req_id", None),
+            )
+            return {"decomposed_requirements": [], "coverage_analysis": []}
+
+        # Cover this requirement's specs concurrently — no barrier waiting on
+        # the other requirements' decompositions.
+        cov_updates = await asyncio.gather(*(
+            self._coverage({
+                "test_case": test_case,
+                "requirement": decomposed.requirement,
+                "decomposed_spec": spec,
+                "cache_mode": cache_mode,
+            })
+            for spec in decomposed.decomposed_specifications
         ))
-
-        results: List[DecomposedRequirement] = []
-        for req, inner_update in zip(reqs, inner_updates):
-            decomposed = inner_update.get("decomposed_requirement")
-            if decomposed is not None:
-                results.append(decomposed)
-            else:
-                logger.warning(
-                    "TCDecomposerNode: decomposition failed for requirement %s",
-                    getattr(req, "req_id", None),
-                )
-
-        return {"decomposed_requirements": results if results else None}
+        coverage = [
+            analysis
+            for update in cov_updates
+            for analysis in update.get("coverage_analysis", [])
+        ]
+        return {"decomposed_requirements": [decomposed], "coverage_analysis": coverage}
 
 
-def make_tc_decomposer_node(
+def make_requirement_coverage_pipeline_node(
     client: RateLimitOpenAIClient,
     model: str,
     model_kwargs: dict,
-    prompt_template: Optional[str] = None,
+    decomposer_template: Optional[str] = None,
+    coverage_template: Optional[str] = None,
     cache_manager: Optional[Any] = None,
     **template_vars,
-) -> TCDecomposerNode:
-    """Build a TCDecomposerNode that wraps the shared DecomposerNode.
+) -> RequirementCoveragePipelineNode:
+    """Build the fused per-requirement decompose→coverage node.
 
     Args:
-        prompt_template: Optional override. If None, uses settings.prompt_config.decomposer
+        decomposer_template: decomposer prompt; defaults to settings.prompt_config.decomposer.
+        coverage_template: coverage prompt; defaults to
+            settings.prompt_config.single_test_coverage_eval (via make_coverage_single_node).
     """
-    if prompt_template is None:
-        prompt_template = settings.prompt_config.decomposer
+    if decomposer_template is None:
+        decomposer_template = settings.prompt_config.decomposer
 
-    inner = make_decomposer_node(
+    decomposer = make_decomposer_node(
         client=client,
         model=model,
         model_kwargs=model_kwargs,
-        prompt_template=prompt_template,
+        prompt_template=decomposer_template,
         cache_manager=cache_manager,
         **template_vars,
     )
-    return TCDecomposerNode(inner=inner)
+    coverage_node = make_coverage_single_node(
+        client, model, model_kwargs,
+        prompt_template=coverage_template,
+        cache_manager=cache_manager,
+        include_decomposition=True,
+    )
+    return RequirementCoveragePipelineNode(decomposer, coverage_node)
 
 
 # ---------------------------------------------------------------------------
@@ -402,26 +431,26 @@ def make_prereqs_single_node(
 # ---------------------------------------------------------------------------
 
 
-def dispatch_coverage(state: TCReviewState) -> List[Send]:
-    """Emit one Send per (decomposed_requirement, decomposed_spec) pair to the
-    coverage_evaluator. The logical and prereqs axes do NOT fan out per spec
-    from v3 onwards — they take the full state via direct edges."""
+def dispatch_requirement_pipeline(state: TCReviewState) -> List[Send]:
+    """Decomposition-mode fan-out: emit one Send per requirement to the fused
+    ``requirement_pipeline`` node (:class:`RequirementCoveragePipelineNode`),
+    which decomposes that requirement then covers its specs. This is what lets
+    coverage overlap decomposition across requirements. The logical and prereqs
+    axes are test-case-level (direct edges), not fanned out here."""
     test_case = state.get("test_case")
-    decomposed_reqs = state.get("decomposed_requirements")
-    if not test_case or not decomposed_reqs:
-        logger.warning("dispatch_coverage: incomplete state, skipping fan-out")
+    requirements = state.get("requirements")
+    if not test_case or not requirements:
+        logger.warning("dispatch_requirement_pipeline: incomplete state, skipping fan-out")
         return []
 
     cache_mode = state.get("cache_mode", "on")
     return [
-        Send("coverage_evaluator", {
+        Send("requirement_pipeline", {
             "test_case": test_case,
-            "requirement": dr.requirement,
-            "decomposed_spec": spec,
+            "requirement": requirement,
             "cache_mode": cache_mode,
         })
-        for dr in decomposed_reqs
-        for spec in dr.decomposed_specifications
+        for requirement in requirements
     ]
 
 

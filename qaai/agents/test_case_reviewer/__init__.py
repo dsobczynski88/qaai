@@ -17,14 +17,14 @@ from .nodes import (
     AggregatorNode,
     OverallLogicalNode,
     OverallPrereqsNode,
+    RequirementCoveragePipelineNode,
     SingleSpecCoverageNode,
-    TCDecomposerNode,
-    dispatch_coverage,
+    dispatch_requirement_pipeline,
     make_aggregator_node,
     make_coverage_single_node,
     make_logical_single_node,
     make_prereqs_single_node,
-    make_tc_decomposer_node,
+    make_requirement_coverage_pipeline_node,
 )
 from .pipeline import TCReviewerRunnable
 
@@ -42,19 +42,19 @@ __all__ = [
     "TestCaseAssessment",
     "TCReviewState",
     # nodes
-    "TCDecomposerNode",
+    "RequirementCoveragePipelineNode",
     "SingleSpecCoverageNode",
     "OverallLogicalNode",
     "OverallPrereqsNode",
     "AggregatorNode",
     # factories
-    "make_tc_decomposer_node",
+    "make_requirement_coverage_pipeline_node",
     "make_coverage_single_node",
     "make_logical_single_node",
     "make_prereqs_single_node",
     "make_aggregator_node",
-    # dispatcher (only coverage fans out per spec from v3 onwards)
-    "dispatch_coverage",
+    # dispatcher (decomposition mode fans out per requirement to requirement_pipeline)
+    "dispatch_requirement_pipeline",
     # runnable
     "TCReviewerRunnable",
 ]
