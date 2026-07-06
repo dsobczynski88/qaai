@@ -168,6 +168,13 @@ class Settings(BaseSettings):
     cache_dir: str = Field(default="./shared/runs", alias="CACHE_DIR")
     enable_cache: bool = Field(default=True, alias="ENABLE_CACHE")
 
+    # Request `response_format={"type": "json_object"}` on reviewer LLM calls so
+    # the model emits strict JSON (prevents the mid-document malformation that
+    # breaks parsing on large outputs). Endpoints that reject the parameter are
+    # detected at runtime and the mode is disabled for the process; set to false
+    # to skip it entirely (e.g. for a backend known not to support JSON mode).
+    enable_json_response_format: bool = Field(default=True, alias="ENABLE_JSON_RESPONSE_FORMAT")
+
     # Optional JAMA / Pyjama integration settings
     jama_host_address: Optional[str] = Field(default=None, alias='JAMA_HOST_ADDRESS')
     jama_client_id: Optional[str] = Field(default=None, alias='JAMA_CLIENT_ID')
