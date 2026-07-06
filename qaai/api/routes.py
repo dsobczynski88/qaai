@@ -49,6 +49,19 @@ def _resolve_cache_mode(cache_mode: str | None, use_cache: bool) -> str:
     return "on" if use_cache else "off"
 
 
+@router.get("/me", tags=["System"])
+async def whoami(request: Request) -> dict[str, Any]:
+    """Return the caller's identity + roles for the SPA's RBAC layer.
+
+    Resolved from the ALB/OIDC-injected header when present, else a DEV-only dev
+    fallback (see qaai/api/identity.py). Identity READ only — it does NOT gate the
+    review endpoints; per-route enforcement is the RBAC follow-up phase.
+    """
+    from qaai.api.identity import resolve_identity
+
+    return resolve_identity(request)
+
+
 @router.get("/health", tags=["System"])
 async def health_check(request: Request) -> dict[str, Any]:
     """Health check endpoint. Returns 200 when all services are initialized, 503 otherwise."""

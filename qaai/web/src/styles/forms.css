@@ -1,0 +1,106 @@
+/* Shared form primitives used by several control components (TextField,
+   CacheModeRadio, LabeledCheckbox, InfoTooltip). Kept global so the controls stay
+   small and consistent. Component-unique styling lives in each SFC. */
+
+/* ─── Labeled field ─── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field .field-optional {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.field input[type="text"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+
+.field input[type="text"]:focus {
+  border-color: var(--amber);
+}
+.field input[type="text"]::placeholder {
+  color: var(--muted);
+}
+
+/* ─── Checkbox / radio toggle rows ─── */
+.cache-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cache-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+}
+.cache-check input {
+  accent-color: var(--amber);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* Cache-mode radio group: a vertical stack of options with a heading row. */
+.cache-radio {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.cache-radio-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cache-radio-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.cache-radio .cache-check {
+  padding-left: 2px;
+}
+
+/* Info "i" badge with a native title tooltip. */
+.cache-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  cursor: help;
+}
+.cache-info:hover,
+.cache-info:focus {
+  color: var(--amber);
+  border-color: var(--amber);
+  outline: none;
+}

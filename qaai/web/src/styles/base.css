@@ -1,0 +1,80 @@
+/* Global reset, page chrome, and shared keyframes.
+   Component-specific rules live in each SFC's <style scoped>. Keyframes MUST be
+   global (scoped keyframe names get mangled), so they live here and are referenced
+   by name from the components that animate. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+body {
+  background-image:
+    linear-gradient(rgba(232, 147, 10, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 147, 10, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  min-height: 100vh;
+}
+
+/* The SPA root replaces the old <body> flex layout: a centered column that lets
+   the footer sit at the bottom via margin-top:auto. */
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 20px 80px;
+}
+
+/* ─── Animations (shared across header, cards, spinner, panels) ─── */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-size: 200%;
+    background-position: 100% 0;
+  }
+  100% {
+    background-size: 200%;
+    background-position: 0% 0;
+  }
+}

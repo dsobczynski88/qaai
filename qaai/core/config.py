@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 from pathlib import Path
@@ -14,6 +15,11 @@ from qaai.core.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+# RBAC roles recognized by the reviewer UI and identity layer. Kept here so the
+# API identity resolver (qaai/api/identity.py) and settings validation share one
+# source of truth. Mirrors the Role union in the Vue app (qaai/web/src/types.ts).
+VALID_ROLES = ("admin", "reviewer", "viewer")
 
 # ---------------------------------------------------------------------------
 # Prompt-set selection constants
@@ -188,7 +194,22 @@ class Settings(BaseSettings):
 
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
-    
+
+    # ── RBAC identity (scaffolding) ──
+    # In production, identity comes from the ALB/OIDC-injected header and roles are
+    # mapped from SSO groups (see qaai/api/identity.py). The settings below cover
+    # local DEV (no edge auth) and the group→role mapping.
+    #
+    # QAAI_DEV_ROLES: comma-separated roles granted to the local dev user when
+    # APP_ENV=DEV and no OIDC header is present (e.g. "reviewer" or "viewer" to
+    # exercise role gating; "admin" default). Ignored outside DEV.
+    dev_user_name: str = Field(default="Local Dev", alias="QAAI_DEV_USER")
+    dev_user_email: str = Field(default="dev@localhost", alias="QAAI_DEV_EMAIL")
+    dev_roles: str = Field(default="admin", alias="QAAI_DEV_ROLES")
+    # JSON object mapping SSO/IdP group name → QAAI role, e.g.
+    # '{"qaai-admins":"admin","qaai-reviewers":"reviewer","qaai-viewers":"viewer"}'.
+    oidc_role_map_json: str = Field(default="", alias="QAAI_OIDC_ROLE_MAP")
+
     _prompt_config_cache: Optional[PromptConfig] = None
 
     def __init__(self, **data):
@@ -207,6 +228,32 @@ class Settings(BaseSettings):
     @property
     def telemetry_file_path(self) -> str:
         return str(Path(self.log_file_path).parent / TOKEN_USAGE_JSONL_FILENAME)
+
+    @property
+    def dev_roles_list(self) -> list[str]:
+        """Parsed, validated dev roles (DEV-only fallback identity)."""
+        return [
+            r.strip().lower()
+            for r in self.dev_roles.split(",")
+            if r.strip().lower() in VALID_ROLES
+        ]
+
+    @property
+    def oidc_role_map(self) -> dict:
+        """Parsed SSO-group → role map from QAAI_OIDC_ROLE_MAP (JSON). Empty on
+        absence or malformed input; only known roles are kept."""
+        if not self.oidc_role_map_json:
+            return {}
+        try:
+            data = json.loads(self.oidc_role_map_json)
+            return {
+                str(k): str(v).lower()
+                for k, v in data.items()
+                if str(v).lower() in VALID_ROLES
+            }
+        except Exception:
+            logger.warning("Invalid QAAI_OIDC_ROLE_MAP JSON; ignoring")
+            return {}
 
     @property
     def prompt_config(self) -> PromptConfig:
