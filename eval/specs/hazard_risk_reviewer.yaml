@@ -1,0 +1,33 @@
+# Eval spec — Hazard Coverage Reviewer. H1-H6 mandatory + R7 recommended.
+name: hazard_risk_reviewer
+component: hazard_risk_reviewer
+prompt_set: null                             # hazard reviewer uses default prompt_config
+
+# run+score input: a hazard row / HazardRowWithTraceMatrix (score-only needs no input).
+input:
+  hazard: hazard
+
+output:
+  verdict_path: hazard_assessment.overall_verdict
+  rubric:
+    list_path: hazard_assessment.mandatory_findings
+    code_field: code
+    verdict_field: verdict
+    codes: [H1, H2, H3, H4, H5, H6, R7]
+
+labels:
+  verdict_key: Overall_Verdict
+  rubric_keys: [H1, H2, H3, H4, H5, H6, R7]
+
+scoring:
+  positive_label: "Yes"
+  negative_label: "No"
+  na_label: "N-A"
+  advisory_codes: [R7]                        # recommended only; excluded from the verdict
+  rubric_class_mode: multiclass
+
+mlflow:
+  experiment: hazard_risk_reviewer
+  params: {}
+  tags: {}
+  metrics_enabled: [overall, per_rubric, latency, cost, helper_invariant]

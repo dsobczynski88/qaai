@@ -1,0 +1,45 @@
+# Eval spec — Single Test Case Reviewer. 5 review objectives (all mandatory, Yes/No).
+# Objective ids are stable and embedded in the aggregator prompt.
+name: test_case_reviewer
+component: test_case_reviewer
+prompt_set: test_case_reviewer_v2            # v2 decomposes; v3 skips decomposition
+
+input:
+  test_case: test_case
+  requirements: requirements
+  design_docs: design_docs
+
+output:
+  verdict_path: aggregated_assessment.overall_verdict
+  rubric:
+    list_path: aggregated_assessment.evaluated_checklist
+    code_field: id                            # objective id, not "code"
+    verdict_field: verdict
+    codes:
+      - expected_result_support
+      - expected_result_spec_align
+      - test_case_achieves
+      - test_case_logical_sequence
+      - test_case_setup_clarity
+
+labels:
+  verdict_key: Overall_Verdict
+  rubric_keys:
+    - expected_result_support
+    - expected_result_spec_align
+    - test_case_achieves
+    - test_case_logical_sequence
+    - test_case_setup_clarity
+
+scoring:
+  positive_label: "Yes"
+  negative_label: "No"
+  na_label: "N-A"                              # TC objectives are Yes/No; N-A unused
+  advisory_codes: []                           # all objectives are mandatory
+  rubric_class_mode: multiclass
+
+mlflow:
+  experiment: test_case_reviewer
+  params: {}
+  tags: {}
+  metrics_enabled: [overall, per_rubric, latency, cost, helper_invariant]
