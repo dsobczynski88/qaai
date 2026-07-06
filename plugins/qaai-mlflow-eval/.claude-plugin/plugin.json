@@ -1,0 +1,10 @@
+{
+  "name": "qaai-mlflow-eval",
+  "version": "0.1.0",
+  "description": "Spec-driven MLflow evaluation for the QAAI reviewer pipelines: set up experiments, run scoring studies against labelled datasets, tune params/metrics, inspect runs, and size labelled samples.",
+  "author": {
+    "name": "Daniel Sobczynski",
+    "email": "dsobczynski88@gmail.com"
+  },
+  "keywords": ["mlflow", "evaluation", "langgraph", "llm-eval", "quality-assurance"]
+}

@@ -1,0 +1,38 @@
+# Eval spec — Test Suite Reviewer (RTM). M1-M5 mandatory + R6 advisory.
+# Swap this file (not code) to evaluate a different project's RTM schema.
+name: test_suite_reviewer
+component: test_suite_reviewer
+prompt_set: test_suite_reviewer_v3          # baseline set; override with --prompt-set
+
+# run+score: how to build graph input state from an eval_inputs row.
+input:
+  requirement: requirement
+  test_cases: test_cases
+  design_docs: design_docs                  # optional; omitted rows are fine
+
+# where predictions live in an eval_outputs / graph-state row.
+output:
+  verdict_path: synthesized_assessment.overall_verdict
+  rubric:
+    list_path: synthesized_assessment.mandatory_findings
+    code_field: code
+    verdict_field: verdict
+    codes: [M1, M2, M3, M4, M5, R6]
+
+# how to read the flat answer-key row.
+labels:
+  verdict_key: Overall_Verdict
+  rubric_keys: [M1, M2, M3, M4, M5, R6]     # R6 optional; missing keys are skipped
+
+scoring:
+  positive_label: "Yes"
+  negative_label: "No"
+  na_label: "N-A"
+  advisory_codes: [R6]                       # excluded from overall + headline (mirrors R6)
+  rubric_class_mode: multiclass              # {Yes, No, N-A}
+
+mlflow:
+  experiment: test_suite_reviewer
+  params: {}                                 # e.g. {dataset_label: healthcore-v1}
+  tags: {}                                   # e.g. {owner: dsobc}
+  metrics_enabled: [overall, per_rubric, latency, cost, helper_invariant]
