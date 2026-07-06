@@ -12,6 +12,7 @@ load_dotenv()
 from httpx import AsyncClient, ASGITransport
 
 from qaai.core.config import settings
+from qaai.core.constants import INPUT_JSONL_FILENAME, OUTPUT_JSONL_FILENAME
 from qaai.core.telemetry import TokenUsageTracker
 
 # All test-run artifacts (logs, JSONL records, telemetry, viewers, graph pngs) go
@@ -85,7 +86,7 @@ def pytest_addoption(parser):
     )
     # Default graph-invocation settings, surfaced by the `review_settings`
     # fixture so tests never hard-code them. Each is overridable at the command
-    # line, e.g. `uv run pytest -m unit --cache-mode partial`.
+    # line, e.g. `uv run pytest -m unit --cache-mode on`.
     parser.addoption(
         "--cache-mode",
         action="store",
@@ -421,8 +422,8 @@ def _recorder_fixture(viewer_fn: str, label: str):
 
     @pytest.fixture(scope="session")
     def _fixture(test_run_dir):
-        inputs_path = test_run_dir / "inputs.jsonl"
-        outputs_path = test_run_dir / "outputs.jsonl"
+        inputs_path = test_run_dir / INPUT_JSONL_FILENAME
+        outputs_path = test_run_dir / OUTPUT_JSONL_FILENAME
         inputs_path.write_text("", encoding="utf-8")
         outputs_path.write_text("", encoding="utf-8")
 
@@ -466,7 +467,7 @@ def review_settings(request):
     Centralizes the knobs tests pass into a reviewer graph (cache_mode,
     test_mode, include_edge_case_analysis) so individual tests don't hard-code
     them. Defaults come from the CLI options registered in pytest_addoption and
-    can be overridden per run, e.g. `uv run pytest -m unit --cache-mode partial`.
+    can be overridden per run, e.g. `uv run pytest -m unit --cache-mode on`.
     """
     from types import SimpleNamespace
 

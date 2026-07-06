@@ -75,7 +75,7 @@ async def test_test_suite_reviewer(real_client, real_model, jsonl_recorders, tes
 
     # Build the graph. Compilation is non-trivial but amortized against the
     # LLM call time (~30-40s) that follows.
-    if real_model == "gpt-5-mini":
+    if real_model in settings.models_using_max_completion_tokens:
         model_kwargs={"max_completion_tokens": settings.max_output_tokens}
     else:
         model_kwargs={"max_tokens": settings.max_output_tokens}

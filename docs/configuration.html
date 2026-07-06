@@ -143,11 +143,12 @@ calls — useful for offline/repeatable runs.</p>
 Invalidation is version-driven: bump a prompt's version and its key changes, leaving old
 entries on disk as evidence. Set <code>ENABLE_CACHE=false</code> to disable the cache entirely
 (no manager is created) <span class="src">qaai/api/main.py</span>.</p>
-<p>Each run threads a <code>cache_mode</code> — <code>off</code>, <code>partial</code>
-(default; caches interim nodes but always re-runs the final node), or <code>full</code>
-(caches the final node too; used internally for the hazard reviewer's embedded RTM subgraph).
-The API's <strong>"Use cached results"</strong> checkbox (<code>use_cache</code>) maps only to
-<code>partial</code> (checked) or <code>off</code> (unchecked)
+<p>Each run threads a <code>cache_mode</code> — <code>off</code>, <code>on</code>
+(default; caches interim nodes but always re-runs the final node), or <code>test</code>
+(reuses the final node too; used internally for the hazard reviewer's embedded RTM subgraph).
+Legacy aliases <code>partial</code>/<code>full</code> are still accepted and map to
+<code>on</code>/<code>test</code>. The API's <strong>"Use cached results"</strong> checkbox
+(<code>use_cache</code>) maps only to <code>on</code> (checked) or <code>off</code> (unchecked)
 <span class="src">qaai/api/routes.py</span>.</p>
 <div class="note">For the full design — disk layout and payload schema, cache keys, the cache
 modes in detail, prompt-set namespacing, and version-driven invalidation — see the

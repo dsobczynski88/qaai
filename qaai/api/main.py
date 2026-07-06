@@ -91,7 +91,8 @@ async def lifespan(app: FastAPI):
 
 
     # max_tokens handles large outputs (100+ test cases) without truncation.
-    if settings.model in ["gpt-5.4-mini"]:
+    # Some models expect max_completion_tokens instead — driven by config, not a literal.
+    if settings.model in settings.models_using_max_completion_tokens:
         settings.model_kwargs.update({"max_completion_tokens": settings.max_output_tokens})
     else:
         settings.model_kwargs.update({"max_tokens": settings.max_output_tokens})

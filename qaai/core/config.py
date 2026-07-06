@@ -8,10 +8,31 @@ from qaai.core.constants import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     DEFAULT_MAX_TOKENS_PER_MINUTE,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_TOKEN_COST_INPUT_PER_M,
+    DEFAULT_TOKEN_COST_OUTPUT_PER_M,
     TOKEN_USAGE_JSONL_FILENAME,
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Prompt-set selection constants
+# ---------------------------------------------------------------------------
+# Named prompt sets chosen by the reviewer UI/API toggles. Co-located here with
+# PromptConfig so all "which prompt set" knowledge lives in one module; the API
+# service layer (qaai/api/services.py) re-imports these.
+
+# Test Suite / Hazard RTM: v4 enables the edge-case decomposer (v6); v3 is the
+# baseline (decomposer v5). Applied to the test-suite reviewer and the hazard
+# reviewer's embedded RTM.
+PROMPT_SET_EDGE_CASE = "test_suite_reviewer_v4"
+PROMPT_SET_BASELINE = "test_suite_reviewer_v3"
+PROMPT_SETS = (PROMPT_SET_BASELINE, PROMPT_SET_EDGE_CASE)
+
+# Test Case reviewer: v2 (default) decomposes each requirement into specs; v3
+# skips decomposition and reviews the test case against the original requirement.
+TC_PROMPT_SET_DECOMP = "test_case_reviewer_v2"
+TC_PROMPT_SET_NO_DECOMP = "test_case_reviewer_v3"
 
 
 class PromptConfig(BaseModel):
@@ -35,8 +56,9 @@ class PromptConfig(BaseModel):
     coverage: str = "coverage_evaluator/v8.0.0/template.jinja2"
     synthesizer: str = "synthesizer/v8.0.0/template.jinja2"
     
-    # Test Case Reviewer prompts
-    single_test_aggregator: str = "single_test_aggregator/v7.0.0/template.jinja2"
+    # Test Case Reviewer prompts (aggregator embeds the review objectives directly;
+    # v8 = decomposition variant, v9 = no-decomposition variant)
+    single_test_aggregator: str = "single_test_aggregator/v9.0.0/template.jinja2"
     single_test_coverage_eval: str = "single_test_coverage_eval/v4.0.0/template.jinja2"
     single_test_logical_steps: str = "single_test_logical_steps/v3.0.0/template.jinja2"
     single_test_prereqs: str = "single_test_prereqs/v3.0.0/template.jinja2"
@@ -87,13 +109,18 @@ class PromptConfig(BaseModel):
 class Settings(BaseSettings):
     """Application settings loaded from environment variables.
     
+    Defaults for the numeric tunables below live in qaai/core/constants.py — this
+    class only wires them to environment-variable aliases. See constants.py for the
+    current values and rationale.
+
     Environment Variables:
         API_KEY: API key for the LLM service (required)
         API_BASE_URL: Base URL for the API endpoint (required)
         API_MODEL: Model identifier (required)
-        MAX_REQUESTS_PER_MINUTE: Rate limit for API requests (default: 490)
-        MAX_TOKENS_PER_MINUTE: Token rate limit (default: 200000)
-        MAX_OUTPUT_TOKENS: Maximum output tokens per request (default: 16000)
+        MAX_REQUESTS_PER_MINUTE: Rate limit for API requests
+        MAX_TOKENS_PER_MINUTE: Token rate limit
+        MAX_OUTPUT_TOKENS: Maximum output tokens per request
+        TOKEN_COST_INPUT_PER_M / TOKEN_COST_OUTPUT_PER_M: USD cost per million tokens
         PROMPT_SET: Named prompt set to load (optional, e.g., "test_case_reviewer_v2")
     """
     # Deployment environment selector (DEV / TEST / PROD). DEV (default) reads from
@@ -109,6 +136,11 @@ class Settings(BaseSettings):
     max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+
+    # Models whose Chat Completions API expects `max_completion_tokens` instead of
+    # the legacy `max_tokens` output cap. Keeps the capability decision in config
+    # rather than as a model-name string literal in request-handling code.
+    models_using_max_completion_tokens: set[str] = {"gpt-5.4-mini", "gpt-5-mini"}
     # Default points at ./logs/qaai.log but creates no directory at import time.
     # The real per-run directory is set by logging_config.start_new_run() — once at
     # startup (create_app) and again at the start of every review request — which
@@ -120,9 +152,10 @@ class Settings(BaseSettings):
     # to ./logs/tests so test artifacts never mix with server runs.
     log_base_dir: str = "./logs"
 
-    # Token cost rates in USD per million tokens — set in .env to match your model pricing.
-    token_cost_input_per_m: float = Field(default=1.00, alias="TOKEN_COST_INPUT_PER_M")
-    token_cost_output_per_m: float = Field(default=5.00, alias="TOKEN_COST_OUTPUT_PER_M")
+    # Token cost rates in USD per million tokens — set in .env to match your model
+    # pricing. Defaults live in constants.py (Claude Haiku 4.5 cost basis).
+    token_cost_input_per_m: float = Field(default=DEFAULT_TOKEN_COST_INPUT_PER_M, alias="TOKEN_COST_INPUT_PER_M")
+    token_cost_output_per_m: float = Field(default=DEFAULT_TOKEN_COST_OUTPUT_PER_M, alias="TOKEN_COST_OUTPUT_PER_M")
 
     # Reviewer cache, shared by all three reviewers (set ENABLE_CACHE=false to
     # disable entirely; CACHE_DIR holds one folder per entity id — e.g.
@@ -134,6 +167,13 @@ class Settings(BaseSettings):
     redis_url: Optional[str] = Field(default=None, alias="REDIS_URL")
     cache_dir: str = Field(default="./shared/runs", alias="CACHE_DIR")
     enable_cache: bool = Field(default=True, alias="ENABLE_CACHE")
+
+    # Request `response_format={"type": "json_object"}` on reviewer LLM calls so
+    # the model emits strict JSON (prevents the mid-document malformation that
+    # breaks parsing on large outputs). Endpoints that reject the parameter are
+    # detected at runtime and the mode is disabled for the process; set to false
+    # to skip it entirely (e.g. for a backend known not to support JSON mode).
+    enable_json_response_format: bool = Field(default=True, alias="ENABLE_JSON_RESPONSE_FORMAT")
 
     # Optional JAMA / Pyjama integration settings
     jama_host_address: Optional[str] = Field(default=None, alias='JAMA_HOST_ADDRESS')

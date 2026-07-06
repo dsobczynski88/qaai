@@ -841,9 +841,7 @@ class _FinalAssessorNode(StandardLLMNode):
             {"role": "user", "content": json.dumps(payload)},
         ]
         try:
-            result = await self.client.chat_completion(
-                model=self.model, messages=messages, **self.model_kwargs,
-            )
+            result = await self._chat_completion(messages)
             parsed = self._parse_llm_response(result, self.response_model, self.__class__.__name__)
         except Exception as e:
             logger.warning("%s: LLM call failed — %s", self.__class__.__name__, e)

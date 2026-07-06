@@ -11,6 +11,9 @@ from openai.types.chat import ChatCompletion
 from qaai.core.constants import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     DEFAULT_MAX_TOKENS_PER_MINUTE,
+    DEFAULT_INITIAL_RETRY_DELAY,
+    DEFAULT_BACKOFF_FACTOR,
+    DEFAULT_MAX_RETRIES,
 )
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -111,10 +114,10 @@ def _estimate_tokens_from_messages(messages: List[Dict[str, Any]], model: str) -
 async def async_retry_with_backoff(
     func: Callable[..., Awaitable[T]],
     *args,
-    initial_delay: float = 60,
-    factor: float = 2.0,
+    initial_delay: float = DEFAULT_INITIAL_RETRY_DELAY,
+    factor: float = DEFAULT_BACKOFF_FACTOR,
     jitter: bool = True,
-    max_retries: int = 5,
+    max_retries: int = DEFAULT_MAX_RETRIES,
     retry_on = RateLimitError,
     # Token-aware additions:
     token_limiter: Optional["OpenAITokenLimiter"] = None,

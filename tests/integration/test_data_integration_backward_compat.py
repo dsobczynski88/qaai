@@ -8,7 +8,6 @@ import pytest
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
 from qaai.agents.test_suite_reviewer.core import Requirement, TestCase
-from qaai.agents.test_case_reviewer.core import ReviewObjective
 
 
 @pytest.mark.integration
@@ -78,22 +77,11 @@ async def test_tc_pipeline_backward_compatibility(real_client, real_model):
             text="The system shall validate user input before processing."
         )
     ]
-    review_objectives = [
-        ReviewObjective(
-            id="expected_result_support",
-            description="Expected result is supported by requirement"
-        ),
-        ReviewObjective(
-            id="test_case_achieves",
-            description="Test case achieves its stated objective"
-        ),
-    ]
-    
-    # Invoke graph with local data (no pyjama_request)
+    # Invoke graph with local data (no pyjama_request). The review objectives are
+    # embedded in the aggregator prompt (v8/v9), so they are not passed as state.
     result = await graph.graph.ainvoke({
         "test_case": test_case,
         "requirements": requirements,
-        "review_objectives": review_objectives,
     })
     
     # Verify pipeline ran successfully

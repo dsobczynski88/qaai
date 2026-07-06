@@ -197,13 +197,14 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_tc_review.ht
 <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td><code>baseline_id</code></td><td>string</td><td>required</td><td>JAMA baseline to fetch and review</td></tr>
-<tr><td><code>use_cache</code></td><td>bool</td><td><code>true</code></td><td><code>true</code> → <code>cache_mode="partial"</code>; <code>false</code> → <code>"off"</code> <span class="src">routes.py:68,91,135</span></td></tr>
+<tr><td><code>use_cache</code></td><td>bool</td><td><code>true</code></td><td><code>true</code> → <code>cache_mode="on"</code>; <code>false</code> → <code>"off"</code> <span class="src">routes.py:68,91,135</span></td></tr>
 <tr><td><code>test_mode</code></td><td>bool?</td><td><code>null</code></td><td>Cache-only JAMA (no live calls); <code>null</code> → <code>PYJAMA_TEST_MODE</code></td></tr>
 <tr><td><code>include_edge_case_analysis</code></td><td>bool</td><td><code>false</code></td><td><code>true</code> → prompt set <code>test_suite_reviewer_v4</code> (edge-case decomposer v6); <code>false</code> → <code>test_suite_reviewer_v3</code> (baseline v5). Applies to the test-suite review only. <span class="src">routes.py</span></td></tr>
 </tbody></table>
-<div class="note">The HTTP API never exposes <code>cache_mode="full"</code> — the
-<code>use_cache</code> checkbox maps only to <code>partial</code>/<code>off</code>.
-<code>full</code> is used internally for the hazard reviewer's embedded RTM subgraph.
+<div class="note">The canonical cache modes are <code>off</code> / <code>on</code> / <code>test</code>
+(legacy <code>partial</code>/<code>full</code> are still accepted and map to <code>on</code>/<code>test</code>).
+The <code>use_cache</code> checkbox maps only to <code>on</code>/<code>off</code>; <code>test</code>
+(recreate entirely from cache) is used internally for the hazard reviewer's embedded RTM subgraph.
 See <a href="configuration.html#caching">Configuration → Caching</a>.</div>
 <div class="note"><strong>"Include Edge Case Analysis" toggle.</strong> The
 <code>include_edge_case_analysis</code> flag selects the prompt set per request for

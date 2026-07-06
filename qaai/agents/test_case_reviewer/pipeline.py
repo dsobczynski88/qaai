@@ -30,13 +30,13 @@ from qaai.utils import render_graph_png, write_graph_png_bytes
 from .core import TCReviewState
 from qaai.agents.shared.gate import make_validation_gate, make_gate_router
 from .nodes import (
-    dispatch_coverage,
     dispatch_coverage_by_requirement,
+    dispatch_requirement_pipeline,
     make_aggregator_node,
     make_coverage_single_node,
     make_logical_single_node,
     make_prereqs_single_node,
-    make_tc_decomposer_node,
+    make_requirement_coverage_pipeline_node,
     validate_tc_inputs,
 )
 
@@ -45,35 +45,26 @@ class TCReviewerRunnable:
     """
     LangGraph-based single-test-case reviewer.
 
-    Graph structure:
+    Graph structure (decomposition mode):
         START
           ↓
-        ┌──────────────────────────────────────────┐
-        │ DATA_INTEGRATION (fetch/passthru)          │
-        └──────────────────────────────────────────┘
+        DATA_INTEGRATION (fetch/passthru)  →  TRANSFORM (JAMA→state or no-op)
           ↓
-        ┌──────────────────────────────────────────┐
-        │ TRANSFORM (JAMA→state or no-op)            │
-        └──────────────────────────────────────────┘
-          ↓
-        ┌──────────────────────────────────────────┐
-        │ DECOMPOSER (sequential loop over reqs)    │
-        └──────────────────────────────────────────┘
-          ↓
-        ┌──────────────────────────────────────────┐
-        │ COVERAGE_ROUTER (sync no-op)              │
-        └──────────────────────────────────────────┘
-          ↓ coverage Send × N (per spec); logical & prereqs direct edges (test-level)
-        ┌─────────────┬─────────────┬─────────────┐
-        │ coverage_   │ logical_    │ prereqs_    │
-        │ evaluator×N │ evaluator×N │ evaluator×N │
-        └─────────────┴─────────────┴─────────────┘
-          ↓ (operator.add reducers fan in per axis)
-        ┌──────────────────────────────────────────┐
-        │ AGGREGATOR  (MoA-like synthesis)          │
-        └──────────────────────────────────────────┘
-          ↓
-        END
+        VALIDATION_GATE  →  COVERAGE_ROUTER (sync no-op)
+          ↓ per-requirement Send × N        ↘ direct edges (test-level, ×1 each)
+        ┌──────────────────────────────┐   ┌───────────┐  ┌───────────┐
+        │ REQUIREMENT_PIPELINE × N      │   │ logical_  │  │ prereqs_  │
+        │  decompose one req, then       │   │ evaluator │  │ evaluator │
+        │  cover its specs concurrently  │   └───────────┘  └───────────┘
+        └──────────────────────────────┘
+          ↓ operator.add reducers fan in (decomposed_requirements + coverage_analysis)
+        AGGREGATOR (MoA-like synthesis)  →  END
+
+    Fusing decompose→coverage per requirement lets requirement A's coverage run
+    while requirement B is still decomposing (no barrier on the slowest decompose).
+    No-decomposition mode instead fans coverage_router out per requirement to a
+    single coverage_evaluator (dispatch_coverage_by_requirement); there is no
+    decomposition stage.
     """
 
     def __init__(
@@ -110,11 +101,6 @@ class TCReviewerRunnable:
         transform = make_transform_node_test_case_review()
 
         cm = self.cache_manager
-        coverage_eval = make_coverage_single_node(
-            self.client, self.model, self.model_kwargs,
-            prompt_template=pc.single_test_coverage_eval, cache_manager=cm,
-            include_decomposition=self.include_decomposition,
-        )
         logical_eval = make_logical_single_node(
             self.client, self.model, self.model_kwargs,
             prompt_template=pc.single_test_logical_steps, cache_manager=cm,
@@ -132,11 +118,9 @@ class TCReviewerRunnable:
         sg.add_node("data_integration", data_integration)
         sg.add_node("transform", transform)
         sg.add_node("validation_gate", make_validation_gate(validate_tc_inputs))
-        # Join barrier: add_conditional_edges needs a single named source for
-        # each fan-out. coverage_router is the shared parent that all three
-        # axis dispatchers branch from.
+        # coverage_router is the single named source the fan-out dispatcher and the
+        # two test-level axis edges branch from (add_conditional_edges needs one).
         sg.add_node("coverage_router", lambda state: {})
-        sg.add_node("coverage_evaluator", coverage_eval)
         sg.add_node("logical_evaluator", logical_eval)
         sg.add_node("prereqs_evaluator", prereqs_eval)
         sg.add_node("aggregator", aggregator)
@@ -147,39 +131,47 @@ class TCReviewerRunnable:
         sg.add_edge("transform", "validation_gate")
 
         # Input gate: skip the graph (no LLM calls) when the test case has no
-        # traced requirements or no step text. The first node after the gate
-        # differs by mode: the decomposer (with decomposition) or the
-        # coverage_router directly (no decomposition).
-        if self.include_decomposition:
-            decomposer = make_tc_decomposer_node(
-                self.client, self.model, self.model_kwargs,
-                prompt_template=pc.decomposer, cache_manager=cm,
-            )
-            sg.add_node("decomposer", decomposer)
-            sg.add_conditional_edges(
-                "validation_gate",
-                make_gate_router(["decomposer"]),
-                ["decomposer", END],
-            )
-            sg.add_edge("decomposer", "coverage_router")
-            # Coverage axis fans out per spec via Send.
-            coverage_dispatch = dispatch_coverage
-        else:
-            sg.add_conditional_edges(
-                "validation_gate",
-                make_gate_router(["coverage_router"]),
-                ["coverage_router", END],
-            )
-            # Coverage axis fans out per requirement via Send (no specs).
-            coverage_dispatch = dispatch_coverage_by_requirement
+        # traced requirements or no step text. Both modes proceed to coverage_router.
+        sg.add_conditional_edges(
+            "validation_gate",
+            make_gate_router(["coverage_router"]),
+            ["coverage_router", END],
+        )
 
-        # Coverage fans out via Send. Logical and prereqs are test-case-level
-        # (single LLM call each) — direct edges, no Send.
-        sg.add_conditional_edges("coverage_router", coverage_dispatch, ["coverage_evaluator"])
+        # Requirement axis fan-out differs by mode. Decomposition mode fans out one
+        # Send per requirement to the fused requirement_pipeline node (decompose →
+        # cover its specs), so coverage overlaps decomposition across requirements.
+        # No-decomposition mode fans out per requirement to a single coverage
+        # evaluator that judges the original requirement text directly.
+        if self.include_decomposition:
+            requirement_pipeline = make_requirement_coverage_pipeline_node(
+                self.client, self.model, self.model_kwargs,
+                decomposer_template=pc.decomposer,
+                coverage_template=pc.single_test_coverage_eval,
+                cache_manager=cm,
+            )
+            sg.add_node("requirement_pipeline", requirement_pipeline)
+            sg.add_conditional_edges(
+                "coverage_router", dispatch_requirement_pipeline, ["requirement_pipeline"]
+            )
+            sg.add_edge("requirement_pipeline", "aggregator")
+        else:
+            coverage_eval = make_coverage_single_node(
+                self.client, self.model, self.model_kwargs,
+                prompt_template=pc.single_test_coverage_eval, cache_manager=cm,
+                include_decomposition=False,
+            )
+            sg.add_node("coverage_evaluator", coverage_eval)
+            sg.add_conditional_edges(
+                "coverage_router", dispatch_coverage_by_requirement, ["coverage_evaluator"]
+            )
+            sg.add_edge("coverage_evaluator", "aggregator")
+
+        # Logical and prereqs are test-case-level (single LLM call each) — direct
+        # edges off the router, no Send. They fan into the aggregator alongside
+        # the per-requirement results.
         sg.add_edge("coverage_router", "logical_evaluator")
         sg.add_edge("coverage_router", "prereqs_evaluator")
-
-        sg.add_edge("coverage_evaluator", "aggregator")
         sg.add_edge("logical_evaluator", "aggregator")
         sg.add_edge("prereqs_evaluator", "aggregator")
         sg.add_edge("aggregator", END)

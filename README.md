@@ -58,11 +58,11 @@ The `overall_verdict` aggregates deterministically: it is `Yes` only when every 
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `decomposed_requirements`                                               | Each traced requirement broken into atomic specs (same `DecomposedSpec` shape as the RTM reviewer)                                                                                                                            |
 | `coverage_analysis` / `logical_structure_analysis` / `prereqs_analysis` | Three parallel `SpecAnalysis` lists — one per axis — each entry: `{spec_id, exists (bool), assessment}`                                                                                                                       |
-| `aggregated_assessment.evaluated_checklist`                             | The `review_objectives` checklist (five items) populated with `verdict` (`Yes`/`No`), a `partial` flag (drives Yellow rendering when verdict is `Yes` but coverage is materially incomplete), and an `assessment` rationale per item |
+| `aggregated_assessment.evaluated_checklist`                             | The five-objective review checklist populated with `verdict` (`Yes`/`No`), a `partial` flag (drives Yellow rendering when verdict is `Yes` but coverage is materially incomplete), and an `assessment` rationale per item |
 | `aggregated_assessment.overall_verdict`                                 | `Yes` iff every **mandatory** objective is `Yes`; partial-Yes still counts as `Yes`, and the one advisory objective (`test_case_setup_clarity`) never affects the verdict                                                     |
 | `aggregated_assessment.comments` / `clarification_questions`            | Same shape as the other reviewers                                                                                                                                                                                             |
 
-The five review objectives default to `qaai/agents/test_case_reviewer/review_objectives.yaml`: `expected_result_support`, `expected_result_spec_align`, `test_case_achieves`, `test_case_logical_sequence` (all mandatory), and `test_case_setup_clarity` (advisory).
+The five review objectives are embedded directly in the `single_test_aggregator` prompt (v8 for the decomposition set, v9 for the no-decomposition set), matching how the test-suite (M1-M5) and hazard (H1-H6) reviewers carry their rubrics in-prompt: `expected_result_support`, `expected_result_spec_align`, `test_case_achieves`, `test_case_logical_sequence` (all mandatory), and `test_case_setup_clarity` (advisory).
 
 ---
 
@@ -135,7 +135,9 @@ Interactive API documentation is available at `http://localhost:8000/docs`. At s
 | `POST` | `/api/v1/test-case-review`    | JAMA baseline         | `202` + job_id | Submit the 5-objective test-case adequacy review for every test case in a baseline |
 | `POST` | `/api/v1/hazard-risk-review`  | Uploaded SHA Excel    | `202` + job_id | Submit the H1-H6 + R7 hazard mitigation review for every row in an SHA table      |
 | `GET`  | `/api/v1/jobs/{job_id}`       | —                     | JSON           | Poll a submitted job's status (`pending` / `running` / `completed` / `failed`) |
+| `POST` | `/api/v1/jobs/{job_id}/cancel`| —                     | JSON           | Request cancellation of a pending/running job ("Stop Run")                   |
 | `GET`  | `/api/v1/jobs/{job_id}/result`| —                     | HTML viewer    | Download a completed job's HTML report (`425 Too Early` while still running) |
+| `POST` | `/api/v1/feedback-upload`     | Reviewer feedback JSON| JSON           | Upload reviewer ratings/notes captured in the offline HTML viewer           |
 
 #### Health Check
 
@@ -181,7 +183,7 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_rtm_review.h
 
 - `GET /api/v1/jobs/{job_id}` returns `{job_id, status, filename, error}` where `status` ∈ `pending` / `running` / `completed` / `failed` (`error` is populated only on `failed`).
 - `GET /api/v1/jobs/{job_id}/result` returns the HTML report (`200`) when the job is `completed`; `404` for an unknown id, `425 Too Early` while still pending/running, and the job's failure status (`400` for bad input such as an unknown baseline, `500` otherwise) when it failed.
-- Jobs are held in an **in-memory** registry (most-recent 200) and run one at a time. This assumes a **single uvicorn worker** — see the Production Deployment section in `docs/api.md`.
+- Jobs are held in an **in-memory** registry (most-recent 200) and run one at a time. This assumes a **single uvicorn worker** — see the Production Deployment section in `docs/api.html`.
 
 The web frontend performs this submit → poll → download loop automatically.
 
@@ -201,9 +203,10 @@ curl -X POST http://localhost:8000/api/v1/test-suite-review \
 | Body field   | Type   | Required | Default | Description                                                              |
 | ------------ | ------ | -------- | ------- | ------------------------------------------------------------------------ |
 | `baseline_id`| string | Yes      | —       | JAMA baseline ID, e.g. `BASE-84429`                                      |
-| `cache_mode` | string | No       | `null`  | The UI cache-mode radio: `partial` ("Use results to update cache" — reuse interim analysis, regenerate the final assessment fresh, write all results), `full` ("Use cached results" — reuse everything incl. the final assessment), `off` (recompute, write nothing). `null` falls back to `use_cache` |
-| `use_cache`  | bool   | No       | `true`  | Deprecated; ignored when `cache_mode` is set. `true` → `partial`, `false` → `off` |
+| `cache_mode` | string | No       | `null`  | The UI cache-mode radio: `on` ("Use results to update cache" — reuse interim analysis, regenerate the final assessment fresh, write all results), `test` ("Use cached results" — reuse everything incl. the final assessment), `off` (recompute, write nothing). Legacy aliases `partial`→`on` and `full`→`test` are still accepted. `null` falls back to `use_cache` |
+| `use_cache`  | bool   | No       | `true`  | Deprecated; ignored when `cache_mode` is set. `true` → `on`, `false` → `off` |
 | `test_mode`  | bool   | No       | `null`  | Cache-only JAMA — fetch the baseline from the disk cache only, no live JAMA calls. `null` falls back to the server's `PYJAMA_TEST_MODE` |
+| `include_edge_case_analysis` | bool | No | `false` | When `true`, use the edge-case prompt set (`test_suite_reviewer_v4`, edge-case decomposer v6); when `false`, the baseline set (`test_suite_reviewer_v3`). Cached results are namespaced by prompt set |
 
 Once the job completes, open the downloaded `viewer.html` in a browser to page through the M1-M5 + R6 rubric for every requirement.
 
@@ -213,7 +216,7 @@ Once the job completes, open the downloaded `viewer.html` in a browser to page t
 
 ### Test Case Reviewer — `POST /api/v1/test-case-review`
 
-Same `BaselineRequest` body as the RTM endpoint (`baseline_id`, `use_cache`, `test_mode`); the completed job yields a `viewer_tc.html` with the 5-objective checklist for every test case in the baseline.
+Same `BaselineRequest` body as the RTM endpoint (`baseline_id`, `use_cache`/`cache_mode`, `test_mode`), plus `include_decomposition_analysis` (bool, default `true`): when `true` each requirement is decomposed into specs and coverage is judged per spec (`test_case_reviewer_v2`); when `false`, decomposition is skipped and the test case is reviewed directly against the original requirement text (`test_case_reviewer_v3`) — faster and coarser. The completed job yields a `viewer_tc.html` with the 5-objective checklist for every test case in the baseline.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/test-case-review \
@@ -245,10 +248,10 @@ curl -X POST http://localhost:8000/api/v1/hazard-risk-review \
 | `file`              | file   | Yes      | —           | SHA Excel file (`.xlsx`/`.xls`) containing the hazard table |
 | `sheet_name`        | string | No       | `SHA Table` | Worksheet holding the hazard table                     |
 | `identifier_pattern`| string | No       | `GID-\d+`   | Regex for identifiers in the Risk Control Measures column; use `REQ-PUMP-\d+` for the sample workbook |
-| `cache_mode`        | string | No       | `null`      | Cache-mode radio: `partial` (update cache, fresh final), `full` (reuse cached final), `off`. `null` falls back to `use_cache` |
-| `use_cache`         | bool   | No       | `true`      | Deprecated; ignored when `cache_mode` is set. `true` → `partial`, `false` → `off` |
+| `cache_mode`        | string | No       | `null`      | Cache-mode radio: `on` (update cache, fresh final), `test` (reuse cached final), `off`. Legacy aliases `partial`→`on`, `full`→`test` still accepted. `null` falls back to `use_cache` |
+| `use_cache`         | bool   | No       | `true`      | Deprecated; ignored when `cache_mode` is set. `true` → `on`, `false` → `off` |
 | `test_mode`         | bool   | No       | `null`      | Cache-only JAMA (no live calls); `null` uses the server's `PYJAMA_TEST_MODE` |
 
 H5 (Verification Depth and Hazard-Path Effectiveness) is the only finding that may be `N-A` — it applies when `software_related_causes` indicates no software cause. H1-H4, H6, and R7 always resolve to `Yes` or `No`. R7 (HSHA Update) is a recommended criterion: an R7 = No never flips `overall_verdict`.
 
-> **Note:** The review endpoints are asynchronous — the `POST` returns `202` + a `job_id`, and the HTML report is downloaded from `GET /api/v1/jobs/{job_id}/result` once the job completes (see [Asynchronous job flow](#asynchronous-job-flow)). The underlying structured assessments (`SynthesizedAssessment`, `TestCaseAssessment`, `HazardAssessment`) are also serialized to `outputs.jsonl` in the run directory; see `docs/user_guide.md` for the full output data-model reference.
+> **Note:** The review endpoints are asynchronous — the `POST` returns `202` + a `job_id`, and the HTML report is downloaded from `GET /api/v1/jobs/{job_id}/result` once the job completes (see [Asynchronous job flow](#asynchronous-job-flow)). The underlying structured assessments (`SynthesizedAssessment`, `TestCaseAssessment`, `HazardAssessment`) are also serialized to `outputs.jsonl` in the run directory; see the per-reviewer design docs under `docs/design/` for the full output data-model reference.

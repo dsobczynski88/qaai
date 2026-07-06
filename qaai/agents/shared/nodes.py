@@ -17,10 +17,21 @@ import html
 import json
 import logging
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Optional, Any
 from abc import ABC, abstractmethod
 
+try:
+    # Robust second-pass JSON repair: fixes mid-document defects the bracket
+    # balancer can't (unescaped quotes/newlines inside strings, missing commas,
+    # trailing commas). Degrades gracefully if the dependency is not installed.
+    from json_repair import repair_json as _json_repair
+except ImportError:  # pragma: no cover - exercised only when dep is absent
+    _json_repair = None
+
 from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.core.config import settings
 from qaai.utils import render_prompt
 
 from .core import DecomposedRequirement
@@ -28,6 +39,13 @@ from .core import DecomposedRequirement
 # Child of the "qaai" logger, so node logs flow through the re-pointable file
 # handler that setup_logging() attaches per run (logs/run-<ts>/qaai.log).
 logger = logging.getLogger(__name__)
+
+# Process-wide latch for JSON-mode support. All reviewer nodes request
+# response_format={"type": "json_object"}; if an endpoint rejects it (detected
+# when a retry without it succeeds), this flips to False so we stop paying the
+# double-call penalty on every subsequent request. Mutable holder so the flag
+# can be toggled from within methods.
+_json_mode = {"supported": True}
 
 
 class CacheRequiredError(RuntimeError):
@@ -320,37 +338,144 @@ class BaseLLMNode(ABC):
         return data
 
     @staticmethod
+    def _run_dir() -> Path:
+        """Best-effort resolve the active run directory (logs/run-<ts>/).
+
+        Derived from the 'qaai' logger's FileHandler (set per run by
+        setup_logging()); falls back to the parent of the configured log path,
+        then to ./logs. Never raises — diagnostics must not break parsing.
+        """
+        try:
+            qlog = logging.getLogger("qaai")
+            for h in qlog.handlers:
+                base = getattr(h, "baseFilename", None)
+                if base:
+                    return Path(base).parent
+        except Exception:
+            pass
+        try:
+            from qaai.core.config import settings
+            return Path(settings.log_file_path).parent
+        except Exception:
+            return Path("./logs")
+
+    @staticmethod
+    def _dump_failed_parse(node_name: str, content: Optional[str]) -> Optional[str]:
+        """Persist the full raw LLM response to disk so the untruncated content
+        (logs cap at 200 chars; Pydantic truncates its message) is inspectable.
+        Returns the path written, or None. Never raises."""
+        if not content:
+            return None
+        try:
+            run_dir = BaseLLMNode._run_dir()
+            run_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            path = run_dir / f"failed_parse_{node_name}_{ts}.txt"
+            path.write_text(content, encoding="utf-8")
+            return str(path)
+        except Exception as e:  # pragma: no cover - diagnostics only
+            logger.debug("%s: could not dump failed-parse content — %s", node_name, e)
+            return None
+
+    async def _chat_completion(self, messages: list):
+        """Call the LLM, requesting strict JSON output when enabled.
+
+        Adds ``response_format={"type": "json_object"}`` (self.model_kwargs takes
+        precedence if it already sets one). If the endpoint rejects the parameter,
+        retries once without it and latches JSON mode off process-wide so the
+        double-call penalty is paid at most once. Endpoints that don't support the
+        parameter (some Ollama/vLLM/Bedrock configs) thus degrade gracefully.
+        """
+        kwargs = dict(self.model_kwargs)
+        want_json = (
+            _json_mode["supported"]
+            and "response_format" not in kwargs
+            and getattr(settings, "enable_json_response_format", True)
+        )
+        if want_json:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        try:
+            return await self.client.chat_completion(
+                model=self.model, messages=messages, **kwargs
+            )
+        except Exception as e:
+            if not want_json:
+                raise
+            logger.warning(
+                "%s: chat_completion with response_format failed (%s); retrying without JSON mode",
+                self.__class__.__name__, e,
+            )
+            kwargs.pop("response_format", None)
+            result = await self.client.chat_completion(
+                model=self.model, messages=messages, **kwargs
+            )
+            # Retry without JSON mode succeeded — endpoint likely doesn't support
+            # the parameter. Latch it off so we don't retry on every future call.
+            _json_mode["supported"] = False
+            logger.warning(
+                "%s: disabling response_format JSON mode for the rest of this process",
+                self.__class__.__name__,
+            )
+            return result
+
+    @staticmethod
     def _parse_llm_response(result, response_model, node_name: str = "") -> Optional[Any]:
-        """Try each choice in the LLM result; return the first successfully parsed model."""
+        """Try each choice in the LLM result; return the first successfully parsed model.
+
+        Parse strategy per choice: extract JSON (markdown fence + bracket balancer)
+        -> json.loads -> json_repair second pass (mid-document defects) -> give up.
+        On failure the full raw content is dumped to the run directory and the
+        exact byte offset + context around the decode error is logged.
+        """
+        content = None
         for choice in result.choices:
             try:
                 content = choice.message.content
                 logger.debug("%s: raw LLM response — %s", node_name, content)
                 extracted_json = BaseLLMNode._extract_json_from_markdown(content)
-                logger.debug("%s: extracted JSON length=%d, first 200 chars: %s", 
+                logger.debug("%s: extracted JSON length=%d, first 200 chars: %s",
                            node_name, len(extracted_json), extracted_json[:200])
+
+                py_obj = None
                 try:
-                    # Parse to dict first for potential repair
                     py_obj = json.loads(extracted_json)
-                    
-                    # ✅ Solution 4: Repair checklist structure if present
-                    if "evaluated_checklist" in py_obj:
-                        py_obj = BaseLLMNode._repair_checklist_structure(py_obj, node_name)
-                    
-                    return response_model.model_validate(py_obj)
-                except json.JSONDecodeError:
-                    # If json.loads failed, try direct Pydantic validation as fallback
-                    return response_model.model_validate_json(extracted_json)
-            except json.JSONDecodeError as e:
-                logger.warning("%s: JSON decode error at position %d: %s", node_name, e.pos, e.msg)
-                # Show context around the error position
-                context_start = max(0, e.pos - 50)
-                context_end = min(len(extracted_json), e.pos + 50)
-                logger.warning("%s: JSON context around error (pos %d): ...%s...", 
-                             node_name, e.pos, extracted_json[context_start:context_end])
-                continue
+                except json.JSONDecodeError as je:
+                    # Log the EXACT failure location + a wide context window BEFORE
+                    # any fallback — this is the byte the bracket balancer can't fix.
+                    ctx_start = max(0, je.pos - 120)
+                    ctx_end = min(len(extracted_json), je.pos + 120)
+                    logger.warning(
+                        "%s: json.loads failed at pos %d (%s); context: ...%s...",
+                        node_name, je.pos, je.msg, extracted_json[ctx_start:ctx_end],
+                    )
+                    # Second pass: robust repair of mid-document defects.
+                    if _json_repair is not None:
+                        try:
+                            repaired = _json_repair(extracted_json)
+                            py_obj = json.loads(repaired)
+                            logger.info("%s: recovered via json_repair second pass", node_name)
+                        except Exception as re_err:
+                            logger.warning("%s: json_repair also failed — %s", node_name, re_err)
+                    else:
+                        logger.warning("%s: json_repair unavailable (dependency not installed)", node_name)
+
+                if py_obj is None:
+                    dumped = BaseLLMNode._dump_failed_parse(node_name, content)
+                    logger.warning(
+                        "%s: unrecoverable JSON for choice; raw dumped to %s", node_name, dumped,
+                    )
+                    continue
+
+                # ✅ Solution 4: Repair checklist structure if present
+                if isinstance(py_obj, dict) and "evaluated_checklist" in py_obj:
+                    py_obj = BaseLLMNode._repair_checklist_structure(py_obj, node_name)
+
+                return response_model.model_validate(py_obj)
             except Exception as e:
-                logger.warning("%s: parse failed for choice — %s", node_name, e)
+                dumped = BaseLLMNode._dump_failed_parse(node_name, content)
+                logger.warning("%s: parse failed for choice — %s (raw dumped to %s)",
+                             node_name, e, dumped)
                 continue
         return None
 
@@ -457,11 +582,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
             {"role": "user", "content": json.dumps(payload)},
         ]
 
-        result = await self.client.chat_completion(
-            model=self.model,
-            messages=messages,
-            **self.model_kwargs,
-        )
+        result = await self._chat_completion(messages)
         parsed = self._parse_llm_response(result, self.response_model, self.__class__.__name__)
 
         if parsed is None:
@@ -596,11 +717,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
                 self._get_cache_node_name(state), self._get_cache_entity_id(state)
             )
 
-        result = await self.client.chat_completion(
-            model=self.model,
-            messages=messages,
-            **self.model_kwargs,
-        )
+        result = await self._chat_completion(messages)
         usage = getattr(result, "usage", None)
         prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
         completion_tokens = getattr(usage, "completion_tokens", 0) or 0
