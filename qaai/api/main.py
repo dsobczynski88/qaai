@@ -208,10 +208,24 @@ def create_app() -> FastAPI:
     if docs_dir.is_dir():
         app.mount("/guide", StaticFiles(directory=str(docs_dir), html=True), name="guide")
 
-    # Must be mounted AFTER the API router so API routes take precedence.
-    static_dir = os.path.join(os.path.dirname(__file__), "static")
-    os.makedirs(static_dir, exist_ok=True)
-    app.mount("/", NoCacheStaticFiles(directory=static_dir, html=True), name="static")
+    # Serve the built Vue SPA (qaai/web/dist) at "/". Must be mounted AFTER the API
+    # router so /api/v1/* routes take precedence. During migration (or before the
+    # SPA has been built) fall back to the legacy static/ dir so Python-only dev and
+    # existing deployments keep working. Hash-mode routing in the SPA means no
+    # server-side SPA fallback is required.
+    web_dist = Path(__file__).resolve().parents[1] / "web" / "dist"
+    legacy_static = Path(__file__).resolve().parent / "static"
+    if web_dist.is_dir():
+        ui_dir = str(web_dist)
+    else:
+        ui_dir = str(legacy_static)
+        logger.warning(
+            "Vue SPA build not found at %s — serving legacy static UI. "
+            "Run `npm install && npm run build` in qaai/web.",
+            web_dist,
+        )
+    os.makedirs(ui_dir, exist_ok=True)
+    app.mount("/", NoCacheStaticFiles(directory=ui_dir, html=True), name="static")
 
     logger.info("QAAI API created (environment: %s)", environment)
     return app

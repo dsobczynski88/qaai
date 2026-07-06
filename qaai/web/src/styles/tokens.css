@@ -1,0 +1,17 @@
+/* Design tokens — ported verbatim from the original static/style.css :root block.
+   The QAAI dark "terminal/console" theme: near-black surfaces, amber accent,
+   JetBrains Mono / Syne type. Kept global so every component can reference them. */
+:root {
+  --bg: #070a0e;
+  --surface: #0e1219;
+  --border: #1c2330;
+  --amber: #e8930a;
+  --amber-dim: #7a4d05;
+  --green: #2cb67d;
+  --red: #c0392b;
+  --blue: #3b82f6;
+  --text: #d8dfe8;
+  --muted: #5a6478;
+  --mono: "JetBrains Mono", monospace;
+  --display: "Syne", sans-serif;
+}

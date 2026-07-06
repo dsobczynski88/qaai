@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QAAI · Frontend (Vue 3) &amp; RBAC</title>
+<style>
+  :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
+    --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--bad:#b22;--maxw:860px}
+  @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;
+    --line:#222a33;--accent:#6ea8ff;--code-bg:#161b22;--sidebar:#11161c;--ok:#5bd07e;--warn:#e3b341;--bad:#ff7b72}}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .layout{display:grid;grid-template-columns:266px 1fr;min-height:100vh}
+  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:24px 18px;background:var(--sidebar);border-right:1px solid var(--line);font-size:14px}
+  nav.toc strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
+  nav.toc a{display:block;color:var(--mute);text-decoration:none;padding:3px 0}
+  nav.toc a:hover,nav.toc a.active{color:var(--accent)}
+  main{max-width:var(--maxw);padding:32px 30px 90px;margin:0 auto;width:100%}
+  header.doc{border-bottom:1px solid var(--line);margin-bottom:8px;padding-bottom:12px}
+  header.doc .meta{color:var(--mute);font-size:13px}
+  h1,h2,h3{line-height:1.25;scroll-margin-top:14px}
+  h2{margin-top:40px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{margin-top:26px}
+  a{color:var(--accent)}
+  code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
+  pre code{background:none;padding:0}
+  pre.diagram{line-height:1.35}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--code-bg)}
+  .src{color:var(--mute);font:12px ui-monospace,monospace}
+  .pill{display:inline-block;font:12px ui-monospace,monospace;padding:1px 7px;border-radius:999px;border:1px solid var(--line)}
+  .get{color:var(--ok)}.post{color:var(--accent)}
+  .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
+  .note.warn{border-left-color:var(--warn)}
+  figure{margin:18px 0}
+  figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+  figure figcaption{color:var(--mute);font-size:13px;margin-top:6px}
+  footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
+  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}}
+  @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Table of contents">
+  <strong>Frontend &amp; RBAC</strong>
+  <a href="#overview">Overview</a>
+  <a href="#layout">SPA layout &amp; build</a>
+  <a href="#job-flow">Async job engine</a>
+  <a href="#client">API client &amp; proxy base</a>
+  <a href="#rbac">RBAC model</a>
+  <a href="#identity">Identity endpoint</a>
+  <a href="#serving">FastAPI serving</a>
+  <a href="#followup">Backend &amp; AWS follow-up</a>
+  <strong style="margin-top:16px">More docs</strong>
+  <a href="../index.html">← Docs home</a>
+  <a href="../api.html">API guide</a>
+  <a href="../configuration.html">Configuration</a>
+  <a href="agents.html">Reviewer agents (design)</a>
+</nav>
+<main>
+<header class="doc">
+  <h1>Frontend (Vue 3) &amp; Role-Based Access</h1>
+  <div class="meta">QAAI (qaai) · Vue 3 frontend &amp; RBAC · generated from the codebase 2026-07-06</div>
+</header>
+
+<h2 id="overview">Overview</h2>
+<p>The interactive reviewer UI is a <strong>Vue 3 + Vite single-page app</strong> under
+<code>qaai/web/</code>, built to <code>qaai/web/dist/</code> and served by FastAPI at
+<code>/</code>. It replaces the former vanilla <code>qaai/api/static/</code> page (kept
+as a build-less fallback) and adds a <strong>role-based access-control</strong> layer.
+<span class="src">qaai/api/main.py:216-228</span></p>
+<p>The backend endpoint contract and request payload field names are preserved exactly —
+only the UI and the static mount changed. Two behaviours were ported verbatim: the
+proxy base-path detection and the async job engine (below).</p>
+<table>
+<thead><tr><th>Concern</th><th>Choice</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td>Framework</td><td>Vue 3 (SFC, <code>&lt;script setup&gt;</code>)</td><td><code>qaai/web/src/*.vue</code></td></tr>
+<tr><td>Build</td><td>Vite (<code>base: "./"</code>)</td><td><span class="src">qaai/web/vite.config.ts:10</span></td></tr>
+<tr><td>Routing</td><td>Vue Router, <strong>hash mode</strong></td><td><span class="src">qaai/web/src/router/index.ts:26</span></td></tr>
+<tr><td>State</td><td>Pinia stores (<code>auth</code>, <code>job</code>)</td><td><code>qaai/web/src/stores/</code></td></tr>
+<tr><td>Roles</td><td>admin / reviewer / viewer</td><td><span class="src">qaai/web/src/constants.ts:14</span> · <span class="src">qaai/core/config.py:22</span></td></tr>
+</tbody></table>
+<div class="note"><strong>Scope.</strong> This work is the Vue conversion plus RBAC
+<em>scaffolding</em> — the identity read seam and client-side gating. Server-side
+enforcement of roles on the review endpoints is a documented follow-up (see
+<a href="#followup">Backend &amp; AWS follow-up</a>).</div>
+
+<h2 id="layout">SPA layout &amp; build</h2>
+<p>Source lives under <code>qaai/web/src/</code>; a production build lands in
+<code>qaai/web/dist/</code>, which is what FastAPI mounts.</p>
+<pre><code>qaai/web/
+  package.json         vite · vue · vue-router · pinia
+  vite.config.ts       base:'./' · dev proxy → :8000
+  index.html           mounts #app
+  src/
+    main.ts            createApp + pinia + router + global styles
+    App.vue            shell: AppHeader / &lt;router-view&gt; / AppFooter
+    router/index.ts    hash router + role guard
+    api/{client,reviews}.ts
+    stores/{auth,job}.ts
+    constants.ts  types.ts
+    views/{ReviewHome,Unauthorized}.vue
+    components/  ReviewerSelector, ReviewerCard, forms/*, controls/*, status/*
+    styles/{tokens,base,forms}.css
+  dist/                built output → served by FastAPI</code></pre>
+<p><code>base: "./"</code> makes every built asset URL <strong>relative</strong> to
+<code>index.html</code>, so the SPA works under any proxy prefix (local <code>/</code>,
+JupyterHub <code>/user/x/proxy/8000/</code>, or an AWS ALB path) without hardcoding it.
+<span class="src">qaai/web/vite.config.ts:5-10</span></p>
+<p>Build once, then start the API:</p>
+<pre><code>cd qaai/web
+npm install
+npm run build          # → qaai/web/dist
+uv run uvicorn qaai.api.main:app --reload</code></pre>
+<p>For UI development with hot reload, run the Vite dev server alongside the API; it
+proxies backend paths to port 8000:</p>
+<pre><code>npm run dev            # http://localhost:5173  (proxies /api → :8000)</code></pre>
+<p><span class="src">qaai/web/vite.config.ts:22-27</span> · <code>npm run typecheck</code>
+runs <code>vue-tsc</code> (the <code>build</code> script transpiles via esbuild and does
+not type-check).</p>
+
+<h2 id="job-flow">Async job engine</h2>
+<p>Reviews run as background jobs so every HTTP request stays sub-second and the upstream
+proxy never idles out. The client submits, then polls a fast status endpoint and
+downloads the report when done — ported into the <code>job</code> Pinia store.
+<span class="src">qaai/web/src/stores/job.ts:101</span></p>
+<pre class="diagram"><code>POST /api/v1/{test-suite|test-case|hazard-risk}-review   → 202 { job_id }
+      │
+      ▼   every POLL_INTERVAL_MS (4000 ms), until MAX_POLL_MS (30 min)
+GET  /api/v1/jobs/{job_id}          → { status, total, done, succeeded, failed,
+      │                                  eta_seconds, messages[] }
+      │  status == "completed"
+      ▼
+GET  /api/v1/jobs/{job_id}/result   → HTML report (Blob)  → Download Report
+      ▲
+      └── POST /api/v1/jobs/{job_id}/cancel                (Stop Run)</code></pre>
+<p><span class="src">qaai/web/src/constants.ts:7-8</span> defines
+<code>POLL_INTERVAL_MS = 4000</code> and <code>MAX_POLL_MS = 30 * 60 * 1000</code>.
+The store exposes reactive <code>phase</code> (<code>idle | loading | done | error</code>),
+progress counts, the result object URL, and the error string; the status components bind
+to these instead of mutating the DOM.</p>
+<p>The old global <code>pollToken</code> is replaced by a monotonic
+<strong>generation counter plus an <code>AbortController</code></strong>:
+<code>bumpGeneration()</code> increments the token and aborts the in-flight fetch, so a
+superseded poll loop returns quietly. Switching reviewers calls
+<code>cancelSilently()</code>; <strong>Stop Run</strong> calls <code>stop()</code>, which
+cancels the job server-side.
+<span class="src">qaai/web/src/stores/job.ts:86</span>
+<span class="src">qaai/web/src/stores/job.ts:95</span>
+<span class="src">qaai/web/src/stores/job.ts:166</span></p>
+
+<h2 id="client">API client &amp; proxy base</h2>
+<p>All requests flow through one client module. <code>detectRootPath()</code> is ported
+verbatim from the original static UI: it derives the JupyterHub/VSCode proxy prefix from
+<code>window.location.pathname</code> (or <code>""</code> for local/direct access), and
+every request is prefixed with the resulting <code>ROOT_PATH</code>.
+<span class="src">qaai/web/src/api/client.ts:12</span>
+<span class="src">qaai/web/src/api/client.ts:24</span></p>
+<table>
+<thead><tr><th>Export</th><th>Role</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td><code>apiFetch(path, opts)</code></td><td><code>fetch()</code> that prefixes <code>ROOT_PATH</code> and injects auth headers</td><td><span class="src">qaai/web/src/api/client.ts:46</span></td></tr>
+<tr><td><code>authHeaders()</code></td><td>auth-header seam — empty for ALB/OIDC (cookie is sent same-origin); the single place to add a Bearer token if swapped to Cognito</td><td><span class="src">qaai/web/src/api/client.ts:41</span></td></tr>
+<tr><td><code>parseErr(resp)</code></td><td>uniform <code>"status: detail"</code> error extraction</td><td><span class="src">qaai/web/src/api/client.ts:52</span></td></tr>
+</tbody></table>
+<div class="note"><strong>Runtime base vs asset base.</strong> Built <em>assets</em> load
+via Vite's relative <code>base: "./"</code>; runtime <em>API calls</em> are prefixed
+separately by <code>detectRootPath()</code>. The two mechanisms together keep the SPA
+portable across proxy prefixes.</div>
+
+<h2 id="rbac">RBAC model</h2>
+<p>Three roles gate UI actions. The role → action map lives in the SPA and is mirrored on
+the backend so both sides agree on the role vocabulary.
+<span class="src">qaai/web/src/constants.ts:14</span>
+<span class="src">qaai/core/config.py:22</span></p>
+<table>
+<thead><tr><th>Role</th><th><code>run_review</code></th><th><code>upload_feedback</code></th><th><code>manage</code></th></tr></thead>
+<tbody>
+<tr><td><code>admin</code></td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td><code>reviewer</code></td><td>✓</td><td>✓</td><td>—</td></tr>
+<tr><td><code>viewer</code></td><td>—</td><td>—</td><td>—</td></tr>
+</tbody></table>
+<p>The <code>auth</code> store loads identity once via <code>GET /api/v1/me</code> and
+exposes <code>hasRole()</code> / <code>can(permission)</code>, the latter resolving
+against <code>ROLE_PERMISSIONS</code>.
+<span class="src">qaai/web/src/stores/auth.ts:33</span>
+<span class="src">qaai/web/src/stores/auth.ts:28</span></p>
+<p>Gating is applied in two places:</p>
+<ul>
+<li><strong>Route guard</strong> — <code>router.beforeEach</code> ensures identity is
+loaded, then redirects to the <code>unauthorized</code> route when a route
+<code>requiresAuth</code> and the user is unauthenticated, or lacks a required role.
+<span class="src">qaai/web/src/router/index.ts:32-41</span></li>
+<li><strong>Role-gated components</strong> — <code>SubmitButton</code> disables (with an
+explanatory note) unless <code>can("run_review")</code>; <code>FeedbackUpload</code> is
+hidden unless <code>can("upload_feedback")</code>.
+<span class="src">qaai/web/src/components/controls/SubmitButton.vue</span></li>
+</ul>
+<div class="note warn"><strong>Frontend RBAC is UX only, not security.</strong> Route
+guards and disabled buttons stop honest users, not the API — a determined client can
+still call the review endpoints directly. Real enforcement (per-route role dependencies
+and OIDC signature verification) is the follow-up phase below. This matters in the
+regulated (IEC 62304) context.</div>
+
+<h2 id="identity">Identity endpoint</h2>
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Returns</th></tr></thead>
+<tbody>
+<tr><td><span class="pill get">GET</span></td><td><code>/api/v1/me</code></td><td><code>{ "user": {id,name,email} | null, "roles": [...] }</code></td></tr>
+</tbody></table>
+<p>The route delegates to <code>resolve_identity(request)</code>. It is
+<strong>identity-read only</strong> and does not gate the review endpoints.
+<span class="src">qaai/api/routes.py:53-62</span>
+<span class="src">qaai/api/identity.py:78</span></p>
+<p>Resolution order:</p>
+<ol>
+<li><strong>ALB / OIDC header</strong> — in the target AWS deployment an ALB with an OIDC
+listener authenticates at the edge and injects a signed JWT in
+<code>x-amzn-oidc-data</code>. The resolver decodes the JWT <em>payload</em> and maps the
+caller's SSO groups to QAAI roles.
+<span class="src">qaai/api/identity.py:30</span>
+<span class="src">qaai/api/identity.py:38</span>
+<span class="src">qaai/api/identity.py:54</span></li>
+<li><strong>Dev fallback</strong> — when no header is present <em>and</em>
+<code>APP_ENV=DEV</code>, a configurable dev identity is returned; otherwise it fails
+closed to <code>{user: null, roles: []}</code> so a misconfigured production deploy shows
+"Access denied" rather than silently granting access.
+<span class="src">qaai/api/identity.py:94</span></li>
+</ol>
+<div class="note warn"><strong>Signature not verified (yet).</strong> The resolver decodes
+the OIDC payload but does <em>not</em> verify its signature against the ALB public key —
+that verification, and enforcing roles on the review routes, is the follow-up phase.
+<span class="src">qaai/api/identity.py:38-52</span></div>
+<p>Group→role mapping uses an explicit configured map, with a name-substring fallback (a
+group whose name contains <code>admin</code>/<code>reviewer</code>/<code>viewer</code>).
+Configuration:</p>
+<table>
+<thead><tr><th>Env var</th><th>Purpose</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td><code>QAAI_DEV_ROLES</code></td><td>DEV-only fallback roles (comma-separated), default <code>admin</code></td><td><span class="src">qaai/core/config.py:208</span></td></tr>
+<tr><td><code>QAAI_DEV_USER</code> / <code>QAAI_DEV_EMAIL</code></td><td>DEV fallback display identity</td><td><span class="src">qaai/core/config.py:206</span></td></tr>
+<tr><td><code>QAAI_OIDC_ROLE_MAP</code></td><td>JSON map of SSO group → role, e.g. <code>{"qaai-admins":"admin"}</code></td><td><span class="src">qaai/core/config.py:211</span></td></tr>
+<tr><td><code>APP_ENV</code></td><td><code>DEV</code> enables the dev fallback; <code>TEST</code>/<code>PROD</code> require the edge header</td><td><span class="src">qaai/core/config.py:130</span></td></tr>
+</tbody></table>
+<p>The parsed helpers <code>settings.dev_roles_list</code> and
+<code>settings.oidc_role_map</code> validate values against <code>VALID_ROLES</code>.
+<span class="src">qaai/core/config.py:233</span>
+<span class="src">qaai/core/config.py:242</span></p>
+<p>To exercise gating locally, set <code>QAAI_DEV_ROLES=viewer</code> (run buttons disable)
+or <code>reviewer</code> / <code>admin</code>.</p>
+
+<h2 id="serving">FastAPI serving</h2>
+<p><code>create_app()</code> mounts the built SPA at <code>/</code> after the API router
+(so <code>/api/v1/*</code> wins), using <code>NoCacheStaticFiles</code>. If
+<code>qaai/web/dist</code> is absent it falls back to the legacy
+<code>qaai/api/static/</code> UI and logs a warning, so Python-only workflows and existing
+deploys keep working mid-migration.
+<span class="src">qaai/api/main.py:216-228</span></p>
+<pre><code>web_dist = Path(__file__).resolve().parents[1] / "web" / "dist"
+legacy_static = Path(__file__).resolve().parent / "static"
+ui_dir = str(web_dist) if web_dist.is_dir() else str(legacy_static)
+app.mount("/", NoCacheStaticFiles(directory=ui_dir, html=True), name="static")</code></pre>
+<p>Hash-mode routing keeps every route in the URL fragment, so unknown paths never reach
+the server — <strong>no SPA fallback route is required</strong>, and deep links work under
+any proxy prefix. <span class="src">qaai/web/src/router/index.ts:26</span></p>
+
+<h2 id="followup">Backend &amp; AWS follow-up</h2>
+<div class="note warn"><strong>Planned — not yet implemented.</strong> The items below are
+the documented next phase (per <code>qaai/web/README.md</code> and the plan); no code for
+them exists in the repo yet. <span class="src">qaai/web/README.md</span></div>
+<ul>
+<li><strong>Backend enforcement.</strong> A FastAPI dependency that <em>verifies</em> the
+ALB OIDC JWT signature against the ALB public key (by <code>kid</code>), extracts SSO
+groups, and a <code>require_role(...)</code> dependency on the review / feedback routes.</li>
+<li><strong>Credentialed CORS revisit.</strong> Today CORS middleware is only added when
+<code>ALLOWED_ORIGINS</code> is set to explicit origins (with
+<code>allow_credentials=True</code>); the default <code>"*"</code> adds no CORS middleware.
+Credentialed CORS cannot use <code>"*"</code>, so this must be revisited when cookie/token
+auth is enforced. <span class="src">qaai/api/main.py:191-199</span></li>
+<li><strong>AWS infrastructure.</strong> ALB + OIDC listener (Cognito or corporate IdP),
+an ECS/Fargate task, and a Dockerfile that runs <code>npm run build</code> then serves via
+uvicorn/gunicorn. Reuse the existing secret loader (<code>qaai/core/secrets.py</code>,
+<code>APP_ENV</code>). <span class="src">qaai/core/secrets.py</span></li>
+</ul>
+<div class="note warn"><strong>Run a single worker.</strong> The job registry is an
+in-memory <code>JobManager</code>, so the API must run with a single worker; horizontal
+scaling on ECS would need a shared job store. <span class="src">qaai/api/jobs.py</span></div>
+
+<footer class="doc">Generated from the QAAI codebase on 2026-07-06.</footer>
+</main>
+</div>
+<script>
+  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
+  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
+    links.forEach(l=>l.classList.remove('active'));
+    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
+    {rootMargin:'-10% 0px -80% 0px'});
+  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>
