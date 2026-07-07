@@ -65,7 +65,7 @@
 <main>
 <header class="doc">
   <h1>Hazard Risk Reviewer</h1>
-  <div class="meta">QAAI (qaai) · <code>qaai.agents.hazard_risk_reviewer</code> · endpoint <code>POST /api/v1/hazard-risk-review</code> · generated from the codebase 2026-06-14</div>
+  <div class="meta">QAAI (qaai) · <code>qaai.agents.hazard_risk_reviewer</code> · endpoint <code>POST /api/v1/hazard-risk-review</code> · generated from the codebase 2026-07-06</div>
 </header>
 
 <h2 id="purpose">What it checks &amp; how</h2>
@@ -89,27 +89,32 @@ SHA Excel file into one <code>HazardRowWithTraceMatrix</code> per row:</p>
 <tbody>
 <tr><td><code>hazard</code></td><td><code>HazardRowWithTraceMatrix</code></td><td>Yes</td><td>The SHA row (hazard, hazardous situation, causes, pre/post-mitigation risk, controls) plus its trace matrix. <code>hazard_id</code> is the cache partition.</td></tr>
 <tr><td>&nbsp;↳ <code>requirements_traceability</code></td><td><code>HazardTraceMatrix</code></td><td>—</td><td>Traced <code>requirements</code>, <code>test_cases</code>, <code>design_docs</code>, <code>user_needs</code>, <code>system_requirements</code>.</td></tr>
-<tr><td><code>cache_mode</code></td><td><code>"off" | "partial" | "full"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>partial</code>.</td></tr>
+<tr><td><code>cache_mode</code></td><td><code>"off" | "on" | "test"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>on</code> (legacy <code>partial</code>→<code>on</code>, <code>full</code>→<code>test</code> still accepted).</td></tr>
 <tr><td><code>pyjama_request</code></td><td><code>PyJamaRequest</code></td><td>Optional</td><td>When present, a JAMA <code>bidirectional_trace</code> fetch merges traceability onto the row; absent → Excel-only.</td></tr>
 </tbody></table>
 <p>API form fields: <code>project_name</code>, the <code>.xlsx</code> file,
-<code>sheet_name</code> (default <code>SHA Table</code>), <code>use_cache</code>,
+<code>sheet_name</code> (default <code>SHA Table</code>),
+<code>identifier_pattern</code> (default <code>GID-\d+</code>; passed to the loader as
+<code>extract_gids_format</code>), <code>cache_mode</code>, <code>use_cache</code>,
 <code>test_mode</code>, and <code>include_edge_case_analysis</code>.</p>
 
 <h2 id="graph">Graph topology</h2>
 <figure>
   <img src="img/hazard_risk_reviewer.png" alt="Hazard Risk Reviewer LangGraph diagram" width="1098" height="829" loading="lazy">
-  <figcaption>Compiled <code>HazardReviewerRunnable</code> graph (rendered from the live pipeline). H1/H2/H3/R7 run early; H4/H5 after the requirement reviews; H6 after H4/H5; the final assessor joins all seven.</figcaption>
+  <figcaption>Compiled <code>HazardReviewerRunnable</code> graph. H1/R7 run early; H2/H3 dispatch off the design summarizer; H4/H5 after the requirement reviews + summaries; H6 after H4/H5; the final assessor joins all seven. <em>The ASCII below is authoritative; the rendered PNG is regenerated separately (follow-up).</em></figcaption>
 </figure>
 <pre class="diagram"><code>START
-  -> data_integration -> transform
-       |-- dispatch_hazard_evaluators_early --> [ h1 | h2 | h3 | r7 ]   (parallel, immediate)
+  -> data_integration -> transform -> validation_gate   (skip -> END when required SHA fields are missing)
+  -> work_router
+       |-- dispatch_hazard_evaluators_early --> [ h1 | r7 ]          (need only hazard fields)
        |-- dispatch_requirement_reviews -- Send xN --> requirement_reviewer  (each runs the RTM subgraph)
-       |-- design_summarizer                                            (parallel)
-       |-- needs_summarizer                                             (parallel)
-                 \--> late_evaluator_router (joins req-reviews + summarizers)
-                          -- dispatch_hazard_evaluators_late --> [ h4 | h5 ]  (parallel)
-                                   \--> h6_evaluator   (waits for h4 + h5; H3 finding arrives via reducer)
+       |-- design_summarizer                                        (parallel)
+       |-- needs_summarizer                                         (parallel)
+  design_summarizer -- dispatch_hazard_evaluators_design --> [ h2 | h3 ]   (consume summarized_designs)
+  [ requirement_reviewer | design_summarizer | needs_summarizer ]
+       \--> late_evaluator_router
+                -- dispatch_hazard_evaluators_late --> [ h4 | h5 ]  (parallel)
+                         \--> h6_evaluator   (waits for h4 + h5; H3 finding arrives via reducer)
   -> final_assessment   (joins h1, h2, h6, r7; H3/H4/H5 already reduced)  -> END</code></pre>
 <p>Findings accumulate into <code>hazard_findings</code> via an
 <code>Annotated[List[HazardFinding], operator.add]</code> reducer; per-requirement
@@ -118,14 +123,19 @@ RTM results accumulate into <code>requirement_reviews</code> the same way.
 
 <h2 id="staging">Why the graph is staged by data dependency</h2>
 <ul>
-<li><strong>H1, H2, H3, R7</strong> only read hazard fields, so they fire
-immediately from <code>transform</code>, in parallel with the requirement reviews.</li>
+<li><strong>H1, R7</strong> only read hazard fields, so they fire immediately from
+<code>work_router</code>, in parallel with the requirement reviews and summarizers.</li>
+<li><strong>H2 (software contribution)</strong> and <strong>H3 (pre-mitigation risk)</strong>
+reason over the summarized design controls, so they dispatch off
+<code>design_summarizer</code> once it completes — not from <code>work_router</code>.</li>
 <li><strong>H4 (risk-control coverage)</strong> and <strong>H5 (verification
 depth)</strong> need the per-requirement RTM results <em>and</em> the design/needs
-summaries, so they wait behind <code>late_evaluator_router</code>.</li>
+summaries, so they wait behind <code>late_evaluator_router</code> (which joins
+<code>requirement_reviewer</code> + both summarizers).</li>
 <li><strong>H6 (residual-risk closure)</strong> depends on H3, H4, H5. It is wired
-only behind H4+H5 (same superstep); H3's finding is already in the reducer by then,
-so no direct H3→H6 edge is needed (one would fire H6 a superstep early).</li>
+only behind H4+H5 (same superstep); H3's finding is already in the reducer by then
+(H3 runs no later than <code>late_evaluator_router</code>), so no direct H3→H6 edge is
+needed (one would fire H6 a superstep early).</li>
 <li><strong>final_assessment</strong> waits for all seven findings.</li>
 </ul>
 
@@ -201,7 +211,7 @@ at startup and selected per request.</div>
 <code>outputs.jsonl</code>, one record per hazard row, showing the H1–H6 + R7 rubric,
 the per-requirement RTM reviews, and the deterministic overall verdict.</p>
 
-<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-06-14.</footer>
+<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-07-06.</footer>
 </main>
 </div>
 <script>

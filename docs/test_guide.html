@@ -60,7 +60,7 @@
 <main>
 <header class="doc">
   <h1>Test Guide</h1>
-  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-18</div>
+  <div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
 </header>
 
 <p>This guide covers how to set up, install, and run the test suites under
@@ -171,18 +171,20 @@ instead of crashing. Bad-input data fixtures live in conftest
 test assert hit/miss by inspecting <code>chat_completion.call_count</code>
 <span class="src">tests/unit/test_review_cache.py:34-46</span>. It covers, in five groups:</p>
 <ul>
-<li><strong>ReviewCacheManager</strong> — one-folder-per-entity disk layout
-(<code>{cache_dir}/{entity_id}/{node}_{version}.json</code>), version-bump-is-a-miss,
+<li><strong>ReviewCacheManager</strong> — one-folder-per-entity, append-only disk layout
+(<code>{cache_dir}/{entity_id}/{node}_{version}_{timestamp}.json</code>, newest wins),
+version-bump-is-a-miss,
 prompt-set namespacing (per-set subfolders that never alias), scoped/whole-entity
 <code>purge_entity</code>, entity/node-name sanitization, Redis-absent disk-only mode, a
 relative <code>CACHE_DIR</code> anchored to <code>PROJECT_ROOT</code> (the phantom-MISS regression
 guard), legacy meta-less files still reading as a HIT, and
 <code>extract_prompt_version</code> <span class="src">tests/unit/test_review_cache.py:93-257</span></li>
 <li><strong>Base-node gating</strong> — <code>on</code> caches interim nodes but always
-re-runs a <code>is_final_output</code> node; <code>test</code> reuses the final node too;
-<code>off</code> neither reads nor writes; missing <code>cache_mode</code> defaults to
-<code>on</code>; <code>cache_manager=None</code> disables caching
-<span class="src">tests/unit/test_review_cache.py:265-329</span></li>
+re-runs a <code>is_final_output</code> node; <code>test</code> reads the final node too and
+raises <code>CacheRequiredError</code> on a miss; <code>off</code> <strong>writes a new
+timestamped file but never reads</strong> (so it re-runs); missing <code>cache_mode</code>
+defaults to <code>on</code>; <code>cache_manager=None</code> disables caching
+<span class="src">tests/unit/test_review_cache.py:311-388</span></li>
 <li><strong>Per-spec evaluators</strong> — RTM/TC single-spec nodes write distinct files per
 <code>spec_id</code>, hit cache on rerun, and the RTM payload carries
 <code>summarized_designs</code> (or null) <span class="src">tests/unit/test_review_cache.py:354-436</span></li>
@@ -227,7 +229,7 @@ describes the <em>result download</em>, not the initial <code>POST</code>.</div>
 <tr><td><code>test_test_suite_reviewer.py</code></td><td><code>test_test_suite_review_happy_path</code> <span class="pill">@integration</span> + 422 cases (missing / null / invalid JSON)</td><td>submit → poll → result is 200 <code>text/html</code></td></tr>
 <tr><td><code>test_test_case_reviewer.py</code></td><td><code>test_tc_review_happy_path</code> <span class="pill">@integration</span> + 422 cases</td><td>same async flow for the TC endpoint</td></tr>
 <tr><td><code>test_hazard_risk_reviewer.py</code></td><td>happy path <span class="pill">@integration, skipped</span>; missing file / missing project → 422; non-Excel upload → 400</td><td>multipart upload validation</td></tr>
-<tr><td><code>test_cache_toggle.py</code></td><td><code>use_cache</code> / explicit <code>cache_mode</code> / <code>test_mode</code> / <code>include_edge_case_analysis</code> mapping (services stubbed)</td><td><code>use_cache=false</code>→<code>off</code>, default→<code>partial</code>; explicit <code>cache_mode</code> forwarded verbatim and wins over <code>use_cache</code>; edge-case toggle → <code>v4</code> else <code>v3</code>; <code>_select()</code> falls back to baseline for unknown sets</td></tr>
+<tr><td><code>test_cache_toggle.py</code></td><td><code>use_cache</code> / explicit <code>cache_mode</code> / <code>test_mode</code> / <code>include_edge_case_analysis</code> mapping (services stubbed)</td><td><code>use_cache=false</code>→<code>off</code>, default→<code>on</code>; explicit <code>cache_mode</code> forwarded verbatim (legacy <code>partial</code>/<code>full</code>→<code>on</code>/<code>test</code>) and wins over <code>use_cache</code>; edge-case toggle → <code>v4</code> else <code>v3</code>; <code>_select()</code> falls back to baseline for unknown sets</td></tr>
 <tr><td><code>test_batch_review_gating.py</code></td><td>success-gating &amp; live-progress in <code>_run_batch_review</code> (stub graph + fake cache)</td><td>clean item kept; errored / incomplete entities purged (scoped to the run's prompt set); one bad item no longer aborts the batch (all-failing → <code>ValueError</code>); <code>Job</code> progress counters + problems-only run log shared with the viewer</td></tr>
 </tbody></table>
 <pre><code>uv run pytest tests/api/v1/test_cache_toggle.py -v
@@ -361,7 +363,7 @@ Per session, under <code>logs/tests/run-&lt;timestamp&gt;/</code>
 <li><code>hazard_pipeline_state.json</code> — full hazard graph state (hazard test only)</li>
 </ul>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-06-18. · <a href="index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-07-06. · <a href="index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

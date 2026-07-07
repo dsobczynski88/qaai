@@ -64,7 +64,7 @@
 <main>
 <header class="doc">
   <h1>Test Case Reviewer</h1>
-  <div class="meta">QAAI (qaai) · <code>qaai.agents.test_case_reviewer</code> · endpoint <code>POST /api/v1/test-case-review</code> · generated from the codebase 2026-06-14</div>
+  <div class="meta">QAAI (qaai) · <code>qaai.agents.test_case_reviewer</code> · endpoint <code>POST /api/v1/test-case-review</code> · generated from the codebase 2026-07-06</div>
 </header>
 
 <h2 id="purpose">What it checks &amp; how</h2>
@@ -175,17 +175,23 @@ the verdict.</p>
 
 <h2 id="cache">Caching</h2>
 <p>Interim nodes use the shared <code>ReviewCacheManager</code>, partitioned by
-<code>test_id</code> (<code>TEST-*</code> folders). Under <code>partial</code>,
-interim nodes are cached and the aggregator always re-runs for a fresh result.
-The Test Case Reviewer uses the default prompt configuration and is
-<strong>not</strong> affected by the "Include Edge Case Analysis" toggle.</p>
+<code>test_id</code> (<code>TEST-*</code> folders). Under <code>on</code> (the default),
+interim nodes are reused from cache and the aggregator always re-runs for a fresh result.
+The Test Case Reviewer is <strong>not</strong> affected by the "Include Edge Case Analysis"
+toggle.</p>
+<div class="note"><strong>Decomposition toggle &amp; prompt sets.</strong> The API field
+<code>include_decomposition_analysis</code> (default <strong>ON</strong>) selects the mode and
+its prompt set: ON → decomposition mode, <code>test_case_reviewer_v2</code> (aggregator
+<code>single_test_aggregator</code>&nbsp;v8, coverage <code>single_test_coverage_eval</code>&nbsp;v3);
+OFF → no-decomposition mode, <code>test_case_reviewer_v3</code> (aggregator&nbsp;v9, coverage&nbsp;v4).
+The logical and prereqs prompts are shared by both sets.</div>
 
 <h2 id="output">Output</h2>
 <p>The endpoint returns a self-contained HTML viewer rendered from
 <code>outputs.jsonl</code>, one record per test case, showing the 5-objective
 checklist, the per-spec coverage, and the logical/prereqs analyses.</p>
 
-<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-06-14.</footer>
+<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-07-06.</footer>
 </main>
 </div>
 <script>

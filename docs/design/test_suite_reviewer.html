@@ -63,7 +63,7 @@
 <main>
 <header class="doc">
   <h1>Test Suite Reviewer (RTM)</h1>
-  <div class="meta">QAAI (qaai) · <code>qaai.agents.test_suite_reviewer</code> · endpoint <code>POST /api/v1/test-suite-review</code> · generated from the codebase 2026-06-14</div>
+  <div class="meta">QAAI (qaai) · <code>qaai.agents.test_suite_reviewer</code> · endpoint <code>POST /api/v1/test-suite-review</code> · generated from the codebase 2026-07-06</div>
 </header>
 
 <h2 id="purpose">What it checks &amp; how</h2>
@@ -94,7 +94,7 @@ findings, comments, and clarification questions.</li>
 <tr><td><code>requirement</code></td><td><code>Requirement</code> (<code>req_id</code> + <code>text</code>)</td><td>Yes</td><td>The single requirement under review; <code>req_id</code> is the cache partition.</td></tr>
 <tr><td><code>test_cases</code></td><td><code>List[TestCase]</code></td><td>Yes</td><td>Test cases traced to the requirement (id, description, setup, steps, expected results).</td></tr>
 <tr><td><code>design_docs</code></td><td><code>List[DesignDocument]</code></td><td>Optional</td><td>Design docs implementing the requirement; enables the R6 design-alignment lens.</td></tr>
-<tr><td><code>cache_mode</code></td><td><code>"off" | "partial" | "full"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>partial</code>.</td></tr>
+<tr><td><code>cache_mode</code></td><td><code>"off" | "on" | "test"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>on</code> (legacy <code>partial</code>→<code>on</code>, <code>full</code>→<code>test</code> still accepted).</td></tr>
 </tbody></table>
 <p>Via the API, these arrive from a JAMA baseline: the <code>data_integration</code>
 node fetches the baseline and <code>transform</code> maps each requirement + its
@@ -104,11 +104,12 @@ directly and both nodes are no-ops.</p>
 <h2 id="graph">Graph topology</h2>
 <figure>
   <img src="img/test_suite_reviewer.png" alt="Test Suite Reviewer LangGraph diagram" width="517" height="730" loading="lazy">
-  <figcaption>Compiled <code>RTMReviewerRunnable</code> graph (rendered from the live pipeline).</figcaption>
+  <figcaption>Compiled <code>RTMReviewerRunnable</code> graph. <em>The ASCII below is authoritative; the rendered PNG is regenerated separately (follow-up).</em></figcaption>
 </figure>
 <pre class="diagram"><code>START
   -> data_integration            (JAMA fetch, or no-op when data already in state)
   -> transform                   (JAMA rows -> graph state)
+  -> validation_gate             (skip the graph -> END when required inputs are missing)
   -> [ decomposer | summarizer | design_summarizer ]   (parallel)
   -> coverage_router             (join barrier)
   -> dispatch_coverage  --Send xN-->  spec_evaluator    (parallel, one per spec)
@@ -156,8 +157,8 @@ The assessment also carries up-to-two-sentence <code>comments</code> and targete
 
 <h2 id="cache">Caching &amp; prompt sets</h2>
 <p>Every interim node opts into the shared write-through <code>ReviewCacheManager</code>
-(on disk), partitioned by <code>req_id</code>. Under <code>partial</code> (the
-default), interim nodes are cached but the final synthesizer always re-runs for a
+(on disk), partitioned by <code>req_id</code>. Under <code>on</code> (the
+default), interim nodes are reused from cache but the final synthesizer always re-runs for a
 fresh assessment.</p>
 <div class="note"><strong>Prompt sets &amp; the edge-case toggle.</strong> The API
 field <code>include_edge_case_analysis</code> selects the prompt set:
@@ -166,8 +167,8 @@ field <code>include_edge_case_analysis</code> selects the prompt set:
 sets share the same version for every other node, so the <strong>prompt-set name is
 folded into the cache key</strong>
 (<code>review:{req_id}:{set}:{node}:{version}</code>, disk
-<code>{cache_dir}/{req_id}/{set}/{node}_{version}.json</code>) to keep their results
-from aliasing. Each set is pre-compiled into its own graph at startup and selected
+<code>{cache_dir}/{req_id}/{set}/{node}_{version}_{timestamp}.json</code>) to keep their
+results from aliasing. Each set is pre-compiled into its own graph at startup and selected
 per request.</div>
 
 <h2 id="output">Output</h2>
@@ -175,7 +176,7 @@ per request.</div>
 rendered from <code>outputs.jsonl</code>, one record per requirement, showing the
 M1–M5 + R6 rubric, the decomposed specs, and the inlined test cases.</p>
 
-<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-06-14.</footer>
+<footer class="doc">Generated from the QAAI (qaai) codebase on 2026-07-06.</footer>
 </main>
 </div>
 <script>
