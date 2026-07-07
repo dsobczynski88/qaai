@@ -65,7 +65,7 @@
 <main>
 <header class="doc">
   <h1>Reviewer Agent Design</h1>
-  <div class="meta">QAAI (qaai-may23) · generated from the codebase 2026-06-08</div>
+  <div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
 </header>
 
 <h2 id="overview">Overview</h2>
@@ -97,10 +97,11 @@ four files:</p>
 <p>State: <code>RTMReviewState</code> with fan-in field
 <code>coverage_analysis: Annotated[List[EvaluatedSpec], operator.add]</code>
 <span class="src">test_suite_reviewer/core.py:241</span>. Built by
-<code>RTMReviewerRunnable.build()</code> <span class="src">test_suite_reviewer/pipeline.py:27-173</span>:</p>
+<code>RTMReviewerRunnable.build()</code> <span class="src">test_suite_reviewer/pipeline.py:73-181</span>:</p>
 <pre class="diagram"><code>START
   -> data_integration            (JAMA fetch, or no-op when data already in state)
   -> transform                   (JAMA rows -> graph state)
+  -> validation_gate             (skip the graph -> END when required inputs are missing)
   -> [ decomposer | summarizer | design_summarizer ]   (parallel)
   -> coverage_router             (join)
   -> dispatch_coverage  --Send xN-->  spec_evaluator    (parallel, one per decomposed spec)
@@ -111,7 +112,7 @@ four files:</p>
 <code>SynthesizerNode</code> (marked <code>is_final_output=True</code>) plus the shared
 <code>DecomposerNode</code>. <code>dispatch_coverage</code> fans out one <code>Send</code>
 per decomposed spec and copies <code>cache_mode</code> into each payload
-<span class="src">test_suite_reviewer/nodes.py:147-173</span>.</p>
+<span class="src">test_suite_reviewer/nodes.py:164-190</span>.</p>
 
 <h2 id="tc">Test Case Reviewer</h2>
 <p>State: <code>TCReviewState</code>; in decomposition mode the requirement axis fans
@@ -137,12 +138,15 @@ channels, while the logical and prereqs axes are single test-case-level nodes
 <code>requirement_reviews</code> and <code>hazard_findings</code> (both
 <code>operator.add</code>) <span class="src">hazard_risk_reviewer/core.py:408,411</span>.
 The graph is staged by data dependency
-<span class="src">hazard_risk_reviewer/pipeline.py:70-282</span>:</p>
-<pre class="diagram"><code>START -> data_integration -> transform
-  transform --Send--> [ h1 | h2 | h3 | r7 ]            (early evaluators)
-  transform --Send xN--> requirement_reviewer          (each runs the RTM SUBGRAPH)
-  transform -> design_summarizer ,  needs_summarizer
-        \\ (all of the above join) //
+<span class="src">hazard_risk_reviewer/pipeline.py:144-315</span>:</p>
+<pre class="diagram"><code>START -> data_integration -> transform -> validation_gate
+  validation_gate            (skip the graph -> END when required SHA fields are missing)
+  -> work_router             (fan-out hub for the early work)
+       |-- dispatch_early --Send--> [ h1 | r7 ]           (need only hazard fields)
+       |-- dispatch_reviews --Send xN--> requirement_reviewer   (each runs the RTM SUBGRAPH)
+       |-- design_summarizer , needs_summarizer
+  design_summarizer --Send--> [ h2 | h3 ]                (consume summarized_designs)
+  [ requirement_reviewer | design_summarizer | needs_summarizer ]
   -> late_evaluator_router
   -> dispatch_late --Send--> [ h4 | h5 ]
   -> h6                       (joins after H4/H5; H3 reaches it via the reducer)
@@ -153,14 +157,14 @@ The graph is staged by data dependency
 <code>RequirementReviewerNode</code> wraps a shared <code>RTMReviewerRunnable</code> and
 invokes <code>await self.rtm.graph.ainvoke(rtm_input)</code> for one requirement, caching
 the whole-subgraph result as one <code>req_id</code>-keyed blob
-<span class="src">hazard_risk_reviewer/nodes.py:241-360</span>.</p>
+<span class="src">hazard_risk_reviewer/nodes.py:313-446</span>.</p>
 
 <h2 id="nodes">Shared node engine</h2>
 <p>All nodes derive from base classes in
 <code>qaai/agents/shared/nodes.py</code>. <code>StandardLLMNode</code> is a
 <strong>Template Method</strong>: its <code>__call__</code> runs a fixed pipeline and
 subclasses fill in only the hooks
-<span class="src">shared/nodes.py:309-433</span>:</p>
+<span class="src">shared/nodes.py:547-613</span>:</p>
 <pre class="diagram"><code>__call__(state):
   _validate_state(state)         -> False ? return _get_skip_response()  (soft-fail)
   cache read (if allowed)        -> hit ? return _format_response(restored)
@@ -178,17 +182,20 @@ response rather than raising, so a missing upstream field shows up as a node tha
 
 <h2 id="cache">Cache manager system</h2>
 <p><code>ReviewCacheManager</code> is a write-through cache on disk, shared by all reviewers
-<span class="src">qaai/core/cache.py</span>: each per-node result is persisted as JSON at
-<code>{cache_dir}/{entity_id}/{node}_{prompt_version}.json</code>, keyed
-<code>review:{entity_id}:{node}:{prompt_version}</code>. See the
+<span class="src">qaai/core/cache.py</span>: each per-node result is persisted as an
+append-only, timestamped JSON file at
+<code>{cache_dir}/{entity_id}/[{prompt_set}/]{node}_{prompt_version}_{timestamp}.json</code>
+(reads select the newest), keyed
+<code>review:{entity_id}:[{prompt_set}:]{node}:{prompt_version}</code>. See the
 <a href="caching.html">Caching design doc</a> for the full layout and payload schema.</p>
 <p>Caching is governed per node by <code>cache_mode</code> threaded through state
-<span class="src">shared/nodes.py:122-137</span>: <code>off</code> disables reads+writes;
-<code>partial</code> (default) caches interim nodes but always re-runs nodes flagged
-<code>is_final_output=True</code>; <code>full</code> caches finals too (used for the
-embedded RTM subgraph). Because <code>Send</code> creates fresh payloads, every dispatcher
-copies <code>cache_mode</code> into each fan-out payload so children inherit the policy.
-Bumping a prompt version changes the key — the invalidation mechanism. See
+<span class="src">shared/nodes.py:169-192</span>: <code>off</code> never reads but re-runs every
+node and still writes a new timestamped result; <code>on</code> (default) reuses cached interim
+nodes but always re-runs nodes flagged <code>is_final_output=True</code>; <code>test</code>
+reads all nodes (incl. final) and makes no LLM calls (a miss raises
+<code>CacheRequiredError</code>). Because <code>Send</code> creates fresh payloads, every
+dispatcher copies <code>cache_mode</code> into each fan-out payload so children inherit the
+policy. Bumping a prompt version changes the key — the invalidation mechanism. See
 <a href="../configuration.html#caching">Configuration → Caching</a>.</p>
 
 <h2 id="logging">Logging &amp; telemetry</h2>
@@ -225,16 +232,16 @@ per role so a whole bundle can be swapped via the <code>PROMPT_SET</code> env va
 <table>
 <thead><tr><th>Pattern</th><th>Where</th><th>Why</th></tr></thead>
 <tbody>
-<tr><td>Template Method</td><td><code>StandardLLMNode.__call__</code> <span class="src">shared/nodes.py:369-433</span></td><td>One orchestration; nodes implement only payload/format hooks.</td></tr>
+<tr><td>Template Method</td><td><code>StandardLLMNode.__call__</code> <span class="src">shared/nodes.py:547-613</span></td><td>One orchestration; nodes implement only payload/format hooks.</td></tr>
 <tr><td>Send fan-out + <code>operator.add</code> reduce</td><td><code>dispatch_*</code> + <code>Annotated[List, operator.add]</code></td><td>Maximize parallelism; results concatenate deterministically.</td></tr>
-<tr><td>Subgraph embedding</td><td><code>RequirementReviewerNode</code> <span class="src">hazard_risk_reviewer/nodes.py:241-360</span></td><td>Reuse the entire RTM pipeline per traced requirement.</td></tr>
+<tr><td>Subgraph embedding</td><td><code>RequirementReviewerNode</code> <span class="src">hazard_risk_reviewer/nodes.py:313-446</span></td><td>Reuse the entire RTM pipeline per traced requirement.</td></tr>
 <tr><td>Soft-fail nodes</td><td><code>_validate_state</code> / dispatchers returning <code>[]</code></td><td>Missing upstream data degrades to a skip, not a crash.</td></tr>
 <tr><td>Factory functions</td><td><code>make_*_node(...)</code></td><td>Inject client/model/prompt + cache wiring consistently.</td></tr>
 <tr><td>Write-through cache</td><td><code>ReviewCacheManager</code> <span class="src">core/cache.py</span></td><td>Durable disk JSON as regulatory evidence; prompt-version-keyed invalidation.</td></tr>
 <tr><td>Versioned prompt registry</td><td><code>qaai/prompts</code> + <code>_registry.py</code></td><td>Reproducible prompts; version is the cache-invalidation key.</td></tr>
 </tbody></table>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-06-08. · <a href="../index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-07-06. · <a href="../index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

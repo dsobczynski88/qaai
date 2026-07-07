@@ -61,7 +61,7 @@
 <main>
 <header class="doc">
   <h1>Caching</h1>
-  <div class="meta">QAAI (qaai-may23) · the shared review cache, on disk</div>
+  <div class="meta">QAAI (qaai) · the shared review cache, on disk</div>
 </header>
 
 <h2 id="overview">Overview</h2>
@@ -80,6 +80,12 @@ auditable record of what the model produced for each artifact.</li>
 <span class="src">qaai/api/main.py</span>. Each LLM node opts into caching by exposing an
 entity id (see <a href="#keys">Cache keys</a>); nodes that do not expose one simply run
 uncached.</p>
+<div class="note">The manager is write-through over up to three tiers: an optional
+<strong>Redis</strong> layer (Tier&nbsp;2, enabled only when <code>REDIS_URL</code> is set;
+holds the latest write under a timestamp-free key with a 24h TTL and degrades gracefully when
+absent) in front of the durable <strong>Disk</strong> layer (Tier&nbsp;3), which is the
+regulatory system of record. This page describes the Disk layer; Redis is a transparent
+read-through accelerator over it.</div>
 
 <h2 id="disk">The Disk cache</h2>
 <p>The cache persists to plain JSON files on disk — the layer historically called
@@ -87,16 +93,21 @@ uncached.</p>
 It is the single durable store: it survives process restarts and is the artifact a reviewer or
 auditor inspects after a run.</p>
 <p>Files are laid out one folder per entity directly under the cache root
-(<code>CACHE_DIR</code>, default <code>./shared</code>):</p>
-<pre class="diagram"><code>{CACHE_DIR}/{entity_id}/{node}_{prompt_version}.json</code></pre>
+(<code>CACHE_DIR</code>, default <code>./shared/runs</code>):</p>
+<pre class="diagram"><code>{CACHE_DIR}/{entity_id}/{node}_{prompt_version}_{timestamp}.json</code></pre>
+<p>Files are <strong>append-only and immutable</strong>: every write creates a new file whose
+name carries a timestamp (<code>%Y_%m_%d_%H_%M_%S_%f</code>), and a read selects the
+<strong>newest</strong> matching file. A full history of what the model produced for each
+artifact is therefore preserved rather than overwritten
+<span class="src">qaai/core/cache.py</span>.</p>
 <p>The <code>entity_id</code> folder name carries a reviewer-specific prefix, so all three
 reviewers coexist under one cache root:</p>
 <table>
 <thead><tr><th>Prefix</th><th>Reviewer</th><th>Example folder</th></tr></thead>
 <tbody>
-<tr><td><code>REQ-*</code></td><td>Test Suite (RTM)</td><td><code>./shared/REQ-PUMP-101/</code></td></tr>
-<tr><td><code>TEST-*</code></td><td>Test Case</td><td><code>./shared/TEST-4417/</code></td></tr>
-<tr><td><code>HAZ-*</code></td><td>Hazard Risk</td><td><code>./shared/HAZ-12/</code></td></tr>
+<tr><td><code>REQ-*</code></td><td>Test Suite (RTM)</td><td><code>./shared/runs/REQ-PUMP-101/</code></td></tr>
+<tr><td><code>TEST-*</code></td><td>Test Case</td><td><code>./shared/runs/TEST-4417/</code></td></tr>
+<tr><td><code>HAZ-*</code></td><td>Hazard Risk</td><td><code>./shared/runs/HAZ-12/</code></td></tr>
 </tbody></table>
 <p>Each file stores both the model result and a metadata sidecar in one payload, so the
 evidence is self-describing <span class="src">qaai/core/cache.py</span>:</p>
@@ -105,12 +116,12 @@ evidence is self-describing <span class="src">qaai/core/cache.py</span>:</p>
   "meta": {
     "entity_id":        "REQ-PUMP-101",
     "node":             "synthesizer",
-    "prompt_version":   "v7.0.0",
+    "prompt_version":   "v8.0.0",
     "prompt_set":       "test_suite_reviewer_v3",   // null when un-namespaced
     "model":            "gpt-4o-mini",
     "prompt_tokens":     1234,
     "completion_tokens": 567,
-    "ts":               "2026-06-16T09:00:00Z"
+    "ts":               "2026-07-06T09:00:00Z"
   }
 }</code></pre>
 <div class="note">Entity ids and node names are sanitized to filesystem-safe characters
@@ -119,9 +130,11 @@ slashes or spaces still maps to a single predictable path.</div>
 
 <h2 id="keys">Cache keys</h2>
 <p>A cache entry is addressed by three coordinates — <strong>entity</strong>,
-<strong>node</strong>, and <strong>prompt version</strong> — which together form both the
-lookup key and the on-disk filename:</p>
-<pre class="diagram"><code>review:{entity_id}:{node_name}:{prompt_version}</code></pre>
+<strong>node</strong>, and <strong>prompt version</strong>. They form the Redis key and the
+on-disk filename <em>prefix</em> (the trailing <code>_{timestamp}</code> distinguishes the
+append-only writes; the newest file for a prefix wins):</p>
+<pre class="diagram"><code>review:{entity_id}:{node_name}:{prompt_version}          # Redis key
+{entity_id}/{node_name}_{prompt_version}_{timestamp}.json  # Disk file</code></pre>
 <ul>
 <li><code>entity_id</code> — the artifact under review (<code>REQ-*</code> /
 <code>TEST-*</code> / <code>HAZ-*</code>). Returned per node by
@@ -132,8 +145,8 @@ cached <span class="src">qaai/agents/shared/nodes.py</span>.</li>
 node class name; nodes that share one class across several graph positions override
 <code>_get_cache_node_name()</code> so each gets a distinct key.</li>
 <li><code>prompt_version</code> — the semver of the Jinja2 template the node rendered, parsed
-from its path (e.g. <code>coverage_evaluator/v7.0.0/template.jinja2</code> →
-<code>v7.0.0</code>). This is what makes the cache self-invalidating
+from its path (e.g. <code>coverage_evaluator/v8.0.0/template.jinja2</code> →
+<code>v8.0.0</code>). This is what makes the cache self-invalidating
 (see <a href="#invalidation">Invalidation</a>).</li>
 </ul>
 <p>When a run uses a named prompt set, the set name is folded into the key (and the disk
@@ -145,30 +158,38 @@ every node's read/write gates <span class="src">qaai/agents/shared/nodes.py</spa
 <table>
 <thead><tr><th>Mode</th><th>Reads</th><th>Writes</th><th>Behavior</th></tr></thead>
 <tbody>
-<tr><td><code>off</code></td><td>—</td><td>—</td><td>No reads or writes; every node recomputes.</td></tr>
-<tr><td><code>partial</code> <em>(default)</em></td><td>interim only</td><td>all</td><td>Cache every interim node, but <strong>always re-run the graph's final node</strong> (synthesizer / aggregator / final assessor, flagged <code>is_final_output=True</code>) so the top-level verdict is always freshly produced.</td></tr>
-<tr><td><code>full</code></td><td>all</td><td>all</td><td>Cache the final node too. Used internally for the hazard reviewer's embedded RTM subgraph, where a whole per-requirement review is cached as one <code>req_id</code>-keyed blob.</td></tr>
+<tr><td><code>off</code></td><td>—</td><td>all</td><td>Never reads. Re-runs every node, but <strong>still writes a new timestamped file</strong> for each — nothing is reused, yet the run's results are preserved as history.</td></tr>
+<tr><td><code>on</code> <em>(default)</em></td><td>interim only</td><td>all</td><td>Reuse the newest cached result for every interim node, but <strong>always re-run the graph's final node</strong> (synthesizer / aggregator / final assessment, flagged <code>is_final_output=True</code>) so the top-level verdict is always freshly produced. Writes through.</td></tr>
+<tr><td><code>test</code></td><td>all</td><td>—</td><td>Read the newest cached result for <strong>all</strong> nodes, including the final one, and make <strong>no LLM calls</strong> — a cache miss raises <code>CacheRequiredError</code> (surfaced as HTTP 400). Used to regenerate a report entirely from prior evidence, fully offline.</td></tr>
 </tbody></table>
 <p>The gating is small and lives entirely in the base node
 <span class="src">qaai/agents/shared/nodes.py</span>:</p>
-<pre><code>def _cache_read_allowed(self, state):
+<pre><code>@staticmethod
+def _mode(state):
+    return (state or {}).get("cache_mode", "on")
+
+def _cache_read_allowed(self, state):
     if self.cache_manager is None or not self.prompt_version:
         return False
-    mode = (state or {}).get("cache_mode", "partial")
+    mode = self._mode(state)
     if mode == "off":
         return False
-    if mode == "partial" and self.is_final_output:   # final node always re-runs
+    if mode == "on" and self.is_final_output:   # final node always re-runs
         return False
-    return True
+    return True  # "on" (interim) and "test" (all nodes) may read
 
 def _cache_write_allowed(self, state):
     if self.cache_manager is None or not self.prompt_version:
         return False
-    return (state or {}).get("cache_mode", "partial") != "off"</code></pre>
-<div class="note">The API's <strong>"Use cached results"</strong> checkbox
-(<code>use_cache</code>) maps only to <code>partial</code> (checked) or <code>off</code>
-(unchecked) <span class="src">qaai/api/routes.py</span>. <code>full</code> is an internal
-mode for the embedded RTM subgraph and is <strong>not reachable over HTTP</strong>.</div>
+    return self._mode(state) in ("off", "on")   # "test" never writes</code></pre>
+<div class="note">The API exposes a per-endpoint <strong>cache-mode radio</strong>
+(<code>on</code> "reuse cached, fresh final" · <code>test</code> "recreate from cache, no LLM" ·
+<code>off</code> "re-run all, save timestamped"), resolved by <code>_resolve_cache_mode()</code>
+<span class="src">qaai/api/routes.py</span>. The legacy <code>use_cache</code> bool still maps
+<code>true</code>&nbsp;→&nbsp;<code>on</code> / <code>false</code>&nbsp;→&nbsp;<code>off</code>,
+and the legacy radio values <code>partial</code>&nbsp;→&nbsp;<code>on</code> /
+<code>full</code>&nbsp;→&nbsp;<code>test</code> are still accepted. The hazard reviewer's
+embedded RTM subgraph is driven internally with <code>test</code> when regenerating.</div>
 
 <h2 id="threading">Threading &amp; fan-out</h2>
 <p><code>cache_mode</code> is a first-class field on the shared graph state
@@ -178,10 +199,10 @@ the <code>Send</code> fan-out: when a dispatcher fans work out to parallel nodes
 <code>Send</code> payload is a fresh partial state, so the dispatcher must copy
 <code>cache_mode</code> into every payload or the fan-out branches silently fall back to the
 default <span class="src">qaai/agents/&lt;reviewer&gt;/nodes.py</span>:</p>
-<pre><code>cache_mode = state.get("cache_mode", "partial")
+<pre><code>cache_mode = state.get("cache_mode", "on")
 return [
     Send("h1_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
-    Send("h2_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
+    Send("r7_evaluator", {"hazard": hazard, "cache_mode": cache_mode}),
     ...
 ]</code></pre>
 
@@ -194,8 +215,8 @@ folded into both the key and the disk path when present:</p>
 <table>
 <thead><tr><th></th><th>Key</th><th>Disk path</th></tr></thead>
 <tbody>
-<tr><td>Default (no set)</td><td><code>review:{entity_id}:{node}:{version}</code></td><td><code>{CACHE_DIR}/{entity_id}/{node}_{version}.json</code></td></tr>
-<tr><td>Named set</td><td><code>review:{entity_id}:{prompt_set}:{node}:{version}</code></td><td><code>{CACHE_DIR}/{entity_id}/{prompt_set}/{node}_{version}.json</code></td></tr>
+<tr><td>Default (no set)</td><td><code>review:{entity_id}:{node}:{version}</code></td><td><code>{CACHE_DIR}/{entity_id}/{node}_{version}_{ts}.json</code></td></tr>
+<tr><td>Named set</td><td><code>review:{entity_id}:{prompt_set}:{node}:{version}</code></td><td><code>{CACHE_DIR}/{entity_id}/{prompt_set}/{node}_{version}_{ts}.json</code></td></tr>
 </tbody></table>
 <p>The set name flows <code>PromptConfig.set_name</code> → node constructor
 (<code>prompt_set</code>) → <code>ReviewCacheManager.get/set</code>
@@ -206,15 +227,22 @@ un-namespaced layout unchanged. This is exactly why
 every node version except the decomposer.</p>
 
 <h2 id="invalidation">Invalidation</h2>
-<p>There is <strong>no TTL or expiry</strong> on disk entries — invalidation is
-<strong>version-driven</strong>. Because the prompt version is part of the key, bumping a
-template's version (a new <code>qaai/prompts/&lt;role&gt;/v.../</code> directory) produces a new
-key automatically; the next run misses and recomputes, while the prior version's file remains
-on disk untouched as historical evidence. No manual purge is needed, and switching prompt sets
-has the same effect.</p>
+<p>There is <strong>no TTL or expiry</strong> on disk entries (the optional Redis layer holds a
+24h TTL copy) — disk invalidation is <strong>version-driven</strong>. Because the prompt
+version is part of the key, bumping a template's version (a new
+<code>qaai/prompts/&lt;role&gt;/v.../</code> directory) produces a new key automatically; the
+next run misses and recomputes, while the prior version's file remains on disk untouched as
+historical evidence. No manual purge is needed, and switching prompt sets has the same effect.
+Even at a fixed version, each run appends a new timestamped file, so the newest write wins while
+the history is preserved.</p>
 <div class="note">Keeping superseded versions on disk is deliberate: the cache doubles as a
-regulatory artifact, so old results are retained rather than overwritten. To reclaim space,
-delete entity folders (or per-version files) directly.</div>
+regulatory artifact, so old results are retained rather than overwritten. Because writes are
+per-node and write-through, the batch service reuses results only <strong>after</strong> the
+fact: an item whose graph run fails or whose final state is incomplete has <em>only that run's</em>
+files purged via <code>ReviewCacheManager.purge_run(entity_id, since, prompt_set)</code>
+(run-scoped by timestamp, so earlier good runs survive)
+<span class="src">qaai/api/services.py, qaai/core/cache.py</span>. To reclaim space, delete
+entity folders (or per-version files) directly.</div>
 
 <h2 id="enable">Enabling &amp; disabling</h2>
 <p>Two settings govern the cache globally <span class="src">qaai/core/config.py</span>:</p>
@@ -222,11 +250,13 @@ delete entity folders (or per-version files) directly.</div>
 <thead><tr><th>Setting</th><th>Default</th><th>Effect</th></tr></thead>
 <tbody>
 <tr><td><code>ENABLE_CACHE</code></td><td><code>true</code></td><td>Master switch. When <code>false</code>, no cache manager is created and every run recomputes regardless of the per-request toggle.</td></tr>
-<tr><td><code>CACHE_DIR</code></td><td><code>./shared</code></td><td>Root directory for the on-disk cache (one folder per entity).</td></tr>
+<tr><td><code>CACHE_DIR</code></td><td><code>./shared/runs</code></td><td>Root directory for the on-disk cache (one folder per entity).</td></tr>
+<tr><td><code>REDIS_URL</code></td><td><code>None</code></td><td>Optional. When set, enables the Tier&nbsp;2 Redis accelerator (24h TTL); when unset the cache is disk-only.</td></tr>
 </tbody></table>
-<p>Per request, the <code>use_cache</code> toggle then chooses <code>partial</code> (on) or
-<code>off</code> (off) for that run. See the
-<a href="../configuration.html#caching">Configuration guide</a> for the env-var reference.</p>
+<p>Per request, the cache-mode radio chooses <code>on</code> / <code>test</code> / <code>off</code>
+(the legacy <code>use_cache</code> toggle maps to <code>on</code> / <code>off</code>) for that
+run. See the <a href="../configuration.html#caching">Configuration guide</a> for the env-var
+reference.</p>
 
 <h2 id="telemetry">Telemetry</h2>
 <p>Cache activity is observable: the <code>TokenUsageTracker</code>
@@ -235,7 +265,7 @@ token/cost records to <code>token_usage.jsonl</code> in the run directory, inclu
 a hit saved. The teardown summary reports cache effectiveness for the run, so you can see how
 much a cached re-run avoided recomputing.</p>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-06-16. · <a href="../index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-07-06. · <a href="../index.html">Docs home</a></footer>
 </main>
 </div>
 <script>
