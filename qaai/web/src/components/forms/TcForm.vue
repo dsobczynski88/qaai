@@ -32,6 +32,7 @@ function run() {
           test_mode: testMode.value,
           include_edge_case_analysis: false,
           include_decomposition_analysis: includeDecomp.value,
+          include_design_summaries: false,
         },
         signal,
       ),

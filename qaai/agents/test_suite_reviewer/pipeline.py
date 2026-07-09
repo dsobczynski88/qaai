@@ -14,7 +14,7 @@ from qaai.agents.shared.data_integration import (
     PyJamaNodeConfig,
 )
 from .core import RTMReviewState
-from qaai.agents.shared.gate import make_validation_gate, make_gate_router
+from qaai.agents.shared.gate import make_validation_gate
 from .nodes import (
     make_coverage_evaluator,
     make_decomposer_node,
@@ -23,6 +23,7 @@ from .nodes import (
     make_synthesizer_node,
     dispatch_coverage,
     validate_rtm_inputs,
+    route_after_gate_rtm,
 )
 
 
@@ -157,9 +158,11 @@ class RTMReviewerRunnable:
         # Input gate: skip the graph (no LLM calls) when the requirement has no
         # text or no traced test cases; otherwise fan out to the work nodes.
         sg.add_edge("transform", "validation_gate")
+        # route_after_gate_rtm fans out to decomposer + summarizer always, and to
+        # design_summarizer only when state["include_design_summaries"] is set.
         sg.add_conditional_edges(
             "validation_gate",
-            make_gate_router(["decomposer", "summarizer", "design_summarizer"]),
+            route_after_gate_rtm,
             ["decomposer", "summarizer", "design_summarizer", END],
         )
 

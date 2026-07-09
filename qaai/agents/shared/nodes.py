@@ -140,6 +140,7 @@ class BaseLLMNode(ABC):
         prompt_version: str = "",
         is_final_output: bool = False,
         prompt_set: Optional[str] = None,
+        design_sensitive: bool = False,
     ):
         self.client = client
         self.model = model
@@ -154,6 +155,10 @@ class BaseLLMNode(ABC):
         # "on" cache mode such a node always re-runs (skips cache read) so the
         # user gets a fresh output while still reusing cached interim nodes.
         self.is_final_output = is_final_output
+        # When True this node's output depends on whether the RTM design_summarizer
+        # ran, so its cache key carries a design-summary discriminator (ds0/ds1)
+        # read per-request from state["include_design_summaries"].
+        self.design_sensitive = design_sensitive
 
     # ------------------------------------------------------------------
     # Cache gating (driven by state["cache_mode"]: "off" | "on" | "test")
@@ -169,6 +174,17 @@ class BaseLLMNode(ABC):
     @staticmethod
     def _mode(state: Any) -> str:
         return (state or {}).get("cache_mode", "on")
+
+    def _design_discriminator(self, state: Any) -> Optional[bool]:
+        """Design-summary cache discriminator for this node.
+
+        Returns the per-request ``include_design_summaries`` flag for
+        design-sensitive nodes (so their cache never aliases across the toggle),
+        or None for unaffected nodes (legacy un-discriminated cache layout).
+        """
+        if not self.design_sensitive:
+            return None
+        return bool((state or {}).get("include_design_summaries", False))
 
     def _cache_read_allowed(self, state: Any) -> bool:
         """Whether this node may read from cache for the given state."""
@@ -503,11 +519,12 @@ class StandardLLMNode(BaseLLMNode, ABC):
         prompt_version: str = "",
         is_final_output: bool = False,
         prompt_set: Optional[str] = None,
+        design_sensitive: bool = False,
     ):
         super().__init__(
             client, model, system_prompt, model_kwargs,
             cache_manager, prompt_version, is_final_output,
-            prompt_set=prompt_set,
+            prompt_set=prompt_set, design_sensitive=design_sensitive,
         )
         self.response_model = response_model
 
@@ -555,7 +572,10 @@ class StandardLLMNode(BaseLLMNode, ABC):
         if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
-                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
+                cached = await self.cache_manager.get(
+                    entity_id, node_name, self.prompt_version, self.prompt_set,
+                    include_design=self._design_discriminator(state),
+                )
                 if cached is not None:
                     try:
                         restored = self.response_model.model_validate(cached["result"])
@@ -606,6 +626,7 @@ class StandardLLMNode(BaseLLMNode, ABC):
                         completion_tokens=completion_tokens,
                         model=self.model,
                         prompt_set=self.prompt_set,
+                        include_design=self._design_discriminator(state),
                     )
                 except Exception as e:
                     logger.warning("%s: cache write failed — %s", self.__class__.__name__, e)
@@ -646,11 +667,12 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         prompt_version: str = "",
         is_final_output: bool = False,
         prompt_set: Optional[str] = None,
+        design_sensitive: bool = False,
     ):
         super().__init__(
             client, model, system_prompt, model_kwargs,
             cache_manager, prompt_version, is_final_output,
-            prompt_set=prompt_set,
+            prompt_set=prompt_set, design_sensitive=design_sensitive,
         )
         self.response_model = response_model
 
@@ -741,7 +763,10 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:
-                cached = await self.cache_manager.get(entity_id, node_name, self.prompt_version, self.prompt_set)
+                cached = await self.cache_manager.get(
+                    entity_id, node_name, self.prompt_version, self.prompt_set,
+                    include_design=self._design_discriminator(state),
+                )
                 if cached is not None:
                     try:
                         restored = self._restore_from_cache(cached)
@@ -801,6 +826,7 @@ class BatchedLLMNode(BaseLLMNode, ABC):
                         completion_tokens=total_completion_tokens,
                         model=self.model,
                         prompt_set=self.prompt_set,
+                        include_design=self._design_discriminator(state),
                     )
                 except Exception as exc:
                     logger.warning("%s: cache write failed — %s", self.__class__.__name__, exc)

@@ -3,8 +3,13 @@ Shared Pydantic models reused across reviewer components
 (test_suite_reviewer, test_case_reviewer, hazard_risk_reviewer).
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Literal, Any, Dict, TypedDict
+
+
+# Alias keys the aggregator LLM has been observed to (or plausibly may) nest the
+# decomposed-spec list under instead of the canonical `decomposed_specifications`.
+_SPEC_KEY_ALIASES = ("decomposed_requirements", "decomposed_specs", "specifications", "specs")
 
 
 # Binary Yes/No verdict shared by every reviewer rubric; the N-A variant is used
@@ -23,6 +28,10 @@ class BaseReviewState(TypedDict, total=False):
     # Caching control: "off" | "on" (default) | "test". Threaded from the
     # API/service into every node; see qaai.core.cache.ReviewCacheManager.
     cache_mode: str
+    # When True the RTM design_summarizer runs and its output feeds spec/synth;
+    # threaded per-request (like cache_mode) and folded into the cache key of
+    # design-sensitive nodes so the two modes never alias. Default False.
+    include_design_summaries: bool
     # JAMA integration fields (Option 2 only)
     pyjama_request: Optional[Any]  # PyJamaRequest, but avoid import cycle
     jama_data: Optional[List[Dict[str, Any]]]
@@ -52,6 +61,23 @@ class DecomposedSpec(BaseModel):
 class DecomposedRequirement(BaseModel):
     requirement: Requirement
     decomposed_specifications: List[DecomposedSpec]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_spec_field_name(cls, data: Any) -> Any:
+        """Accept the specs list under a wrong key and normalize to
+        'decomposed_specifications'. The aggregator LLM (single_test_aggregator v8,
+        decomposition mode) intermittently nests specs under 'decomposed_requirements'
+        (the parent list's own name), which reads as the required field missing.
+        Only re-homes when the canonical key is absent — never clobbers a real value,
+        never fabricates."""
+        if isinstance(data, dict) and "decomposed_specifications" not in data:
+            for alias in _SPEC_KEY_ALIASES:
+                if isinstance(data.get(alias), list):
+                    data = dict(data)
+                    data["decomposed_specifications"] = data.pop(alias)
+                    break
+        return data
 
 
 class DesignDocument(BaseModel):

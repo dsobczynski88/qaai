@@ -167,6 +167,66 @@ async def test_prompt_set_namespaces_cache(cache, tmp_path):
     assert await cache.get("REQ-1", "coverage_evaluator", "v8.0.0") is None
 
 
+async def test_include_design_namespaces_cache(cache, tmp_path):
+    """The design-summary discriminator (ds0/ds1) keys design-sensitive results so
+    a with-design result never aliases a without-design one for the same
+    entity/set/node/version."""
+    await cache.set(
+        "REQ-1", "synthesizer", "v8.0.0", {"value": "with"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3", include_design=True,
+    )
+    await cache.set(
+        "REQ-1", "synthesizer", "v8.0.0", {"value": "without"}, 0, 0, "m",
+        prompt_set="test_suite_reviewer_v3", include_design=False,
+    )
+    # Distinct files under the same set folder — ds token in the filename stem
+    _only_file(tmp_path / "REQ-1" / "test_suite_reviewer_v3", "synthesizer_v8.0.0_ds1_")
+    _only_file(tmp_path / "REQ-1" / "test_suite_reviewer_v3", "synthesizer_v8.0.0_ds0_")
+
+    on = await cache.get("REQ-1", "synthesizer", "v8.0.0", "test_suite_reviewer_v3", include_design=True)
+    off = await cache.get("REQ-1", "synthesizer", "v8.0.0", "test_suite_reviewer_v3", include_design=False)
+    assert on["result"] == {"value": "with"}
+    assert off["result"] == {"value": "without"}
+    assert on["meta"]["include_design"] is True
+    assert off["meta"]["include_design"] is False
+
+
+async def test_include_design_none_preserves_legacy_layout(cache, tmp_path):
+    """include_design=None (unaffected nodes / other reviewers) keeps the legacy
+    un-discriminated filename and key."""
+    await cache.set("REQ-1", "decomposer", "v5.0.0", {"value": "x"}, 0, 0, "m")
+    _only_file(tmp_path / "REQ-1", "decomposer_v5.0.0_")
+    got = await cache.get("REQ-1", "decomposer", "v5.0.0")
+    assert got["result"] == {"value": "x"}
+    # no ds token was written
+    assert not sorted((tmp_path / "REQ-1").glob("decomposer_v5.0.0_ds*"))
+
+
+async def test_design_sensitive_node_keys_cache_by_flag(cache):
+    """A design_sensitive node's cache read hits only its own mode; the opposite
+    mode is a miss → a live LLM call — driven by state['include_design_summaries'].
+    A non-sensitive node ignores the flag entirely (discriminator is None)."""
+    node, client = make_dummy_node(cache)
+    node.design_sensitive = True
+
+    # design ON: miss → 1 live call, writes ds1
+    client.chat_completion.return_value.choices[0].message.content = json.dumps({"value": "on"})
+    await node({"entity": "REQ-1", "include_design_summaries": True, "cache_mode": "on"})
+    assert client.chat_completion.await_count == 1
+    # design ON again: hit → no new call
+    await node({"entity": "REQ-1", "include_design_summaries": True, "cache_mode": "on"})
+    assert client.chat_completion.await_count == 1
+    # design OFF: different discriminator → miss → live call
+    await node({"entity": "REQ-1", "include_design_summaries": False, "cache_mode": "on"})
+    assert client.chat_completion.await_count == 2
+
+    assert node._design_discriminator({"include_design_summaries": True}) is True
+    assert node._design_discriminator({"include_design_summaries": False}) is False
+    # A non-sensitive node never discriminates.
+    node.design_sensitive = False
+    assert node._design_discriminator({"include_design_summaries": True}) is None
+
+
 # --- run-scoped purge (success-gating) ------------------------------------
 
 

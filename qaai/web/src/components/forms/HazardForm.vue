@@ -19,6 +19,7 @@ const identifierPattern = ref("");
 const cacheMode = ref<CacheMode>("on");
 const testMode = ref(true);
 const edgeCase = ref(false);
+const designSummaries = ref(false);
 
 function run() {
   const name = project.value.trim();
@@ -40,6 +41,7 @@ function run() {
   form.append("cache_mode", cacheMode.value);
   form.append("test_mode", String(testMode.value));
   form.append("include_edge_case_analysis", String(edgeCase.value));
+  form.append("include_design_summaries", String(designSummaries.value));
 
   job.start({
     submit: (signal) => submitHazardReview(form, signal),
@@ -95,6 +97,12 @@ function run() {
       v-model="edgeCase"
       label="Include Edge Case Analysis"
       :tooltip="TOOLTIPS.edgeCaseHazard"
+    />
+    <LabeledCheckbox
+      id="hz-design-summaries"
+      v-model="designSummaries"
+      label="Include Design Summaries"
+      :tooltip="TOOLTIPS.designSummariesHazard"
     />
     <SubmitButton label="Run Hazard Risk Review" :busy="job.isRunning" @click="run" />
   </div>

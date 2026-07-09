@@ -51,4 +51,5 @@ export interface BaselineReviewRequest {
   test_mode: boolean;
   include_edge_case_analysis: boolean;
   include_decomposition_analysis: boolean;
+  include_design_summaries: boolean;
 }

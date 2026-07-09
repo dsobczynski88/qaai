@@ -403,6 +403,10 @@ class HazardReviewState(TypedDict, total=False):
     # Caching control: "off" | "on" (default) | "test". Threaded from the
     # API/service into every node; see qaai.core.cache.ReviewCacheManager.
     cache_mode: str
+    # Controls the EMBEDDED RTM subgraph's design_summarizer (not the hazard
+    # rubric's own H2/H3 design_summarizer). Threaded into rtm_input per requirement
+    # and folded into the requirement_reviewer blob cache key. Default False.
+    include_design_summaries: bool
     hazard: HazardRowWithTraceMatrix
     pyjama_request: Optional[PyJamaRequest]
     # Per-run cache-only JAMA override (None ⇒ use the node/config default).

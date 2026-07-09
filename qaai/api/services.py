@@ -328,7 +328,7 @@ class RTMReviewService:
     async def run_from_baseline(
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "on",
         test_mode: Optional[bool] = None, prompt_set: str = PROMPT_SET_BASELINE,
-        progress=None,
+        progress=None, include_design_summaries: bool = False,
     ) -> str:
         """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path.
 
@@ -386,7 +386,10 @@ class RTMReviewService:
             items=state_dicts,
             graph=runnable.graph,
             thread_id_fn=lambda i, _item: f"{thread_id_prefix}-{i:03d}",
-            graph_input_fn=lambda _i, state_dict: {**state_dict, "cache_mode": cache_mode},
+            graph_input_fn=lambda _i, state_dict: {
+                **state_dict, "cache_mode": cache_mode,
+                "include_design_summaries": include_design_summaries,
+            },
             viewer_writer=write_viewer,
             item_noun="requirement",
             entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("requirement"), "req_id", None),
@@ -525,6 +528,7 @@ class HazardReviewService:
         prompt_set: str = PROMPT_SET_BASELINE,
         extract_gids_format: str = "GID-\\d+",
         progress=None,
+        include_design_summaries: bool = False,
     ) -> str:
         """Parse an uploaded SHA Excel file and run the hazard graph for every row.
 
@@ -569,7 +573,10 @@ class HazardReviewService:
             )
 
         def _hazard_graph_input(i, hazard_row):
-            graph_input = {"hazard": hazard_row, "cache_mode": cache_mode}
+            graph_input = {
+                "hazard": hazard_row, "cache_mode": cache_mode,
+                "include_design_summaries": include_design_summaries,
+            }
             if test_mode is not None:
                 graph_input["pyjama_test_mode"] = test_mode
 

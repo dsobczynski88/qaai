@@ -304,8 +304,12 @@ def dispatch_requirement_reviews(state: HazardReviewState) -> List[Send]:
         return []
     
     cache_mode = state.get("cache_mode", "on")
+    include_design_summaries = state.get("include_design_summaries", False)
     return [
-        Send("requirement_reviewer", {"hazard": hazard, "requirement": req, "cache_mode": cache_mode})
+        Send("requirement_reviewer", {
+            "hazard": hazard, "requirement": req, "cache_mode": cache_mode,
+            "include_design_summaries": include_design_summaries,
+        })
         for req in requirements
     ]
 
@@ -348,6 +352,9 @@ class RequirementReviewerNode:
 
         req_id = requirement.req_id
         cache_mode = state.get("cache_mode", "on")
+        # Controls the embedded RTM subgraph's design_summarizer. The req blob
+        # wraps the whole RTM result, so it is design-sensitive: ds0/ds1 keys it.
+        include_design_summaries = bool(state.get("include_design_summaries", False))
         # This per-requirement blob behaves like a non-final cacheable node:
         #   read  in "on"/"test" (skip the subgraph when a blob exists),
         #   write in "off"/"on"  (a new timestamped blob each run).
@@ -358,7 +365,10 @@ class RequirementReviewerNode:
         # The blob captures the WHOLE RTM subgraph result (incl. synthesizer),
         # so a hit means the test-suite review is "fully cached" for this req.
         if self.cache_manager is not None and self.rtm_prompt_version and read_allowed:
-            cached = await self.cache_manager.get(req_id, self._NODE_NAME, self.rtm_prompt_version, self.prompt_set)
+            cached = await self.cache_manager.get(
+                req_id, self._NODE_NAME, self.rtm_prompt_version, self.prompt_set,
+                include_design=include_design_summaries,
+            )
             if cached is not None:
                 try:
                     review = RequirementReview.model_validate(cached["result"])
@@ -389,6 +399,8 @@ class RequirementReviewerNode:
             # Embedded RTM has no cache manager of its own (Option A), so this
             # is a no-op for its internal nodes; passed for consistency.
             "cache_mode": cache_mode,
+            # Gates the embedded RTM design_summarizer branch (see route_after_gate_rtm).
+            "include_design_summaries": include_design_summaries,
         }
 
         # Pass design_docs to RTM sub-pipeline if available (from traceability)
@@ -439,6 +451,7 @@ class RequirementReviewerNode:
                     completion_tokens=max(0, completion_tokens),
                     model=self.rtm.model if hasattr(self.rtm, "model") else "",
                     prompt_set=self.prompt_set,
+                    include_design=include_design_summaries,
                 )
             except Exception as e:
                 logger.warning("RequirementReviewerNode: cache write failed — %s", e)

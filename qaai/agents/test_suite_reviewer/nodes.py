@@ -11,6 +11,8 @@ import logging
 import re
 from typing import Optional, List, Any
 from langgraph.types import Send
+from langgraph.graph import END
+from qaai.agents.shared.gate import SKIP_STATUS
 from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.utils import render_prompt
 from qaai.core.cache import ReviewCacheManager
@@ -53,6 +55,22 @@ def validate_rtm_inputs(state: RTMReviewState) -> List[str]:
     if not state.get("test_cases"):
         missing.append("test_cases")
     return missing
+
+
+def route_after_gate_rtm(state: RTMReviewState):
+    """Gate router that conditionally skips the design_summarizer branch.
+
+    Routes to END when the input gate marked the record skipped. Otherwise fans
+    out to decomposer + summarizer, and additionally to design_summarizer only
+    when include_design_summaries is set. LangGraph's superstep model lets the
+    coverage_router join fire correctly whether or not the design branch ran.
+    """
+    if state.get("review_status") == SKIP_STATUS:
+        return END
+    targets = ["decomposer", "summarizer"]
+    if state.get("include_design_summaries"):
+        targets.append("design_summarizer")
+    return targets
 
 
 class SummaryNode(BatchedLLMNode):
@@ -178,6 +196,9 @@ def dispatch_coverage(state: RTMReviewState) -> List[Send]:
     # requirement has no design docs). Send only forwards the keys placed in
     # this dict, so it must be threaded through explicitly to reach spec_evaluator.
     summarized_designs = state.get("summarized_designs")
+    # spec_evaluator is design-sensitive; forward the toggle so its cache key
+    # carries the ds0/ds1 discriminator (Send drops keys not listed here).
+    include_design_summaries = state.get("include_design_summaries", False)
     return [
         Send("spec_evaluator", {
             "requirement": requirement,
@@ -185,6 +206,7 @@ def dispatch_coverage(state: RTMReviewState) -> List[Send]:
             "test_suite": test_suite,
             "summarized_designs": summarized_designs,
             "cache_mode": cache_mode,
+            "include_design_summaries": include_design_summaries,
         })
         for spec in decomposed.decomposed_specifications
     ]
@@ -212,11 +234,13 @@ class SingleSpecEvaluatorNode(StandardLLMNode):
         prompt_version: str = "",
         is_final_output: bool = False,
         prompt_set: Optional[str] = None,
+        design_sensitive: bool = False,
     ):
         # response_model is fixed for this node (mirrors HazardEvaluatorNode).
         super().__init__(
             client, model, EvaluatedSpec, system_prompt, model_kwargs,
             cache_manager, prompt_version, is_final_output, prompt_set=prompt_set,
+            design_sensitive=design_sensitive,
         )
 
     def _validate_state(self, state: Any) -> bool:
@@ -380,6 +404,8 @@ def make_coverage_evaluator(
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        # Coverage output depends on summarized_designs → cache keyed by ds0/ds1.
+        design_sensitive=True,
     )
 
 
@@ -419,6 +445,8 @@ def make_synthesizer_node(
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         is_final_output=True,
         prompt_set=prompt_set,
+        # Synthesis (incl. R6 Design Alignment) depends on summarized_designs.
+        design_sensitive=True,
     )
 
 
@@ -455,4 +483,6 @@ def make_design_summarizer_node(
         cache_manager=cache_manager,
         prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        # Its own output is the design summary → cache keyed by ds1 when it runs.
+        design_sensitive=True,
     )

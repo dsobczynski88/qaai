@@ -15,6 +15,7 @@ const baseline = ref("");
 const cacheMode = ref<CacheMode>("on");
 const testMode = ref(true);
 const edgeCase = ref(false);
+const designSummaries = ref(false);
 
 function run() {
   const id = baseline.value.trim();
@@ -32,6 +33,7 @@ function run() {
           test_mode: testMode.value,
           include_edge_case_analysis: edgeCase.value,
           include_decomposition_analysis: true,
+          include_design_summaries: designSummaries.value,
         },
         signal,
       ),
@@ -62,6 +64,12 @@ function run() {
       v-model="edgeCase"
       label="Include Edge Case Analysis"
       :tooltip="TOOLTIPS.edgeCase"
+    />
+    <LabeledCheckbox
+      id="rtm-design-summaries"
+      v-model="designSummaries"
+      label="Include Design Summaries"
+      :tooltip="TOOLTIPS.designSummaries"
     />
     <SubmitButton
       label="Run Requirement Coverage Review"

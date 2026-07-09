@@ -106,6 +106,7 @@ async def test_suite_review(
         lambda job: service.run_from_baseline(
             body.baseline_id, job.job_id, cache_mode, test_mode,
             prompt_set=prompt_set, progress=job,
+            include_design_summaries=body.include_design_summaries,
         ),
         "qaai_rtm_review.html",
     )
@@ -149,6 +150,7 @@ async def hazard_risk_review(
     use_cache: bool = Form(default=True, description="Deprecated; ignored when cache_mode is set. True maps to 'on', False to 'off'"),
     test_mode: bool | None = Form(default=None, description="Cache-only JAMA (no live calls); omit to use the server default (PYJAMA_TEST_MODE)"),
     include_edge_case_analysis: bool = Form(default=False, description="Use the edge-case prompt set (test_suite_reviewer_v4) for the embedded RTM subgraph; default uses the baseline set (v3)"),
+    include_design_summaries: bool = Form(default=False, description="Run the embedded RTM design_summarizer branch; default skips it. Design-sensitive cache is keyed by this flag (ds0/ds1)."),
     service: HazardReviewService = Depends(get_hazard_service),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> JSONResponse:
@@ -183,6 +185,7 @@ async def hazard_risk_review(
             prompt_set=prompt_set,
             extract_gids_format=identifier_pattern,
             progress=job,
+            include_design_summaries=include_design_summaries,
         ),
         "qaai_hazard_review.html",
     )

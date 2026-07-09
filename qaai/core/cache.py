@@ -131,7 +131,7 @@ class ReviewCacheManager:
 
     async def get(
         self, entity_id: str, node_name: str, prompt_version: str,
-        prompt_set: Optional[str] = None,
+        prompt_set: Optional[str] = None, include_design: Optional[bool] = None,
     ) -> Optional[dict]:
         """Return cached payload or None on a total miss.
 
@@ -142,9 +142,15 @@ class ReviewCacheManager:
         set so two sets that share a node's prompt_version (e.g.
         test_suite_reviewer_v3 and _v4 both pin coverage v8) never alias each
         other. When None the legacy un-namespaced key/path is used.
+
+        ``include_design`` (when not None) folds a design-summary discriminator
+        (ds0/ds1) into the key/filename for nodes whose output depends on whether
+        the RTM design_summarizer ran — so a result computed with design summaries
+        never aliases one computed without. When None (unaffected nodes, other
+        reviewers) the legacy layout is preserved.
         """
-        redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set)
-        disk_path = self._newest_file(entity_id, node_name, prompt_version, prompt_set)
+        redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set, include_design)
+        disk_path = self._newest_file(entity_id, node_name, prompt_version, prompt_set, include_design)
 
         # --- Tier 2: Redis ---
         if self._redis is not None:
@@ -215,10 +221,13 @@ class ReviewCacheManager:
         completion_tokens: int,
         model: str,
         prompt_set: Optional[str] = None,
+        include_design: Optional[bool] = None,
     ) -> None:
         """Persist the LLM result to disk and Redis (write-through).
 
         ``prompt_set`` namespaces the entry by the named prompt set (see get()).
+        ``include_design`` folds the design-summary discriminator into the
+        key/filename for design-sensitive nodes (see get()).
         """
         payload = {
             "result": result_dict,
@@ -227,6 +236,7 @@ class ReviewCacheManager:
                 "node": node_name,
                 "prompt_version": prompt_version,
                 "prompt_set": prompt_set,
+                "include_design": include_design,
                 "model": model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -237,7 +247,7 @@ class ReviewCacheManager:
         raw = json.dumps(payload, indent=2, default=str)
 
         # Write to Disk (Tier 3) — a NEW timestamped file; never overwrite history.
-        disk_path = self._new_file_path(entity_id, node_name, prompt_version, prompt_set)
+        disk_path = self._new_file_path(entity_id, node_name, prompt_version, prompt_set, include_design)
         try:
             disk_path.parent.mkdir(parents=True, exist_ok=True)
             disk_path.write_text(raw, encoding="utf-8")
@@ -247,7 +257,7 @@ class ReviewCacheManager:
 
         # Write to Redis (Tier 2)
         if self._redis is not None:
-            redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set)
+            redis_key = self._redis_key(entity_id, node_name, prompt_version, prompt_set, include_design)
             try:
                 await self._redis.set(redis_key, raw, ex=self._REDIS_TTL)
             except Exception as e:
@@ -372,13 +382,25 @@ class ReviewCacheManager:
             except Exception:
                 pass
 
+    @staticmethod
+    def _design_token(include_design: Optional[bool]) -> str:
+        # ds1/ds0 discriminator for design-sensitive nodes; "" when not applicable
+        # so unaffected nodes and other reviewers keep their legacy key/path.
+        if include_design is None:
+            return ""
+        return "ds1" if include_design else "ds0"
+
     def _redis_key(
         self, entity_id: str, node_name: str, prompt_version: str,
-        prompt_set: Optional[str] = None,
+        prompt_set: Optional[str] = None, include_design: Optional[bool] = None,
     ) -> str:
+        ds = self._design_token(include_design)
+        prefix = f"review:{entity_id}"
         if prompt_set:
-            return f"review:{entity_id}:{prompt_set}:{node_name}:{prompt_version}"
-        return f"review:{entity_id}:{node_name}:{prompt_version}"
+            prefix += f":{prompt_set}"
+        if ds:
+            prefix += f":{ds}"
+        return f"{prefix}:{node_name}:{prompt_version}"
 
     def _entity_dir(self, entity_id: str, prompt_set: Optional[str] = None) -> Path:
         # Sanitize the folder (entity id). A prompt_set gets its own subfolder —
@@ -389,24 +411,30 @@ class ReviewCacheManager:
             d = d / _sanitize(prompt_set)
         return d
 
-    @staticmethod
-    def _file_prefix(node_name: str, prompt_version: str) -> str:
+    @classmethod
+    def _file_prefix(
+        cls, node_name: str, prompt_version: str, include_design: Optional[bool] = None,
+    ) -> str:
         # Sanitize the node token — per-spec node names embed a spec_id which may
-        # contain unsafe chars. The stem layout is "{node}_{version}_{timestamp}".
-        return f"{_sanitize(node_name)}_{prompt_version}_"
+        # contain unsafe chars. The stem layout is "{node}_{version}_[{ds}_]{timestamp}".
+        # The design discriminator (ds0/ds1) sits between version and timestamp;
+        # the $-anchored timestamp regex still parses the trailing token.
+        ds = cls._design_token(include_design)
+        base = f"{_sanitize(node_name)}_{prompt_version}_"
+        return f"{base}{ds}_" if ds else base
 
     def _new_file_path(
         self, entity_id: str, node_name: str, prompt_version: str,
-        prompt_set: Optional[str] = None,
+        prompt_set: Optional[str] = None, include_design: Optional[bool] = None,
     ) -> Path:
-        """Path for a brand-new write: {entity}/[{set}/]{node}_{version}_{ts}.json."""
-        prefix = self._file_prefix(node_name, prompt_version)
+        """Path for a brand-new write: {entity}/[{set}/]{node}_{version}_[{ds}_]{ts}.json."""
+        prefix = self._file_prefix(node_name, prompt_version, include_design)
         filename = f"{prefix}{_now_timestamp()}.json"
         return self._entity_dir(entity_id, prompt_set) / filename
 
     def _newest_file(
         self, entity_id: str, node_name: str, prompt_version: str,
-        prompt_set: Optional[str] = None,
+        prompt_set: Optional[str] = None, include_design: Optional[bool] = None,
     ) -> Optional[Path]:
         """Newest timestamped file for this node/version, or None on a miss.
 
@@ -416,7 +444,7 @@ class ReviewCacheManager:
         old caches still resolve.
         """
         directory = self._entity_dir(entity_id, prompt_set)
-        prefix = self._file_prefix(node_name, prompt_version)
+        prefix = self._file_prefix(node_name, prompt_version, include_design)
         candidates = [Path(p) for p in glob.glob(str(directory / f"{prefix}*.json"))]
         if candidates:
             candidates.sort(

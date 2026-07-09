@@ -52,3 +52,13 @@ class BaselineRequest(BaseModel):
             "(test_case_reviewer_v3) — faster, coarser. Ignored by other endpoints."
         ),
     )
+    include_design_summaries: bool = Field(
+        default=False,
+        description=(
+            "Test-suite reviewer only. When True, run the design_summarizer node "
+            "so design context feeds per-spec coverage and synthesis; when False "
+            "(default) that branch is skipped in the graph. Cached results for "
+            "design-sensitive nodes are keyed by this flag (ds0/ds1) so toggling "
+            "never reads back a result computed under the other mode."
+        ),
+    )

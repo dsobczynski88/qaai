@@ -35,4 +35,8 @@ export const TOOLTIPS = {
     "When on, the embedded test-suite review per requirement uses the edge-case prompt set (test_suite_reviewer_v4, edge-case decomposer). Off uses the baseline set (v3). Cached results are namespaced per prompt set.",
   decomposition:
     "When on (default), QAAI decomposes each requirement into atomic specs and evaluates coverage per spec (test_case_reviewer_v2). Turn off to skip decomposition and review each test case directly against the original requirement text (test_case_reviewer_v3) — faster, coarser-grained.",
+  designSummaries:
+    "When on, QAAI runs the design_summarizer so summarized design documents feed per-spec coverage and the R6 Design Alignment criterion. Off (default) skips that step in the graph. Cached results for design-sensitive nodes are keyed by this toggle so switching it never reuses a result computed under the other mode.",
+  designSummariesHazard:
+    "When on, the embedded per-requirement test-suite review runs its design_summarizer so design documents inform coverage and R6 Design Alignment. Off (default) skips it. Does not affect the hazard rubric's own H2/H3 design analysis. Cached results are keyed by this toggle.",
 } as const;
