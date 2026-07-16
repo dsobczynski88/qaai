@@ -1,0 +1,27 @@
+{
+  "test_case": {
+    "test_id": "PRJ-TEST-3001",
+    "description": "Flatten variant",
+    "setup": "Setup.",
+    "steps": "Step 1. Act. Step 2. Verify.",
+    "expectedResults": "Verified.",
+    "in_baseline": true
+  },
+  "requirements": [
+    {"req_id": "REQ-9", "text": "The service shall flatten."}
+  ],
+  "decomposed_requirements": [
+    {"spec_id": "REQ-9-S1", "description": "atomic obligation", "acceptance_criteria": "observable", "rationale": "Explicit."},
+    {"spec_id": "REQ-9-S2", "description": "atomic obligation 2", "acceptance_criteria": "observable", "rationale": "Implicit."}
+  ],
+  "evaluated_checklist": [
+    {"id": "expected_result_support", "description": "d1", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a1"},
+    {"id": "expected_result_spec_align", "description": "d2", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a2"},
+    {"id": "test_case_achieves", "description": "d3", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a3"},
+    {"id": "test_case_logical_sequence", "description": "d4", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a4"},
+    {"id": "test_case_setup_clarity", "description": "d5", "mandatory": false, "verdict": "Yes", "partial": false, "assessment": "a5"}
+  ],
+  "overall_verdict": "Yes",
+  "comments": "",
+  "clarification_questions": []
+}

@@ -35,6 +35,7 @@ from qaai.core.config import settings
 from qaai.utils import render_prompt
 
 from .core import DecomposedRequirement
+from .json_repair_registry import apply_repairs
 
 # Child of the "qaai" logger, so node logs flow through the re-pointable file
 # handler that setup_logging() attaches per run (logs/run-<ts>/qaai.log).
@@ -321,39 +322,6 @@ class BaseLLMNode(ABC):
         return extracted
 
     @staticmethod
-    def _repair_checklist_structure(data: dict, node_name: str = "") -> dict:
-        """
-        ✅ Solution 4: Pre-validate and repair checklist structure before Pydantic validation.
-        Adds missing 'description' fields to evaluated_checklist items to prevent validation errors.
-        """
-        checklist = data.get("evaluated_checklist", [])
-        if not checklist:
-            return data
-        
-        for i, item in enumerate(checklist):
-            if not isinstance(item, dict):
-                continue
-                
-            # Add missing description field
-            if "description" not in item:
-                item_id = item.get("id", "unknown")
-                item["description"] = f"Evaluation criterion: {item_id}"
-                logger.warning(
-                    "%s: Added missing 'description' field to checklist item %d (id=%s)",
-                    node_name, i, item_id
-                )
-            
-            # Ensure partial field exists (optional but good practice)
-            if "partial" not in item:
-                item["partial"] = False
-                logger.debug(
-                    "%s: Added missing 'partial' field to checklist item %d (id=%s)",
-                    node_name, i, item.get("id", "unknown")
-                )
-        
-        return data
-
-    @staticmethod
     def _run_dir() -> Path:
         """Best-effort resolve the active run directory (logs/run-<ts>/).
 
@@ -483,9 +451,10 @@ class BaseLLMNode(ABC):
                     )
                     continue
 
-                # ✅ Solution 4: Repair checklist structure if present
-                if isinstance(py_obj, dict) and "evaluated_checklist" in py_obj:
-                    py_obj = BaseLLMNode._repair_checklist_structure(py_obj, node_name)
+                # Deterministic, non-fabricating repairs for known LLM schema-fidelity
+                # malformations. Single documented surface: qaai.agents.shared.json_repair_registry.
+                # Dispatched by response_model.__name__; a no-op for models with no registered repairs.
+                py_obj = apply_repairs(response_model, py_obj)
 
                 return response_model.model_validate(py_obj)
             except Exception as e:

@@ -1,0 +1,8 @@
+{
+  "model": "TestCaseAssessment",
+  "source_node": "AggregatorNode",
+  "first_seen": "2026-07-16T00:00:00",
+  "source_file": "curated: user-reported shape (item-level decomposed_requirements->decomposed_specifications mislabel)",
+  "repairable": true,
+  "notes": "Each decomposed_requirements item nests its spec list under the parent list's own name. rehome_decomposed_specs recovers it. This is the shape fixed in commit 78c2b9c."
+}

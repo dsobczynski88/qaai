@@ -1,0 +1,31 @@
+{
+  "test_case": {
+    "test_id": "PRJ-TEST-2146",
+    "description": "Exercise the thing",
+    "setup": "Preconditions established.",
+    "steps": "Step 1. Do the thing. Step 2. Verify.",
+    "expectedResults": "Thing done; verification passes.",
+    "in_baseline": true
+  },
+  "requirements": [
+    {"req_id": "REQ-1", "text": "The service shall do the thing."}
+  ],
+  "decomposed_requirements": [
+    {
+      "requirement": {"req_id": "REQ-1", "text": "The service shall do the thing."},
+      "decomposed_requirements": [
+        {"spec_id": "REQ-1-S1", "description": "The service shall do the thing.", "acceptance_criteria": "Given a valid request, the thing is done.", "rationale": "Explicit."}
+      ]
+    }
+  ],
+  "evaluated_checklist": [
+    {"id": "expected_result_support", "description": "d1", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a1"},
+    {"id": "expected_result_spec_align", "description": "d2", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a2"},
+    {"id": "test_case_achieves", "description": "d3", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a3"},
+    {"id": "test_case_logical_sequence", "description": "d4", "mandatory": true, "verdict": "Yes", "partial": false, "assessment": "a4"},
+    {"id": "test_case_setup_clarity", "description": "d5", "mandatory": false, "verdict": "Yes", "partial": false, "assessment": "a5"}
+  ],
+  "overall_verdict": "Yes",
+  "comments": "",
+  "clarification_questions": [""]
+}

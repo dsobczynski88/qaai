@@ -1,0 +1,7 @@
+{
+  "model": "DecomposedRequirement",
+  "source_node": "DecomposerNode",
+  "first_seen": "2026-07-08T09:00:55",
+  "source_file": "logs\\failed_parse_DecomposerNode_20260708_090055_936889.txt",
+  "repairable": false
+}

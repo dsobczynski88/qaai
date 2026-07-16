@@ -20,68 +20,13 @@ from pydantic import BaseModel, Field, model_validator
 from typing import Any, Optional, List, Literal, TypedDict, Annotated, Dict
 import operator
 
-
-_PARTIAL_VERDICT_ALIASES = {"partial", "yes-partial", "yes (partial)", "yes-with-partial"}
-
-
-def _coerce_partial_verdict(verdict: Any) -> tuple[Any, bool]:
-    """Return (canonical_verdict, partial_flag) when the input matches a 'Partial'
-    alias the LLM tends to emit instead of (verdict='Yes', partial=True). Returns
-    the verdict unchanged with partial_flag=False when no coercion applies."""
-    if isinstance(verdict, str) and verdict.strip().lower() in _PARTIAL_VERDICT_ALIASES:
-        return "Yes", True
-    return verdict, False
-
-
-# Assessment-level keys that belong at the TOP level of TestCaseAssessment. When the
-# aggregator LLM wraps its whole answer under a single `test_case` key (a schema-fidelity
-# error we've observed in production), these are lifted back out of `test_case` before
-# Pydantic validation. Ordered TestCase-first is irrelevant here — this is a membership set.
-_ASSESSMENT_LEVEL_KEYS = (
-    "requirements",
-    "decomposed_requirements",
-    "evaluated_checklist",
-    "overall_verdict",
-    "comments",
-    "clarification_questions",
+# Repair helpers live in the single documented surface
+# (qaai.agents.shared.json_repair_registry). Imported here so the model-level
+# mode="before" validators remain a safety net for direct model_validate calls.
+from qaai.agents.shared.json_repair_registry import (
+    coerce_partial_verdict as _coerce_partial_verdict,
+    unwrap_wrapped_assessment as _unwrap_wrapped_assessment,
 )
-
-
-def _unwrap_wrapped_assessment(data: Any) -> Any:
-    """Recover the assessment when the LLM nested every field inside `test_case`.
-
-    Observed malformation: the aggregator returns
-    ``{"test_case": {<TestCase fields> + requirements + decomposed_requirements +
-    evaluated_checklist + overall_verdict + comments + clarification_questions}}`` — i.e.
-    the entire assessment wrapped one level too deep, so the parsed dict's only top-level
-    key is ``test_case`` and the required top-level fields read as missing.
-
-    ``evaluated_checklist`` is the sentinel: it is never a legitimate TestCase field, so
-    its presence *inside* ``test_case`` while *absent* at the top level unambiguously
-    signals the wrap. When detected, the assessment-level keys are lifted back to the top
-    level (never clobbering a key already present there) and ``test_case`` is reduced to
-    just its TestCase fields.
-
-    Returns ``data`` unchanged when the wrap is not present. Never fabricates: if the model
-    genuinely omitted ``evaluated_checklist``, the sentinel check is False, nothing is
-    lifted, and validation fails exactly as it would have.
-    """
-    if not isinstance(data, dict):
-        return data
-    tc = data.get("test_case")
-    if not (
-        isinstance(tc, dict)
-        and "evaluated_checklist" not in data
-        and "evaluated_checklist" in tc
-    ):
-        return data
-    lifted = dict(data)
-    inner = dict(tc)
-    for key in _ASSESSMENT_LEVEL_KEYS:
-        if key in inner and key not in lifted:
-            lifted[key] = inner.pop(key)
-    lifted["test_case"] = inner
-    return lifted
 
 from qaai.agents.shared.core import (
     Requirement,

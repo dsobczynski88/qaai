@@ -6,10 +6,7 @@ Shared Pydantic models reused across reviewer components
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Literal, Any, Dict, TypedDict
 
-
-# Alias keys the aggregator LLM has been observed to (or plausibly may) nest the
-# decomposed-spec list under instead of the canonical `decomposed_specifications`.
-_SPEC_KEY_ALIASES = ("decomposed_requirements", "decomposed_specs", "specifications", "specs")
+from qaai.agents.shared.json_repair_registry import rehome_decomposed_specs
 
 
 # Binary Yes/No verdict shared by every reviewer rubric; the N-A variant is used
@@ -65,19 +62,11 @@ class DecomposedRequirement(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_spec_field_name(cls, data: Any) -> Any:
-        """Accept the specs list under a wrong key and normalize to
-        'decomposed_specifications'. The aggregator LLM (single_test_aggregator v8,
-        decomposition mode) intermittently nests specs under 'decomposed_requirements'
-        (the parent list's own name), which reads as the required field missing.
-        Only re-homes when the canonical key is absent — never clobbers a real value,
-        never fabricates."""
-        if isinstance(data, dict) and "decomposed_specifications" not in data:
-            for alias in _SPEC_KEY_ALIASES:
-                if isinstance(data.get(alias), list):
-                    data = dict(data)
-                    data["decomposed_specifications"] = data.pop(alias)
-                    break
-        return data
+        """Safety net for direct ``model_validate`` calls: re-home a mislabeled spec
+        list to ``decomposed_specifications``. Logic lives in
+        :func:`qaai.agents.shared.json_repair_registry.rehome_decomposed_specs` (the
+        single documented repair surface, also applied on the node parse path)."""
+        return rehome_decomposed_specs(data)
 
 
 class DesignDocument(BaseModel):

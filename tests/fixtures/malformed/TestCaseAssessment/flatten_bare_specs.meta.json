@@ -1,0 +1,8 @@
+{
+  "model": "TestCaseAssessment",
+  "source_node": "AggregatorNode",
+  "first_seen": "2026-07-16T00:00:00",
+  "source_file": "curated: flatten variant (top-level decomposed_requirements is a flat list of bare DecomposedSpec dicts, no requirement wrapper)",
+  "repairable": true,
+  "notes": "normalize_assessment_decomposed_requirements DROPS the uncoercible bare-spec items (non-critical echo field) rather than fabricating a requirement, so the verdict-bearing assessment still validates. Expect decomposed_requirements == [] after recovery."
+}

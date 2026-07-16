@@ -1,0 +1,8 @@
+{
+  "model": "TestCaseAssessment",
+  "source_node": "AggregatorNode",
+  "first_seen": "2026-07-16T00:00:00",
+  "source_file": "curated: whole assessment wrapped one level too deep under test_case",
+  "repairable": true,
+  "notes": "unwrap_wrapped_assessment lifts the assessment-level keys back to the top level (sentinel: evaluated_checklist inside test_case, absent at top). Mirrors tests/fixtures/mock/aggregator_wrapped_in_test_case.json."
+}
