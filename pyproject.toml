@@ -64,6 +64,11 @@ pyjama = { path = "libs/pyjama", editable = true }
 [project.scripts]
 qaai-api = "qaai.api.run:main"
 
+# Pytest plugin that emits a searchable HTML test catalog. Registering it here makes
+# the --test-catalog flag always available under `uv run pytest` (no -p needed).
+[project.entry-points.pytest11]
+qaai_testcatalog = "qaai.testcatalog.plugin"
+
 # Declaring a build system allows uv to install your project editably during sync.
 # This does not publish anything by itself; it just makes local imports work cleanly.
 [build-system]

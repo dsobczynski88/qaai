@@ -1,0 +1,82 @@
+/* Theme variables mirror qaai/viewer/common/base.css so the catalog sits flush
+   with the reviewer viewers. A [data-theme="dark"] override on <html> supports the
+   toggle button; the default is light. */
+:root {
+  --bg: #fafafa; --panel: #fff; --ink: #1a1a1a; --mute: #666;
+  --line: #e3e3e3; --accent: #2b62c2; --ok: #d7f5db; --bad: #ffdcc2;
+  --warn: #fff4cc; --head: #f2f4f7; --hover: #f6f8fc;
+  --chip-unit: #2e7d32; --chip-integration: #b58105; --chip-api: #2b62c2;
+  --chip-unlabeled: #757575;
+  --mono: ui-monospace, Menlo, Consolas, monospace;
+}
+:root[data-theme="dark"] {
+  --bg: #16181d; --panel: #1e2127; --ink: #e6e8ec; --mute: #9aa0a8;
+  --line: #313640; --accent: #6f9bff; --ok: #1f3a24; --bad: #4a2a17;
+  --warn: #4a3f19; --head: #262a31; --hover: #232830;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+
+header { padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 5; }
+header .src { color: var(--mute); font-size: 12px; font-family: var(--mono); max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header .gen { color: var(--mute); font-size: 11px; }
+.header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+button { padding: 6px 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 4px; cursor: pointer; font: inherit; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 45px; z-index: 4; }
+#search { flex: 1 1 320px; min-width: 220px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.count { color: var(--mute); font-size: 12px; margin-left: auto; }
+
+.facet-chip { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--mute); font-size: 12px; cursor: pointer; text-transform: capitalize; }
+.facet-chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+main { padding: 0 18px 40px; }
+table#catalog { width: 100%; border-collapse: collapse; font-size: 13px; }
+#catalog th, #catalog td { border-bottom: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+#catalog thead th { position: sticky; top: 96px; background: var(--head); color: var(--mute); font-size: 12px; font-weight: 600; z-index: 3; white-space: nowrap; }
+#catalog th.sortable { cursor: pointer; user-select: none; }
+#catalog th .arrow { font-size: 10px; color: var(--accent); }
+#catalog tbody tr:hover { background: var(--hover); }
+
+.t-name { font-family: var(--mono); font-size: 12px; }
+.t-name .parid { color: var(--mute); }
+.t-file { display: block; color: var(--mute); font-size: 11px; margin-top: 2px; }
+.t-summary { max-width: 460px; }
+.curated-flag { color: var(--accent); font-weight: 700; margin-left: 4px; cursor: help; }
+.skip-flag { display: inline-block; margin-left: 6px; font-size: 10px; padding: 0 6px; border-radius: 999px; background: var(--warn); color: #6b4f00; }
+:root[data-theme="dark"] .skip-flag { color: var(--warn); background: #4a3f19; filter: brightness(1.4); }
+
+.chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #fff; text-transform: capitalize; }
+.chip-unit { background: var(--chip-unit); }
+.chip-integration { background: var(--chip-integration); }
+.chip-api { background: var(--chip-api); }
+.chip-unlabeled { background: var(--chip-unlabeled); }
+
+.fx-list { list-style: none; margin: 0; padding: 0; max-width: 260px; }
+.fx-list li { margin: 1px 0; }
+.fx-name { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+
+.io-btn { padding: 3px 10px; font-size: 12px; }
+.io-btn.none { color: var(--mute); border-style: dashed; cursor: default; }
+.io-btn.none:hover { border-color: var(--line); }
+
+.empty { color: var(--mute); padding: 30px 4px; text-align: center; }
+
+/* modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(10,10,10,0.45); display: none; align-items: center; justify-content: center; z-index: 20; }
+.modal-backdrop.open { display: flex; }
+.modal { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; max-width: min(900px, 92vw); max-height: 86vh; overflow: auto; padding: 22px; box-shadow: 0 8px 40px rgba(0,0,0,0.35); }
+.modal h3 { margin: 0 0 4px; font-size: 16px; font-family: var(--mono); }
+.modal .close { position: sticky; top: 0; float: right; }
+.modal .sub { color: var(--mute); font-size: 12px; margin: 0 0 14px; }
+.modal h4 { margin: 18px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mute); }
+.modal pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 12px; overflow: auto; font-family: var(--mono); font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-word; }
+.modal .muted { color: var(--mute); font-style: italic; }
+table.detail { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+table.detail th, table.detail td { border: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top; }
+table.detail th { background: var(--head); font-weight: 600; white-space: nowrap; }

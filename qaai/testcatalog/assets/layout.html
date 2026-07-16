@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{TITLE}}</title>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+<header>
+  <strong>Test Catalog</strong>
+  <span class="src">{{SOURCE}}</span>
+  <span class="gen">generated {{GENERATED}}</span>
+  <div class="header-actions">
+    <button id="theme-btn" type="button" title="Toggle light/dark">◑</button>
+    <button id="copy-btn" type="button">Copy as Markdown</button>
+    <button id="export-btn" type="button">Export JSON</button>
+  </div>
+</header>
+
+<div class="toolbar">
+  <input id="search" type="search" placeholder="Search name, summary, fixtures, file…" autocomplete="off" />
+  <div class="filters" id="type-filters" data-facet="type"></div>
+  <div class="filters" id="component-filters" data-facet="component"></div>
+  <span class="count" id="count"></span>
+</div>
+
+<main>
+  <table id="catalog">
+    <thead>
+      <tr>
+        <th data-sort="name" class="sortable">Test <span class="arrow"></span></th>
+        <th data-sort="type" class="sortable">Type <span class="arrow"></span></th>
+        <th data-sort="component" class="sortable">Component <span class="arrow"></span></th>
+        <th data-sort="summary" class="sortable">Summary <span class="arrow"></span></th>
+        <th data-sort="fixtures" class="sortable">Fixtures / input <span class="arrow"></span></th>
+        <th>I/O</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p id="empty" class="empty" hidden>No tests match the current search / filters.</p>
+</main>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <button class="close" type="button" onclick="closeModal()">Close</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script id="DATA" type="application/json">{{DATA}}</script>
+<script>
+{{JS}}
+</script>
+</body>
+</html>
