@@ -38,6 +38,31 @@ never breaks if the SPA hasn't been built yet.
 
 `npm run typecheck` runs `vue-tsc` (not part of `build`, which uses esbuild).
 
+## Running on JupyterHub
+
+**Do not use `npm run dev` / port 5173 on the Hub.** The Vite dev server binds to
+`127.0.0.1`, so the JupyterHub proxy (which reaches services at
+`/user/<you>/proxy/<port>/`) can't connect to it — you'll get
+`connect ECONNREFUSED 0.0.0.0:5173`.
+
+Instead, serve the **built** SPA from FastAPI on port 8000 (already proxied by the
+Hub with the correct `--root-path`). `scripts/startup.sh` builds `dist/` for you if
+it's missing, then launches the server:
+
+```bash
+bash scripts/startup.sh                 # builds dist/ if absent, then starts uvicorn
+```
+
+Open the `…/user/<you>/proxy/8000/` URL the script prints (not 5173). After pulling
+UI changes, force a fresh build:
+
+```bash
+bash scripts/startup.sh --rebuild-web   # rebuild dist/ even if it already exists
+```
+
+The SPA handles the proxy prefix automatically (`base: "./"` + `detectRootPath()`),
+so no per-deployment path config is needed.
+
 ## Architecture
 
 ```

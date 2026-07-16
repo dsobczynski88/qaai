@@ -52,6 +52,26 @@ else
     exit 1
 fi
 
+# ── Ensure the Vue SPA is built (FastAPI serves qaai/web/dist at /) ──────────
+# On JupyterHub, do NOT run `npm run dev` (port 5173): the Vite dev server binds
+# 127.0.0.1 and the Hub proxy can't reach it (ECONNREFUSED 0.0.0.0:5173). Instead
+# we build the SPA here so FastAPI serves the static dist/ on 8000 (proxied below).
+WEB_DIR="qaai/web"
+REBUILD_WEB=0
+[ "${1:-}" = "--rebuild-web" ] && REBUILD_WEB=1
+if [ ! -f "$WEB_DIR/dist/index.html" ] || [ "$REBUILD_WEB" = "1" ]; then
+    if command -v npm >/dev/null 2>&1; then
+        echo "🛠️  Building Vue SPA ($WEB_DIR → dist)…"
+        ( cd "$WEB_DIR" && { [ -f package-lock.json ] && npm ci --silent || npm install --silent; } && npm run build )
+        echo "   ✓ SPA build ready"
+    else
+        echo "⚠️  npm not found — serving legacy static UI (run 'npm run build' in $WEB_DIR to get the Vue SPA)"
+    fi
+else
+    echo "✓ Vue SPA build present ($WEB_DIR/dist) — pass --rebuild-web to force a rebuild"
+fi
+echo ""
+
 # Detect if running on JupyterHub
 if [ -n "$JUPYTERHUB_USER" ]; then
     echo "🚀 Detected JupyterHub environment"
