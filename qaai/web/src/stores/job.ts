@@ -125,7 +125,7 @@ export const useJobStore = defineStore("job", () => {
         if (myGen !== generation) return;
         if (Date.now() - startTs.value > MAX_POLL_MS) {
           throw new Error(
-            "Timed out waiting for the review to finish (30 min). " +
+            "Timed out waiting for the review to finish (4 hr). " +
               "The job may still be running on the server — try again later.",
           );
         }

@@ -245,7 +245,7 @@ function setButtons(disabled) {
 // is sub-second, the upstream proxy never idles out (no more 504s).
 const POLL_INTERVAL_MS = 4000;
 // Hard ceiling so a job stuck in pending/running can't poll forever.
-const MAX_POLL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_POLL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 function fmtElapsed(startTs) {
   const s = Math.round((Date.now() - startTs) / 1000);
@@ -282,7 +282,7 @@ async function runJob(endpoint, fetchOpts, filename, label, baseSub) {
       if (myToken !== pollToken) return;
       if (Date.now() - startTs > MAX_POLL_MS) {
         throw new Error(
-          "Timed out waiting for the review to finish (30 min). " +
+          "Timed out waiting for the review to finish (4 hr). " +
             "The job may still be running on the server — try again later.",
         );
       }

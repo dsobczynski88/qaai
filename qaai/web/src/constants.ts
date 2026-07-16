@@ -5,7 +5,7 @@ import type { Permission, Role } from "./types";
 // status endpoint. Because every request is sub-second, the upstream proxy never
 // idles out (no 504s). Kept identical to the original vanilla app.
 export const POLL_INTERVAL_MS = 4000;
-export const MAX_POLL_MS = 30 * 60 * 1000; // 30 minutes
+export const MAX_POLL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // ── RBAC ──
 // Which roles grant which UI action. This is UX gating ONLY — a determined client
