@@ -1,29 +1,29 @@
 """Load and convert the row-aligned three-file eval dataset.
 
-Canonical layout under a dataset directory::
+Canonical layout under a dataset directory (the **answer key**, the ACTUAL values)::
 
-    eval_inputs.jsonl          # graph input rows           (run+score)
-    eval_outputs.jsonl         # graph output-state rows    (score-only)
-    eval_outputs_labels.jsonl  # flat answer-key rows        (always)
+    actual_inputs.jsonl   # graph input rows           (run+score)
+    actual_outputs.jsonl  # graph output-state rows    (score-only)
+    actual_labels.jsonl   # flat answer-key rows        (always)
 
 Rows are positionally aligned: row *i* of each file describes the same item.
 
 A live run additionally writes a timestamped *prediction* set beside the dataset::
 
-    predictions/<ts>/eval_inputs -- not repeated; the parent set is the source
-                    /eval_outputs.jsonl         # what the graph actually produced
-                    /eval_outputs_labels.jsonl  # those outputs, flattened = PREDICTED
-                    /run_metadata.json          # provenance tying it to an MLflow run
+    predictions/<ts>/predicted_inputs.jsonl   # the inputs this run scored (self-contained copy)
+                    /predicted_outputs.jsonl  # what the graph actually produced
+                    /predicted_labels.jsonl   # those outputs, flattened = PREDICTED
+                    /run_metadata.json         # provenance tying it to an MLflow run
 
-The distinction that matters: the parent ``eval_outputs.jsonl`` is the **answer key**
-(the ACTUAL values); a ``predictions/<ts>/eval_outputs_labels.jsonl`` holds the
+The distinction that matters: the parent ``actual_outputs.jsonl`` is the **answer key**
+(the ACTUAL values); a ``predictions/<ts>/predicted_labels.jsonl`` holds the
 **PREDICTED** values from one graph run. Scoring compares the two.
 
 Converters
-    gold_to_eval()        gold_dataset_labeled.jsonl -> eval_inputs + eval_outputs_labels
-    synthesize_outputs()  labels -> oracle eval_outputs (the answer key, in output shape)
-    outputs_to_labels()   eval_outputs -> flat labels (the exact inverse of the above)
-    passthrough_outputs() a live run's outputs.jsonl (full state) -> eval_outputs
+    gold_to_eval()        gold_dataset_labeled.jsonl -> actual_inputs + actual_labels
+    synthesize_outputs()  labels -> oracle actual_outputs (the answer key, in output shape)
+    outputs_to_labels()   actual_outputs -> flat labels (the exact inverse of the above)
+    passthrough_outputs() a live run's outputs.jsonl (full state) -> actual_outputs
 """
 from __future__ import annotations
 
@@ -35,9 +35,14 @@ from typing import Any, Dict, List, Optional, Union
 
 from qaai.eval.spec import EvalSpec
 
-INPUTS_NAME = "eval_inputs.jsonl"
-OUTPUTS_NAME = "eval_outputs.jsonl"
-LABELS_NAME = "eval_outputs_labels.jsonl"
+# Answer-key set (the ACTUAL values) — the committed dataset.
+ACTUAL_INPUTS_NAME = "actual_inputs.jsonl"
+ACTUAL_OUTPUTS_NAME = "actual_outputs.jsonl"
+ACTUAL_LABELS_NAME = "actual_labels.jsonl"
+# Prediction set (the PREDICTED values) — one timestamped folder per live run.
+PREDICTED_INPUTS_NAME = "predicted_inputs.jsonl"
+PREDICTED_OUTPUTS_NAME = "predicted_outputs.jsonl"
+PREDICTED_LABELS_NAME = "predicted_labels.jsonl"
 PREDICTIONS_DIRNAME = "predictions"
 METADATA_NAME = "run_metadata.json"
 
@@ -91,9 +96,9 @@ def load_dataset(
     Missing optional files load as empty lists.
     """
     d = Path(dataset_dir) if dataset_dir else None
-    ip = Path(inputs_path) if inputs_path else (d / INPUTS_NAME if d else None)
-    op = Path(outputs_path) if outputs_path else (d / OUTPUTS_NAME if d else None)
-    lp = Path(labels_path) if labels_path else (d / LABELS_NAME if d else None)
+    ip = Path(inputs_path) if inputs_path else (d / ACTUAL_INPUTS_NAME if d else None)
+    op = Path(outputs_path) if outputs_path else (d / ACTUAL_OUTPUTS_NAME if d else None)
+    lp = Path(labels_path) if labels_path else (d / ACTUAL_LABELS_NAME if d else None)
 
     labels = load_jsonl(lp) if lp and lp.exists() else []
     inputs = load_jsonl(ip) if ip and ip.exists() else []
@@ -103,11 +108,11 @@ def load_dataset(
         raise FileNotFoundError(f"labels file not found or empty: {lp}")
     if mode == "score" and not outputs:
         raise FileNotFoundError(
-            f"score mode needs {OUTPUTS_NAME} but none found at {op}. "
+            f"score mode needs {ACTUAL_OUTPUTS_NAME} but none found at {op}. "
             f"Run with --mode run to produce them, or point --dataset-dir at a set that has them."
         )
     if mode == "run" and not inputs:
-        raise FileNotFoundError(f"run mode needs {INPUTS_NAME} but none found at {ip}.")
+        raise FileNotFoundError(f"run mode needs {ACTUAL_INPUTS_NAME} but none found at {ip}.")
 
     return EvalDataset(
         labels=labels, inputs=inputs, outputs=outputs,
@@ -118,7 +123,7 @@ def load_dataset(
 # ── Converters ──────────────────────────────────────────────────────────────
 
 def gold_to_eval(gold_path: Union[str, Path]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Convert gold_dataset_labeled.jsonl -> (eval_inputs rows, eval_outputs_labels rows).
+    """Convert gold_dataset_labeled.jsonl -> (actual_inputs rows, actual_labels rows).
 
     Gold rows look like ``{requirement, test_cases[, design_docs], labels:{Overall_Verdict, M1..}}``.
     Inputs echo everything except ``labels``; labels un-nest the ``labels`` object into a flat row.
@@ -142,11 +147,11 @@ def _set_path(root: Dict[str, Any], dotted: str, value: Any) -> None:
 
 
 def synthesize_outputs(spec: EvalSpec, labels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Build oracle eval_outputs rows from labels (predictions == labels).
+    """Build oracle actual_outputs rows from labels (predictions == labels).
 
     Used only for the committed sample dataset and offline smoke/CI so score-only mode
     has something to score without invoking the LLM. Real evaluation uses run-produced
-    or user-supplied eval_outputs.
+    or user-supplied actual_outputs.
     """
     out_rows: List[Dict[str, Any]] = []
     rub = spec.output.rubric
@@ -186,17 +191,19 @@ def outputs_to_labels(spec: EvalSpec, outputs: List[Optional[Any]]) -> List[Dict
     """Flatten graph output rows into answer-key label rows — the inverse of synthesize_outputs.
 
     Applied to a live run's outputs this yields the **predicted** values; applied to the
-    dataset's own ``eval_outputs.jsonl`` it yields the **actual** values. Same function
+    dataset's own ``actual_outputs.jsonl`` it yields the **actual** values. Same function
     both ways, which is what makes the two sides directly comparable.
 
     Reads plain dicts and Pydantic graph state alike (via ``spec.extract_prediction``).
     A row that soft-failed is kept as ``{verdict_key: None}`` rather than dropped —
-    positional alignment with eval_inputs is the dataset's core invariant, so a missing
+    positional alignment with actual_inputs is the dataset's core invariant, so a missing
     prediction must still occupy its row.
 
     A rubric code absent from the output is omitted rather than written as None, so this
     round-trips ``synthesize_outputs`` exactly (an answer key with no R6 column produces
     no R6 key).
+
+    ``outputs`` is positionally aligned with the dataset's ``actual_inputs`` rows.
     """
     rub = spec.output.rubric
     keys = spec.labels.rubric_keys or (rub.codes if rub else [])
@@ -213,5 +220,5 @@ def outputs_to_labels(spec: EvalSpec, outputs: List[Optional[Any]]) -> List[Dict
 
 
 def passthrough_outputs(outputs_jsonl_path: Union[str, Path]) -> List[Dict[str, Any]]:
-    """A live run's outputs.jsonl rows are already valid eval_outputs (state dicts)."""
+    """A live run's outputs.jsonl rows are already valid actual_outputs (state dicts)."""
     return load_jsonl(outputs_jsonl_path)

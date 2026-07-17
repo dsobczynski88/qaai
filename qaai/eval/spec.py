@@ -6,7 +6,7 @@ hard-codes a schema. Swapping reviewers (RTM / hazard / test-case) or projects i
 matter of writing a new ``eval/specs/<name>.yaml`` — no Python change.
 
 The extraction helpers deliberately read from *both* plain dicts (score-only mode,
-where ``eval_outputs.jsonl`` rows are JSON) and Pydantic models (run+score mode,
+where ``actual_outputs.jsonl`` rows are JSON) and Pydantic models (run+score mode,
 where ``graph.ainvoke`` returns a state dict holding model instances). This mirrors
 ``qaai/api/services.py::_field``.
 """
@@ -62,7 +62,7 @@ class OutputSpec(BaseModel):
 
 
 class LabelSpec(BaseModel):
-    """How to read gold labels from an ``eval_outputs_labels`` row (flat dict)."""
+    """How to read gold labels from an ``actual_labels`` row (flat dict)."""
     verdict_key: str = "Overall_Verdict"
     rubric_keys: List[str] = Field(default_factory=list)
 
@@ -93,7 +93,7 @@ class EvalSpec(BaseModel):
     name: str
     component: str
     prompt_set: Optional[str] = None
-    # run+score input builders: logical graph-state key -> dotted path in the eval_inputs row
+    # run+score input builders: logical graph-state key -> dotted path in the actual_inputs row
     input: Dict[str, str] = Field(default_factory=dict)
     output: OutputSpec
     labels: LabelSpec = Field(default_factory=LabelSpec)

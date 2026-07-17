@@ -3,8 +3,8 @@ name: mlflow-eval-run
 description: |
   Run an MLflow evaluation study over a QAAI reviewer against a labelled dataset and log
   a tracked run (params, metrics, artifacts). Supports two modes: score-only (read
-  pre-computed eval_outputs.jsonl, no LLM) and run+score (invoke the compiled LangGraph
-  on eval_inputs.jsonl via bounded asyncio concurrency, saving a timestamped prediction
+  pre-computed actual_outputs.jsonl, no LLM) and run+score (invoke the compiled LangGraph
+  on actual_inputs.jsonl via bounded asyncio concurrency, saving a timestamped prediction
   set, then score). Scores the reviewer as a binary classifier on overall_verdict plus a
   per-rubric multi-cell classifier (M1-M5+R6 / H1-H6+R7 / 5 TC objectives), with
   helper-invariant and skip-rate signals.
@@ -26,21 +26,22 @@ params, metrics, and artifacts to MLflow as a single comparable run.
 
 ## Predicted vs. actual — read this first
 
-The dataset's `eval_outputs.jsonl` is the **answer key**: the labelled outputs, in
+The dataset's `actual_outputs.jsonl` is the **answer key**: the labelled outputs, in
 graph-output shape. It is the **ACTUAL** side. It is not a prediction and was never meant
 to be one.
 
 **PREDICTED** values only exist once the graph runs. `--mode run` invokes the reviewer over
-`eval_inputs.jsonl` and writes a timestamped prediction set:
+`actual_inputs.jsonl` and writes a timestamped prediction set:
 
 ```
 eval/datasets/test_suite/
-  eval_inputs.jsonl                     # graph input
-  eval_outputs.jsonl                    # answer key, output shape   <- ACTUAL
-  eval_outputs_labels.jsonl             # answer key, flat           <- ACTUAL (projection)
+  actual_inputs.jsonl                   # graph input                <- ACTUAL
+  actual_outputs.jsonl                  # answer key, output shape   <- ACTUAL
+  actual_labels.jsonl                   # answer key, flat           <- ACTUAL (projection)
   predictions/2026-07-16_17-05-33/
-    eval_outputs.jsonl                  # what the graph produced
-    eval_outputs_labels.jsonl           # those outputs, flattened   <- PREDICTED
+    predicted_inputs.jsonl              # the inputs this run scored (self-contained copy)
+    predicted_outputs.jsonl             # what the graph produced
+    predicted_labels.jsonl              # those outputs, flattened   <- PREDICTED
     run_metadata.json                   # mlflow run_id, git sha, model, prompt versions
 ```
 
@@ -48,7 +49,7 @@ Both sides are flattened by the same function (`datasets.py::outputs_to_labels`,
 inverse of `synthesize_outputs`), which is what makes them comparable. Accuracy = predicted
 vs actual.
 
-Ground truth is read from `eval_outputs.jsonl` when present, else `eval_outputs_labels.jsonl`;
+Ground truth is read from `actual_outputs.jsonl` when present, else `actual_labels.jsonl`;
 the choice is logged as the param `ground_truth_source`. If both exist and disagree on any
 labelled cell, the run **fails** with the row index — a self-contradicting dataset makes every
 downstream number meaningless.
@@ -76,14 +77,14 @@ LLM outputs. Start with a small `--limit` to prove the plumbing before spending 
 
 ## Score-only (no LLM — fast, offline)
 
-Scores an existing `eval_outputs.jsonl` against `eval_outputs_labels.jsonl`. Its real use is
+Scores an existing `actual_outputs.jsonl` against `actual_labels.jsonl`. Its real use is
 **re-scoring a past run for free** — new metrics, no LLM spend:
 
 ```bash
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --eval-outputs eval/datasets/test_suite/predictions/<ts>/eval_outputs.jsonl \
-  --eval-outputs-labels eval/datasets/test_suite/eval_outputs_labels.jsonl \
+  --actual-outputs eval/datasets/test_suite/predictions/<ts>/predicted_outputs.jsonl \
+  --actual-labels eval/datasets/test_suite/actual_labels.jsonl \
   --mode score --run-name rescore-<ts>
 ```
 
@@ -116,7 +117,7 @@ mlflow-eval-sample-size.
   mode), token/cost (run mode).
 - **Tags** — `env`, `owner`, plus `oracle_selftest=true` when applicable (see pitfalls).
 - **Artifacts** — predictions.jsonl, failures.jsonl, per_rubric.csv, confusion_matrix.png,
-  per_rubric_confusion.png, prompt_versions.json, fixture_metadata.json, eval_outputs.jsonl
+  per_rubric_confusion.png, prompt_versions.json, fixture_metadata.json, predicted_outputs.jsonl
   (run mode).
 
 Read `balanced_accuracy` / `f1_macro` over plain accuracy when a class dominates, and check
@@ -128,7 +129,7 @@ minority rows carries roughly a ±0.08 interval regardless of how clean its accu
 - **Scoring the committed dataset with `--mode score` reports 1.000.** That is the answer key
   matching itself — a plumbing check, not a measurement. The run self-labels
   `oracle_selftest=true` and prints a warning. Only `--mode run` measures the reviewer.
-- Score mode needs `eval_outputs.jsonl`; if missing, run `--mode run` first or synthesize
+- Score mode needs `actual_outputs.jsonl`; if missing, run `--mode run` first or synthesize
   oracle outputs (mlflow-eval-setup). The loader raises a clear error otherwise.
 - Records whose graph run raises or fails `is_complete` count toward `skip_rate` and are
   excluded from accuracy — watch that metric, a spike means silent regressions. It also

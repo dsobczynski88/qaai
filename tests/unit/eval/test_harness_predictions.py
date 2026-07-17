@@ -33,14 +33,14 @@ def _dataset(spec, *, with_outputs=True, labels=None):
 def test_ground_truth_prefers_the_answer_key_outputs():
     spec = load_spec(RTM_SPEC)
     labels, source = _ground_truth(spec, _dataset(spec), 2)
-    assert source == "eval_outputs"
+    assert source == "actual_outputs"
     assert labels == LABELS
 
 
 def test_ground_truth_falls_back_to_flat_labels():
     spec = load_spec(RTM_SPEC)
     labels, source = _ground_truth(spec, _dataset(spec, with_outputs=False), 2)
-    assert source == "eval_outputs_labels"
+    assert source == "actual_labels"
     assert labels == LABELS
 
 
@@ -51,7 +51,7 @@ def test_ground_truth_respects_limit():
 
 
 def test_ground_truth_raises_when_dataset_contradicts_itself():
-    """eval_outputs.jsonl and eval_outputs_labels.jsonl must agree; drift is not survivable."""
+    """actual_outputs.jsonl and actual_labels.jsonl must agree; drift is not survivable."""
     spec = load_spec(RTM_SPEC)
     drifted = [dict(LABELS[0]), {**LABELS[1], "M4": "No"}]  # flat file disagrees on row 1
     ds = _dataset(spec, labels=drifted)
@@ -66,29 +66,32 @@ def test_ground_truth_tolerates_extra_cells_in_outputs():
     ds = _dataset(spec, labels=[{k: v for k, v in LABELS[0].items()}])
     ds.outputs = synthesize_outputs(spec, [{**LABELS[0], "R6": "No"}])
     labels, source = _ground_truth(spec, ds, 1)
-    assert source == "eval_outputs"
+    assert source == "actual_outputs"
     assert labels[0]["R6"] == "No"
 
 
 def test_write_prediction_set_emits_a_rescorable_dataset(tmp_path):
     spec = load_spec(RTM_SPEC)
+    inputs = [{"requirement": {"req_id": f"R{i}", "text": "t"}} for i in range(len(LABELS))]
     outputs = synthesize_outputs(spec, LABELS)
-    pred_dir = _write_prediction_set(tmp_path, spec, outputs, {"model": "m", "n_records": 2})
+    pred_dir = _write_prediction_set(tmp_path, spec, inputs, outputs, {"model": "m", "n_records": 2})
 
     assert pred_dir.parent == tmp_path
-    # Canonical names inside, so --mode score reads it with no special-casing.
-    assert load_jsonl(pred_dir / "eval_outputs.jsonl") == outputs
-    assert load_jsonl(pred_dir / "eval_outputs_labels.jsonl") == LABELS
+    # predicted_* names mirror the parent's actual_*, so --mode score reads it with no special-casing.
+    assert load_jsonl(pred_dir / "predicted_inputs.jsonl") == inputs
+    assert load_jsonl(pred_dir / "predicted_outputs.jsonl") == outputs
+    assert load_jsonl(pred_dir / "predicted_labels.jsonl") == LABELS
     assert json.loads((pred_dir / "run_metadata.json").read_text(encoding="utf-8"))["model"] == "m"
 
 
 def test_write_prediction_set_preserves_row_alignment_for_failures(tmp_path):
     """A None output must round-trip as a null row, keeping row i aligned to input i."""
     spec = load_spec(RTM_SPEC)
+    inputs = [{"requirement": {"req_id": "R0", "text": "t"}}, {"requirement": {"req_id": "R1", "text": "t"}}]
     outputs = [None, synthesize_outputs(spec, LABELS)[1]]
-    pred_dir = _write_prediction_set(tmp_path, spec, outputs, {})
+    pred_dir = _write_prediction_set(tmp_path, spec, inputs, outputs, {})
 
-    assert (pred_dir / "eval_outputs.jsonl").read_text(encoding="utf-8").splitlines()[0] == "null"
-    rows = load_jsonl(pred_dir / "eval_outputs_labels.jsonl")
+    assert (pred_dir / "predicted_outputs.jsonl").read_text(encoding="utf-8").splitlines()[0] == "null"
+    rows = load_jsonl(pred_dir / "predicted_labels.jsonl")
     assert len(rows) == 2
     assert rows[0] == {"Overall_Verdict": None}

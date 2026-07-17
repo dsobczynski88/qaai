@@ -54,23 +54,23 @@ def test_synthesize_outputs_are_scorable(tmp_path):
 
 
 def test_load_dataset_score_requires_outputs(tmp_path):
-    write_jsonl(tmp_path / "eval_outputs_labels.jsonl", [{"Overall_Verdict": "Yes"}])
+    write_jsonl(tmp_path / "actual_labels.jsonl", [{"Overall_Verdict": "Yes"}])
     with pytest.raises(FileNotFoundError):
         load_dataset(tmp_path, mode="score")
 
 
 def test_load_dataset_run_requires_inputs(tmp_path):
-    write_jsonl(tmp_path / "eval_outputs_labels.jsonl", [{"Overall_Verdict": "Yes"}])
+    write_jsonl(tmp_path / "actual_labels.jsonl", [{"Overall_Verdict": "Yes"}])
     with pytest.raises(FileNotFoundError):
         load_dataset(tmp_path, mode="run")
 
 
 def test_load_dataset_score_ok(tmp_path):
     write_jsonl(
-        tmp_path / "eval_outputs.jsonl",
+        tmp_path / "actual_outputs.jsonl",
         [{"synthesized_assessment": {"overall_verdict": "Yes", "mandatory_findings": []}}],
     )
-    write_jsonl(tmp_path / "eval_outputs_labels.jsonl", [{"Overall_Verdict": "Yes"}])
+    write_jsonl(tmp_path / "actual_labels.jsonl", [{"Overall_Verdict": "Yes"}])
     ds = load_dataset(tmp_path, mode="score")
     assert len(ds) == 1
     assert ds.outputs[0]["synthesized_assessment"]["overall_verdict"] == "Yes"
@@ -94,8 +94,8 @@ def test_outputs_to_labels_roundtrips_the_committed_dataset():
     This is what licenses using the same extractor for both sides of the comparison.
     """
     spec = load_spec(RTM_SPEC)
-    got = outputs_to_labels(spec, load_jsonl(COMMITTED_DATASET / "eval_outputs.jsonl"))
-    assert got == load_jsonl(COMMITTED_DATASET / "eval_outputs_labels.jsonl")
+    got = outputs_to_labels(spec, load_jsonl(COMMITTED_DATASET / "actual_outputs.jsonl"))
+    assert got == load_jsonl(COMMITTED_DATASET / "actual_labels.jsonl")
 
 
 def test_outputs_to_labels_keeps_soft_failed_rows_aligned():
@@ -138,7 +138,7 @@ def test_outputs_to_labels_reads_pydantic_state():
 def test_new_predictions_dir_is_append_only(tmp_path):
     """Each run gets its own timestamped dir; existing prediction sets are never clobbered."""
     first = new_predictions_dir(tmp_path)
-    (first / "eval_outputs.jsonl").write_text("{}", encoding="utf-8")
+    (first / "predicted_outputs.jsonl").write_text("{}", encoding="utf-8")
     assert first.exists() and first.parent == tmp_path
     assert new_predictions_dir(tmp_path).exists()
-    assert (first / "eval_outputs.jsonl").read_text(encoding="utf-8") == "{}"
+    assert (first / "predicted_outputs.jsonl").read_text(encoding="utf-8") == "{}"

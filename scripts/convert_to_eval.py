@@ -1,10 +1,10 @@
-"""Produce the three-file eval dataset from existing QAAI data.
+"""Produce the three-file answer-key dataset from existing QAAI data.
 
 Subcommands:
-    gold     gold_dataset_labeled.jsonl -> eval_inputs.jsonl + eval_outputs_labels.jsonl
-             (optionally --synthesize-outputs to also emit an oracle eval_outputs.jsonl
+    gold     gold_dataset_labeled.jsonl -> actual_inputs.jsonl + actual_labels.jsonl
+             (optionally --synthesize-outputs to also emit an oracle actual_outputs.jsonl
               from the labels, so score-only mode runs offline).
-    outputs  a live run's outputs.jsonl (full graph state) -> eval_outputs.jsonl
+    outputs  a live run's outputs.jsonl (full graph state) -> actual_outputs.jsonl
 
 Examples:
     uv run python scripts/convert_to_eval.py gold \
@@ -19,9 +19,9 @@ import argparse
 from pathlib import Path
 
 from qaai.eval.datasets import (
-    INPUTS_NAME,
-    LABELS_NAME,
-    OUTPUTS_NAME,
+    ACTUAL_INPUTS_NAME,
+    ACTUAL_LABELS_NAME,
+    ACTUAL_OUTPUTS_NAME,
     gold_to_eval,
     passthrough_outputs,
     synthesize_outputs,
@@ -32,8 +32,8 @@ from qaai.eval.datasets import (
 def _cmd_gold(args: argparse.Namespace) -> None:
     inputs, labels = gold_to_eval(args.input)
     out = Path(args.out)
-    write_jsonl(out / INPUTS_NAME, inputs)
-    write_jsonl(out / LABELS_NAME, labels)
+    write_jsonl(out / ACTUAL_INPUTS_NAME, inputs)
+    write_jsonl(out / ACTUAL_LABELS_NAME, labels)
     msg = f"wrote {len(inputs)} inputs + {len(labels)} labels to {out}"
     if args.synthesize_outputs:
         if not args.spec:
@@ -42,7 +42,7 @@ def _cmd_gold(args: argparse.Namespace) -> None:
 
         spec = load_spec(args.spec)
         outputs = synthesize_outputs(spec, labels)
-        write_jsonl(out / OUTPUTS_NAME, outputs)
+        write_jsonl(out / ACTUAL_OUTPUTS_NAME, outputs)
         msg += f" + {len(outputs)} oracle outputs"
     print(msg)
 
@@ -50,8 +50,8 @@ def _cmd_gold(args: argparse.Namespace) -> None:
 def _cmd_outputs(args: argparse.Namespace) -> None:
     rows = passthrough_outputs(args.input)
     out = Path(args.out)
-    write_jsonl(out / OUTPUTS_NAME, rows)
-    print(f"wrote {len(rows)} outputs to {out / OUTPUTS_NAME}")
+    write_jsonl(out / ACTUAL_OUTPUTS_NAME, rows)
+    print(f"wrote {len(rows)} outputs to {out / ACTUAL_OUTPUTS_NAME}")
 
 
 def main() -> None:
@@ -63,7 +63,7 @@ def main() -> None:
     g.add_argument("--out", type=Path, required=True)
     g.add_argument("--spec", type=Path, help="spec (required with --synthesize-outputs)")
     g.add_argument("--synthesize-outputs", action="store_true",
-                   help="also write an oracle eval_outputs.jsonl from labels (offline demo)")
+                   help="also write an oracle actual_outputs.jsonl from labels (offline demo)")
     g.set_defaults(func=_cmd_gold)
 
     o = sub.add_parser("outputs", help="convert a run's outputs.jsonl")
