@@ -23,11 +23,10 @@ from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.agents.shared.nodes import (
     StandardLLMNode,
     DecomposerNode,
+    build_llm_node,
     make_decomposer_node,
 )
-from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import settings
-from qaai.utils import render_prompt
 
 from .core import (
     OverallAnalysis,
@@ -271,15 +270,15 @@ def _make_axis_node(
     prompt_set: Optional[str] = None,
     **template_vars,
 ) -> _SingleSpecAxisNode:
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return node_cls(
+    return build_llm_node(
+        node_cls,
         client=client,
         model=model,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
     )
 
 
@@ -386,15 +385,15 @@ def make_logical_single_node(
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_logical_steps
 
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return OverallLogicalNode(
+    return build_llm_node(
+        OverallLogicalNode,
         client=client,
         model=model,
-        response_model=OverallAnalysis,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        template_vars=template_vars,
+        response_model=OverallAnalysis,
     )
 
 
@@ -414,15 +413,15 @@ def make_prereqs_single_node(
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_prereqs
 
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return OverallPrereqsNode(
+    return build_llm_node(
+        OverallPrereqsNode,
         client=client,
         model=model,
-        response_model=OverallAnalysis,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        template_vars=template_vars,
+        response_model=OverallAnalysis,
     )
 
 
@@ -535,14 +534,14 @@ def make_aggregator_node(
     if prompt_template is None:
         prompt_template = settings.prompt_config.single_test_aggregator
 
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return AggregatorNode(
+    return build_llm_node(
+        AggregatorNode,
         client=client,
         model=model,
-        response_model=TestCaseAssessment,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        template_vars=template_vars,
+        response_model=TestCaseAssessment,
         is_final_output=True,
     )

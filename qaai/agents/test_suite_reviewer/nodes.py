@@ -14,13 +14,12 @@ from langgraph.types import Send
 from langgraph.graph import END
 from qaai.agents.shared.gate import SKIP_STATUS
 from qaai.agents.clients import RateLimitOpenAIClient
-from qaai.utils import render_prompt
-from qaai.core.cache import ReviewCacheManager
 from qaai.core.constants import DEFAULT_BATCH_SIZE
 from qaai.agents.shared.nodes import (
     BatchedLLMNode,
     StandardLLMNode,
     DecomposerNode,
+    build_llm_node,
     make_decomposer_node,
     sanitize_requirement_text,
 )
@@ -357,17 +356,17 @@ def make_summarizer_node(
     v4+ prompts return only the summary array (SummarizedTestCaseList).
     v2/v3 prompts return the full TestSuite object.
     """
-    system_prompt = render_prompt(prompt_template, **template_vars)
     response_model = SummarizedTestCaseList if _prompt_major_version(prompt_template) >= 4 else TestSuite
-    return SummaryNode(
+    return build_llm_node(
+        SummaryNode,
         client=client,
         model=model,
-        response_model=response_model,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=response_model,
     )
 
 
@@ -395,15 +394,15 @@ def make_coverage_evaluator(
     Returns:
         SingleSpecEvaluatorNode: Configured single-spec evaluator node
     """
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return SingleSpecEvaluatorNode(
+    return build_llm_node(
+        SingleSpecEvaluatorNode,
         client=client,
         model=model,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
         # Coverage output depends on summarized_designs → cache keyed by ds0/ds1.
         design_sensitive=True,
     )
@@ -434,17 +433,17 @@ def make_synthesizer_node(
     Returns:
         SynthesizerNode: Configured synthesizer node
     """
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return SynthesizerNode(
+    return build_llm_node(
+        SynthesizerNode,
         client=client,
         model=model,
-        response_model=SynthesizedAssessment,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
-        is_final_output=True,
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=SynthesizedAssessment,
+        is_final_output=True,
         # Synthesis (incl. R6 Design Alignment) depends on summarized_designs.
         design_sensitive=True,
     )
@@ -471,18 +470,16 @@ def make_design_summarizer_node(
     Returns:
         DesignSummarizerNode: Configured design summarizer node
     """
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    response_model = SummarizedDesignSpecList
-
-    return DesignSummarizerNode(
+    return build_llm_node(
+        DesignSummarizerNode,
         client=client,
         model=model,
-        response_model=response_model,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=SummarizedDesignSpecList,
         # Its own output is the design summary → cache keyed by ds1 when it runs.
         design_sensitive=True,
     )

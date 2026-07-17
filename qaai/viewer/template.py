@@ -1,20 +1,11 @@
 """HTML template for the batch-output viewer.
 
+Renders RTMReviewState records produced by qaai.agents.test_suite_reviewer — one
+Requirement plus its traced test suite and the M1-M5 + R6 rubric.
+
 Placeholders: {{TITLE}}, {{SOURCE}}, {{RUN_KEY}}, {{DATA}}.
 """
 
-from pathlib import Path
+from qaai.viewer._loader import load_template
 
-_COMMON = Path(__file__).parent / "common"
-_HERE   = Path(__file__).parent / "test_suite_reviewer"
-
-_css  = (_COMMON / "base.css").read_text(encoding="utf-8") + (_HERE / "style.css").read_text(encoding="utf-8")
-_js   = (_COMMON / "shared.js").read_text(encoding="utf-8") + "\n" + (_HERE / "script.js").read_text(encoding="utf-8")
-_html = (_COMMON / "layout.html").read_text(encoding="utf-8")
-
-HTML_TEMPLATE = (
-    _html
-    .replace("{{CSS}}",          _css)
-    .replace("{{JS}}",           _js)
-    .replace("{{HEADER_TITLE}}", "Test Suite Reviewer")
-)
+HTML_TEMPLATE = load_template("test_suite_reviewer", "Test Suite Reviewer")

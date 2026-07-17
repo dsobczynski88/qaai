@@ -29,10 +29,10 @@ from qaai.agents.shared.nodes import (
     BatchedLLMNode,
     CacheRequiredError,
     StandardLLMNode,
+    build_llm_node,
 )
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
-from qaai.utils import render_prompt
 
 from .constants import HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS
 from .core import (
@@ -883,55 +883,6 @@ class _FinalAssessorNode(StandardLLMNode):
 # --- factories ------------------------------------------------------------
 
 
-def _make_hazard_evaluator(
-    client: RateLimitOpenAIClient,
-    model: str,
-    model_kwargs: dict,
-    prompt_template: str,
-    dimension_code: str,
-    required_fields: tuple,
-    cache_manager: Optional[ReviewCacheManager] = None,
-    prompt_set: Optional[str] = None,
-    **template_vars,
-) -> HazardEvaluatorNode:
-    """Factory for generic HazardEvaluatorNode (H1-H5, R7)."""
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return HazardEvaluatorNode(
-        client=client,
-        model=model,
-        system_prompt=system_prompt,
-        model_kwargs=model_kwargs,
-        dimension_code=dimension_code,
-        required_fields=required_fields,
-        cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
-        prompt_set=prompt_set,
-    )
-
-
-def _make_h6_evaluator(
-    client: RateLimitOpenAIClient,
-    model: str,
-    model_kwargs: dict,
-    prompt_template: str,
-    cache_manager: Optional[ReviewCacheManager] = None,
-    prompt_set: Optional[str] = None,
-    **template_vars,
-) -> H6EvaluatorNode:
-    """Factory for specialized H6EvaluatorNode."""
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return H6EvaluatorNode(
-        client=client,
-        model=model,
-        response_model=HazardFinding,
-        system_prompt=system_prompt,
-        model_kwargs=model_kwargs,
-        cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
-        prompt_set=prompt_set,
-    )
-
-
 def make_hazard_evaluator_node(
     dimension_code: str,
     client: RateLimitOpenAIClient,
@@ -943,10 +894,17 @@ def make_hazard_evaluator_node(
     **template_vars,
 ) -> HazardEvaluatorNode:
     """Create a HazardEvaluatorNode for the given dimension (H1-H5, R7)."""
-    fields = _DIMENSION_CONFIGS[dimension_code]
-    return _make_hazard_evaluator(
-        client, model, model_kwargs, prompt_template,
-        dimension_code, fields, cache_manager, prompt_set=prompt_set, **template_vars,
+    return build_llm_node(
+        HazardEvaluatorNode,
+        client=client,
+        model=model,
+        model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
+        cache_manager=cache_manager,
+        prompt_set=prompt_set,
+        template_vars=template_vars,
+        dimension_code=dimension_code,
+        required_fields=_DIMENSION_CONFIGS[dimension_code],
     )
 
 
@@ -959,10 +917,17 @@ def make_h6_evaluator_node(
     prompt_set: Optional[str] = None,
     **template_vars,
 ) -> H6EvaluatorNode:
-    return _make_h6_evaluator(
-        client, model, model_kwargs, prompt_template,
-        cache_manager=cache_manager, prompt_set=prompt_set,
-        **template_vars,
+    """Create the specialized H6EvaluatorNode."""
+    return build_llm_node(
+        H6EvaluatorNode,
+        client=client,
+        model=model,
+        model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
+        cache_manager=cache_manager,
+        prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=HazardFinding,
     )
 
 
@@ -975,17 +940,18 @@ def make_final_assessor_node(
     prompt_set: Optional[str] = None,
     **template_vars,
 ) -> _FinalAssessorNode:
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return _FinalAssessorNode(
+    """Create the _FinalAssessorNode. This is the graph's final output node."""
+    return build_llm_node(
+        _FinalAssessorNode,
         client=client,
         model=model,
-        response_model=FinalAssessorProse,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
-        is_final_output=True,
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=FinalAssessorProse,
+        is_final_output=True,
     )
 
 
@@ -999,16 +965,16 @@ def make_hazard_design_summarizer_node(
     **template_vars,
 ) -> HazardDesignSummarizerNode:
     """Create a HazardDesignSummarizerNode with prompt loaded from Jinja2 template."""
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return HazardDesignSummarizerNode(
+    return build_llm_node(
+        HazardDesignSummarizerNode,
         client=client,
         model=model,
-        response_model=HazardSummarizedDesignSpecList,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=HazardSummarizedDesignSpecList,
     )
 
 
@@ -1022,16 +988,16 @@ def make_hazard_needs_summarizer_node(
     **template_vars,
 ) -> HazardNeedsSummarizerNode:
     """Create a HazardNeedsSummarizerNode with prompt loaded from Jinja2 template."""
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return HazardNeedsSummarizerNode(
+    return build_llm_node(
+        HazardNeedsSummarizerNode,
         client=client,
         model=model,
-        response_model=HazardSummarizedUserNeedList,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=HazardSummarizedUserNeedList,
     )
 
 

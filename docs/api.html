@@ -97,6 +97,15 @@ its input form. These documentation pages are also served at <code>/guide</code>
 See the <a href="design/frontend_vue_rbac.html">Frontend &amp; RBAC design</a> for the SPA,
 the async job engine, and the <code>/api/v1/me</code> identity/roles seam.</p>
 
+<div class="note warn"><strong><code>qaai/api/static/</code> is deprecated.</strong> The Vue SPA
+under <code>qaai/web/</code> is the supported frontend and the only one that receives new
+features; the legacy vanilla page survives purely as the build-less fallback taken when
+<code>qaai/web/dist/</code> is missing <span class="src">qaai/api/main.py:216-228</span>. It is
+~1,600 lines of separately-maintained HTML/CSS/JS that does <strong>not</strong> track the SPA —
+notably it has none of the RBAC gating. Treat it as a safety net for an unbuilt checkout, not a
+second UI to keep in sync: build the SPA (<code>npm run build</code> in <code>qaai/web</code>)
+rather than adding features to <code>static/</code>.</div>
+
 <h2 id="endpoints">Endpoints</h2>
 <p>All routes are mounted under <code>/api/v1</code> <span class="src">qaai/api/routes.py</span>.</p>
 <table>

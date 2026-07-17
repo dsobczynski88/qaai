@@ -106,13 +106,72 @@ Create a `.env` file in the repo root with your LLM credentials (`API_KEY`, `API
 
 ## Documentation
 
-In-depth, self-contained HTML docs (generated from the codebase) live under `docs/` — open [`docs/index.html`](docs/index.html) as the entry point:
+In-depth, self-contained HTML docs (generated from the codebase) live under `docs/` — open [`docs/index.html`](docs/index.html) as the entry point.
+
+**Guides**
 
 - [Configuration Guide](docs/configuration.html) — environment variables, enabling/disabling the cache, and creating & selecting prompt sets.
-- [Caching design](docs/design/caching.html) — the shared review cache: disk layout, cache keys, per-run cache modes, prompt-set namespacing, and version-driven invalidation.
+- [API Server & Frontend Guide](docs/api.html) — the async job model, every endpoint, request schemas, the web frontend, and production notes.
 - [Test Guide](docs/test_guide.html) — running the unit, API, and integration suites; default fixtures and custom input files.
-- [API Server & Frontend Guide](docs/api.html) — the async job model, every endpoint, request schemas, the single-page web frontend, and production notes.
-- [Reviewer Agent design](docs/design/agents.html) — per-reviewer graph topologies, the shared node engine, output viewers, and design patterns.
+- [MLflow Evaluation](docs/mlflow.html) — score the reviewers as classifiers: the spec-driven harness, dataset format, metrics, sample sizing, and the `qaai-mlflow-eval` plugin.
+- [Test Catalog](docs/test_catalog.html) — the `--test-catalog` pytest plugin: a searchable HTML book of the collected suite.
+
+**Design**
+
+- [Reviewer Agents (overview)](docs/design/agents.html) — per-reviewer graph topologies, the shared node engine, output viewers, and design patterns.
+- [Test Suite Reviewer (RTM)](docs/design/test_suite_reviewer.html) — node-by-node walkthrough, the M1–M5 + R6 rubric, and verdict logic.
+- [Test Case Reviewer](docs/design/test_case_reviewer.html) — the three review axes and the 5-objective checklist.
+- [Hazard Risk Reviewer](docs/design/hazard_risk_reviewer.html) — the staged H1–H6 + R7 graph and the embedded RTM subgraph.
+- [Caching](docs/design/caching.html) — disk layout, cache keys, per-run cache modes, prompt-set namespacing, and version-driven invalidation.
+- [Prompt Design](docs/design/prompt_design.html) — how the prompt suites encode ISO/IEC/IEEE 29148, 29119-3, and ISO 14971, with a full clause→prompt traceability table.
+- [Frontend (Vue 3) & RBAC](docs/design/frontend_vue_rbac.html) — the SPA, the async job engine, the RBAC model, and the `/api/v1/me` identity seam.
+
+---
+
+## Testing
+
+The suite is pytest with `asyncio_mode=auto` and two markers, `unit` and `integration`. Integration tests make **real LLM calls** and need a `.env`; everything else runs offline.
+
+```bash
+uv run pytest -m "not integration"    # unit + API tests — no LLM calls
+uv run pytest -m integration -s       # real LLM calls; needs .env
+uv run pytest tests/unit -v           # unit suite only
+```
+
+### Test catalog
+
+`plugins/qaai-testcatalog/` is a **pytest plugin** (registered via the `pytest11` entry point, so no `-p` is needed) that emits a searchable, self-contained HTML book of the collected suite — each test's type, component, summary, fixtures, and example input/output. Because it is built from the tests pytest actually collects, it cannot drift.
+
+```bash
+uv run pytest --collect-only --test-catalog   # no tests run, no LLM calls
+#   -> logs/test-catalog/test_catalog.html    (open in a browser)
+#   -> logs/test-catalog/test_catalog.json    (the underlying data)
+
+uv run pytest -m unit --collect-only --test-catalog                  # scope it like any pytest run
+uv run pytest --collect-only --test-catalog --test-catalog-out DIR   # change the output directory
+python -m qaai_testcatalog logs/test-catalog/test_catalog.json       # re-render from saved JSON
+```
+
+Entries are auto-derived from docstrings, markers, fixtures, and parametrize params; the optional `@pytest.mark.catalog(summary=..., example_input=..., example_output=...)` marker overrides any field. See the [Test Guide](docs/test_guide.html) and [Test Catalog](docs/test_catalog.html) docs.
+
+---
+
+## Evaluation
+
+`qaai/eval/` is a spec-driven MLflow harness that scores any reviewer as a binary classifier (`overall_verdict`) plus a per-cell rubric classifier. An `EvalSpec` (`eval/specs/<name>.yaml`) declares where the verdict and rubric live, so swapping reviewers or projects needs **no code change**. Predictions come only from `--mode run`, which invokes the graph and saves a timestamped prediction set you can re-score offline for free.
+
+```bash
+# Run the graph live, then score (needs .env)
+uv run python scripts/evaluate_with_mlflow.py --spec eval/specs/test_suite_reviewer.yaml \
+  --dataset-dir eval/datasets/test_suite_study --mode run --limit 20
+
+# How many labelled records do I need? (95% confidence, ±0.05 → 385 at p=0.5, 196 at p=0.85)
+uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.5
+
+uv run mlflow ui        # browse runs, metrics, artifacts, and per-node traces
+```
+
+Other CLIs: `scripts/convert_to_eval.py` (build a dataset from gold data or a run's outputs) and `scripts/check_eval_gate.py` (fail CI when a metric regresses). The repo also ships `plugins/qaai-mlflow-eval`, a **Claude Code plugin** wrapping the harness in five skills. Full details — dataset format, every flag, the metric catalogue, and sample sizing — are in the [MLflow Evaluation guide](docs/mlflow.html).
 
 ---
 
@@ -121,7 +180,8 @@ In-depth, self-contained HTML docs (generated from the codebase) live under `doc
 ### Starting the Server
 
 ```bash
-uv run uvicorn qaai.api.main:app --reload
+uv run uvicorn qaai.api.main:app --reload   # dev: auto-reload on code changes
+uv run qaai-api                             # console script (pyproject.toml [project.scripts])
 ```
 
 Interactive API documentation is available at `http://localhost:8000/docs`. At startup the lifespan handler builds a single shared `RTMReviewerRunnable` and reuses it inside the hazard pipeline's `RequirementReviewerNode`, so the RTM graph compiles and renders `graph.png` only once per process even though multiple endpoints exercise it. All three services share a single `ReviewCacheManager`, and a single in-memory `JobManager` (`qaai/api/jobs.py`) backs the asynchronous review jobs.

@@ -76,6 +76,13 @@ as a build-less fallback) and adds a <strong>role-based access-control</strong> 
 <p>The backend endpoint contract and request payload field names are preserved exactly —
 only the UI and the static mount changed. Two behaviours were ported verbatim: the
 proxy base-path detection and the async job engine (below).</p>
+<div class="note warn"><strong><code>qaai/api/static/</code> is deprecated — do not add features
+to it.</strong> The 1,644-line legacy page is separately maintained and does not track this SPA;
+in particular it has <strong>no RBAC layer at all</strong> — it never calls
+<code>/api/v1/me</code> and its only <code>role</code> attributes are ARIA
+(<code>role="button"</code>). It exists solely so an unbuilt checkout still serves a working UI.
+The fix for a missing UI is <code>npm run build</code> in <code>qaai/web</code>, not an edit to
+<code>static/</code>.</div>
 <table>
 <thead><tr><th>Concern</th><th>Choice</th><th>Where</th></tr></thead>
 <tbody>

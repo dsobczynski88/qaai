@@ -52,6 +52,7 @@
   <a href="#datasets">Datasets &amp; converter</a>
   <a href="#spec">The eval spec</a>
   <a href="#run">Running a study</a>
+  <a href="#predictions">Where predictions go</a>
   <a href="#metrics">Metrics &amp; scoring</a>
   <a href="#inspect">Inspecting runs</a>
   <a href="#samplesize">Sample size</a>
@@ -59,13 +60,14 @@
   <strong style="margin-top:16px">More docs</strong>
   <a href="index.html">← Docs home</a>
   <a href="test_guide.html">Test guide</a>
+  <a href="test_catalog.html">Test catalog</a>
   <a href="configuration.html">Configuration</a>
   <a href="design/test_suite_reviewer.html">RTM design</a>
 </nav>
 <main>
 <header class="doc">
   <h1>MLflow Evaluation</h1>
-  <div class="meta">QAAI (qaai) · <code>qaai.eval</code> + <code>scripts/</code> + <code>plugins/qaai-mlflow-eval</code> · generated from the codebase 2026-07-06</div>
+  <div class="meta">QAAI (qaai) · <code>qaai.eval</code> + <code>scripts/</code> + <code>plugins/qaai-mlflow-eval</code> · generated from the codebase 2026-07-16</div>
 </header>
 
 <p>This guide covers the spec-driven MLflow evaluation harness for the three QAAI reviewer
@@ -149,7 +151,30 @@ describes the same item <span class="src">qaai/eval/datasets.py:26-28</span>:</p
 </tbody></table>
 <p><code>load_dataset()</code> resolves a <code>--dataset-dir</code> (or explicit per-file paths)
 and enforces the mode's requirements — score mode needs outputs; run mode needs inputs
-<span class="src">qaai/eval/datasets.py:66-103</span>.</p>
+<span class="src">qaai/eval/datasets.py:66-103</span>. Rows are aligned <strong>positionally</strong>
+across all three files; that alignment is the dataset's core invariant.</p>
+
+<h3>The two committed datasets</h3>
+<table>
+<thead><tr><th>Dataset</th><th>Rows</th><th>Use it?</th></tr></thead>
+<tbody>
+<tr><td><code>eval/datasets/test_suite_study/</code></td><td>20</td><td><strong>Yes</strong> — hand-authored, labels grounded in the row's own text, 10 known-good / 10 known-bad, with a documented failure-mode distribution <span class="src">eval/datasets/test_suite_study/description.md</span></td></tr>
+<tr><td><code>eval/datasets/test_suite/</code></td><td>800</td><td><strong>No</strong> — see the warning below</td></tr>
+</tbody></table>
+<div class="note warn"><strong><code>eval/datasets/test_suite/</code> has ungrounded labels — do
+not measure against it.</strong> Its test steps are templated placeholders (<em>"Execute primary
+action specified in requirement. Verify success."</em>) yet rows are labelled <code>Yes</code> by
+fiat. A 40-record pilot scored <strong>accuracy 0.500, kappa 0.000</strong> — and the reviewer
+was <em>right</em>: it correctly reported <em>"M4 = No: automatic import of heart rate, blood
+pressure, and SpO2 is not covered"</em> on a row labelled <code>Yes</code>. You cannot measure
+accuracy against labels that are wrong. <code>test_suite_study/</code> replaces it under the rule
+that <strong>a row earns <code>Yes</code> only if a competent reviewer reading it would
+agree</strong> <span class="src">eval/datasets/test_suite_study/description.md</span>.</div>
+<div class="note"><strong>20 rows is a pilot, not the study.</strong> At n=20 the 95% accuracy CI
+is ±0.154 (Wilson) even assuming p=0.85, and ±0.20 at p=0.5 — so a 20-row result cannot
+distinguish a 0.75 reviewer from a 0.95 one. Per-cell counts of 2–4 are likewise far below the
+~30/cell per-rubric metrics need; read them as anecdote until the set is scaled. See
+<a href="#samplesize">Sample size</a> for the target N.</div>
 
 <h3>Convert the existing gold data</h3>
 <p><code>scripts/convert_to_eval.py</code> has two subcommands
@@ -167,10 +192,13 @@ smoke/CI check <span class="src">qaai/eval/datasets.py:130-151</span>. Real
 <code>eval_outputs</code> come from a live run (run mode persists them) or from your own data;
 a prior run's <code>outputs.jsonl</code> can be harvested with the <code>outputs</code>
 subcommand <span class="src">qaai/eval/datasets.py:154-156</span>.</p>
-<div class="note warn"><strong>Oracle data is a smoke test only.</strong> The committed
-<code>eval/datasets/test_suite/</code> uses oracle outputs, so score-only scores 1.0 — that
-proves the plumbing, not the model. Real evaluation uses <code>--mode run</code> or your own
-<code>eval_outputs</code>.</div>
+<div class="note warn"><strong>The committed <code>eval_outputs.jsonl</code> is the answer key,
+not a prediction.</strong> Scoring it against its own labels returns <strong>1.000 by
+construction</strong> — it measures the harness, not the reviewer. The run self-detects this,
+tags itself <code>oracle_selftest=true</code>, and prints a WARNING
+<span class="src">scripts/evaluate_with_mlflow.py:101-106</span>. It is a plumbing check.
+<strong>Real predictions come only from <code>--mode run</code></strong>, which writes them to
+<a href="#predictions"><code>predictions/&lt;ts&gt;/</code></a>.</div>
 
 <h2 id="spec">The eval spec</h2>
 <p>One YAML per reviewer/project is the <strong>only</strong> thing that changes between eval
@@ -222,11 +250,13 @@ paths from <strong>both</strong> plain dicts (score mode) and Pydantic models (r
 two modes <span class="src">scripts/evaluate_with_mlflow.py:36</span>.</p>
 
 <h3>Score-only <span class="pill get">no LLM</span></h3>
-<p>Scores an existing <code>eval_outputs.jsonl</code> against the labels — fast and offline:</p>
+<p>Scores an existing <code>eval_outputs.jsonl</code> against the labels — fast and offline. Its
+real use is <a href="#predictions">re-scoring a saved prediction set</a> for free; pointed at a
+committed dataset it is only a plumbing check (see the oracle warning above):</p>
 <pre><code>uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite \
-  --mode score --run-name gold-baseline</code></pre>
+  --dataset-dir eval/datasets/test_suite_study \
+  --mode score --run-name plumbing-smoke</code></pre>
 
 <h3>Run+score <span class="pill post">live LLM</span></h3>
 <p>Invokes the compiled graph on <code>eval_inputs.jsonl</code>, persists the produced
@@ -236,7 +266,7 @@ two modes <span class="src">scripts/evaluate_with_mlflow.py:36</span>.</p>
 <code>off</code> so every node re-runs fresh <span class="src">qaai/eval/runners.py:14</span>:</p>
 <pre><code>uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite \
+  --dataset-dir eval/datasets/test_suite_study \
   --mode run --prompt-set test_suite_reviewer_v4 \
   --max-concurrent 5 --limit 20 --run-name v4-edge-case</code></pre>
 <p>The client is built from <code>settings</code> (<code>API_KEY</code> /
@@ -244,16 +274,25 @@ two modes <span class="src">scripts/evaluate_with_mlflow.py:36</span>.</p>
 a base URL containing <code>"prod"</code> is refused unless <code>--allow-prod</code> is passed
 <span class="src">qaai/eval/runners.py:86-104</span> — mirroring the test suite's
 <code>real_client</code> guard.</p>
+<p>The full flag surface <span class="src">scripts/evaluate_with_mlflow.py:31-58</span>:</p>
 <table>
 <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
+<tr><td><code>--spec</code> <strong>(required)</strong></td><td>—</td><td>Path to <code>eval/specs/&lt;name&gt;.yaml</code></td></tr>
 <tr><td><code>--mode</code></td><td><code>score</code></td><td><code>score</code> (read outputs) or <code>run</code> (invoke the graph)</td></tr>
-<tr><td><code>--dataset-dir</code></td><td>—</td><td>Directory with the three files <span class="src">scripts/evaluate_with_mlflow.py:32</span></td></tr>
+<tr><td><code>--dataset-dir</code></td><td>—</td><td>Directory with the three files</td></tr>
+<tr><td><code>--eval-inputs</code></td><td>from <code>--dataset-dir</code></td><td>Override the path to <code>eval_inputs.jsonl</code></td></tr>
+<tr><td><code>--eval-outputs</code></td><td>from <code>--dataset-dir</code></td><td>Override the path to <code>eval_outputs.jsonl</code> — this is how you re-score a saved prediction set</td></tr>
+<tr><td><code>--eval-outputs-labels</code></td><td>from <code>--dataset-dir</code></td><td>Override the path to <code>eval_outputs_labels.jsonl</code> (the answer key)</td></tr>
 <tr><td><code>--prompt-set</code></td><td>spec's <code>prompt_set</code></td><td>Override the prompt set (run mode); pins per-role versions as params</td></tr>
-<tr><td><code>--max-concurrent</code></td><td>10</td><td>Parallel graph invocations</td></tr>
+<tr><td><code>--run-name</code></td><td>—</td><td>MLflow run name</td></tr>
+<tr><td><code>--experiment</code></td><td>spec's <code>mlflow.experiment</code></td><td>Override the experiment name</td></tr>
+<tr><td><code>--max-concurrent</code></td><td><code>10</code></td><td>Parallel graph invocations</td></tr>
 <tr><td><code>--limit</code></td><td>—</td><td>First N records (truncates inputs and labels together)</td></tr>
 <tr><td><code>--allow-prod</code></td><td>off</td><td>Permit a base URL containing "prod"</td></tr>
 <tr><td><code>--no-trace</code></td><td>off</td><td>Disable MLflow LangGraph autolog tracing</td></tr>
+<tr><td><code>--predictions-dir</code></td><td><code>&lt;dataset-dir&gt;/predictions</code></td><td>Where run mode saves its timestamped prediction set</td></tr>
+<tr><td><code>--no-save-predictions</code></td><td>off</td><td>Do not persist a prediction set (run mode); outputs stay in MLflow artifacts only</td></tr>
 <tr><td><code>--tracking-uri</code></td><td><code>file:./mlruns</code></td><td>MLflow tracking URI (or <code>$MLFLOW_TRACKING_URI</code>)</td></tr>
 </tbody></table>
 
@@ -262,9 +301,32 @@ a base URL containing <code>"prod"</code> is refused unless <code>--allow-prod</
 prompt-set manifest sha and per-role versions as params, so the diff in the UI is exact:</p>
 <pre><code>for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
   uv run python scripts/evaluate_with_mlflow.py \
-    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite \
+    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite_study \
     --mode run --prompt-set $ps --run-name $ps
 done</code></pre>
+
+<h2 id="predictions">Where predictions go</h2>
+<p><strong>Predictions only ever come from <code>--mode run</code>.</strong> Unless
+<code>--no-save-predictions</code> is passed, each run writes a timestamped set next to the
+dataset <span class="src">qaai/eval/datasets.py:41-42,168</span>:</p>
+<pre class="diagram"><code>eval/datasets/&lt;name&gt;/predictions/&lt;YYYY-MM-DD_HH-MM-SS&gt;/
+  ├─ eval_outputs.jsonl          the predicted graph output-state rows
+  ├─ eval_outputs_labels.jsonl   their flat projection (outputs_to_labels)
+  └─ run_metadata.json           model, prompt_set, prompt_versions, git_sha,
+                                 fixture sha256, n_records, mlflow_run_id</code></pre>
+<p><code>run_metadata.json</code> carries the <code>mlflow_run_id</code>
+<span class="src">qaai/eval/harness.py:255</span>, so a saved prediction set always points back at
+the run that produced it. Because <code>outputs_to_labels()</code> is the exact inverse of
+<code>synthesize_outputs()</code>, both sides flatten to the same shape — which is what makes
+predictions and the answer key comparable at all.</p>
+<p>The CLI prints a ready-made re-score command when it saves a set
+<span class="src">scripts/evaluate_with_mlflow.py:96-100</span>. Re-scoring is free and offline —
+useful after changing scoring rules, since it never re-invokes the LLM:</p>
+<pre><code>uv run python scripts/evaluate_with_mlflow.py \
+  --spec eval/specs/test_suite_reviewer.yaml \
+  --eval-outputs eval/datasets/test_suite_study/predictions/&lt;ts&gt;/eval_outputs.jsonl \
+  --eval-outputs-labels eval/datasets/test_suite_study/eval_outputs_labels.jsonl \
+  --mode score --run-name rescore-&lt;ts&gt;</code></pre>
 
 <h2 id="metrics">Metrics &amp; scoring</h2>
 <p>Scoring is pure and LLM-free. <code>build_records()</code> pairs each output row with its
@@ -274,8 +336,9 @@ toward overall metrics if both verdicts exist <span class="src">qaai/eval/scorin
 <table>
 <thead><tr><th>Family</th><th>Metrics logged</th></tr></thead>
 <tbody>
-<tr><td><code>overall</code></td><td><code>overall_accuracy</code> / <code>_precision</code> / <code>_recall</code> / <code>_f1</code> (binary, positive class = <code>Yes</code>)</td></tr>
-<tr><td><code>per_rubric</code></td><td><code>rubric_accuracy.&lt;code&gt;</code>, <code>rubric_f1.&lt;code&gt;</code> (multiclass), and <code>rubric_macro_f1</code></td></tr>
+<tr><td><code>overall</code></td><td>Every scalar in the overall block is logged as <code>overall_&lt;key&gt;</code>: <code>accuracy</code>, <code>precision</code>, <code>recall</code>, <code>f1</code> (binary, positive class = <code>Yes</code>), plus <code>f1_macro</code>, <code>balanced_accuracy</code>, <code>cohen_kappa</code>, <code>support_positive</code> / <code>support_negative</code>, and <code>prevalence_gt_positive</code> / <code>prevalence_pred_positive</code> <span class="src">qaai/eval/scoring.py:190-199</span></td></tr>
+<tr><td><code>per_rubric</code></td><td>Per cell: <code>rubric_accuracy.&lt;code&gt;</code>, <code>rubric_f1.&lt;code&gt;</code> (macro-F1), <code>rubric_balanced_accuracy.&lt;code&gt;</code>, <code>rubric_support.&lt;code&gt;</code>, <code>rubric_kappa.&lt;code&gt;</code>, and per-class counts <code>rubric_support.&lt;code&gt;.&lt;class&gt;</code>; plus the aggregate <code>rubric_macro_f1</code> <span class="src">qaai/eval/metrics.py:27-42</span></td></tr>
+<tr><td><code>exact_match</code></td><td><code>exact_match_rate</code> / <code>exact_match_n</code> — row-level: every <strong>mandatory</strong> cell correct (advisory codes excluded)</td></tr>
 <tr><td><code>helper_invariant</code></td><td><code>helper_invariant_pass_rate</code></td></tr>
 <tr><td><code>latency</code></td><td><code>mean_latency_s</code> / <code>p50</code> / <code>p95</code> / <code>p99</code> (run mode)</td></tr>
 <tr><td><code>cost</code></td><td><code>total_input_tokens</code> / <code>total_output_tokens</code> / <code>estimated_cost_usd</code> (run mode)</td></tr>
@@ -283,7 +346,16 @@ toward overall metrics if both verdicts exist <span class="src">qaai/eval/scorin
 </tbody></table>
 <p>Families are toggled by the spec's <code>metrics_enabled</code> list; the nested result is
 flattened to scalar MLflow keys by <code>flatten_metrics()</code>
-<span class="src">qaai/eval/metrics.py:12</span>.</p>
+<span class="src">qaai/eval/metrics.py:12</span>. Note <code>cohen_kappa</code> is omitted — for a
+cell or for the overall verdict — when there is no class variability to measure
+<span class="src">qaai/eval/metrics.py:34-36</span>.</p>
+<div class="note warn"><strong>Read accuracy next to kappa and prevalence, not alone.</strong>
+On a skewed set, accuracy flatters a model that always guesses the majority label
+<span class="src">qaai/eval/scoring.py:12</span>. <code>cohen_kappa</code> near 0 means the
+predictions carry no signal beyond chance — an 0.85 accuracy with kappa 0.0 is a majority-class
+guesser, not a working reviewer. <code>rubric_support.&lt;code&gt;.&lt;class&gt;</code> is the
+sparse-cell warning sign: a cell whose classes are nearly all one value cannot support a
+meaningful F1.</div>
 
 <h3>The two QAAI-specific signals</h3>
 <div class="note"><strong>helper-invariant pass-rate.</strong> Does the model's predicted
@@ -351,6 +423,11 @@ uv run python scripts/sample_size.py achieved --n 8 --confidence 0.95 --p 0.85
 for the smallest N whose half-width ≤ margin <span class="src">qaai/eval/sample_size.py:50-68</span>,
 with an optional finite-population correction (<code>--population</code>). Textbook anchors:
 95% / ±0.05 / p=0.5 → 385; p=0.85 → 196.</p>
+<div class="note warn"><strong>Size off <code>n_scored</code>, not <code>n_records</code>.</strong>
+A record whose prediction could not be extracted is skipped, so it contributes nothing to the
+accuracy estimate. A 400-record run with a 0.10 <code>skip_rate</code> buys you the confidence
+interval of 360 records, not 400. Check <code>skip_rate</code> before trusting that you hit your
+target N.</div>
 <div class="note warn"><strong>Scope.</strong> This sizes a <em>single</em> accuracy estimate.
 Detecting a <em>difference</em> between two prompt sets (A/B power) needs more samples than
 either single-model CI and is out of scope for this calculator.</div>
@@ -369,7 +446,9 @@ either single-model CI and is out of scope for this calculator.</div>
 <tr><td><code>qaai/eval/artifacts.py</code></td><td>Writes predictions / failures / per-rubric CSV / confusion matrix / provenance / fixture metadata</td></tr>
 <tr><td><code>qaai/eval/harness.py</code></td><td><code>evaluate()</code> — load → (run|read) → score → log to MLflow</td></tr>
 <tr><td><code>eval/specs/*.yaml</code></td><td>One spec per reviewer (RTM / hazard / test-case)</td></tr>
-<tr><td><code>eval/datasets/test_suite/</code></td><td>Committed sample dataset (from gold, with oracle outputs)</td></tr>
+<tr><td><code>eval/datasets/test_suite_study/</code></td><td>The grounded 20-row RTM set — use this one</td></tr>
+<tr><td><code>eval/datasets/test_suite/</code></td><td>Legacy 800-row set; labels are not grounded in its content (see <a href="#datasets">Datasets</a>)</td></tr>
+<tr><td><code>eval/datasets/&lt;name&gt;/predictions/&lt;ts&gt;/</code></td><td>Saved prediction sets from <code>--mode run</code>, each with its <code>run_metadata.json</code></td></tr>
 <tr><td><code>scripts/evaluate_with_mlflow.py</code></td><td>Run a study (score / run)</td></tr>
 <tr><td><code>scripts/convert_to_eval.py</code></td><td>Build the three-file dataset from gold or a run's outputs</td></tr>
 <tr><td><code>scripts/sample_size.py</code></td><td>Accuracy-CI sample-size calculator (<code>ci</code> / <code>achieved</code>)</td></tr>
@@ -381,7 +460,7 @@ either single-model CI and is out of scope for this calculator.</div>
 the sample-size math <span class="src">tests/unit/eval/</span>:</p>
 <pre><code>uv run pytest tests/unit/eval -v</code></pre>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-07-06. · <a href="index.html">Docs home</a></footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-07-16. · <a href="index.html">Docs home</a></footer>
 </main>
 </div>
 <script>

@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover - exercised only when dep is absent
     _json_repair = None
 
 from qaai.agents.clients import RateLimitOpenAIClient
+from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import settings
 from qaai.utils import render_prompt
 
@@ -865,6 +866,42 @@ class DecomposerNode(StandardLLMNode):
         return {"decomposed_requirement": None}
 
 
+def build_llm_node(
+    node_cls: type,
+    *,
+    client: RateLimitOpenAIClient,
+    model: str,
+    model_kwargs: dict,
+    prompt_template: str,
+    cache_manager: Optional[Any] = None,
+    prompt_set: Optional[str] = None,
+    template_vars: Optional[dict] = None,
+    **node_kwargs,
+):
+    """Construct an LLM node: render its prompt, then wire the standard node config.
+
+    Every ``make_*_node`` factory across the three reviewers shares this body — render
+    the Jinja2 template into the system prompt, then pass the same config through to the
+    node, deriving ``prompt_version`` from the template path so it lands in the cache key.
+    Node-specific arguments (``response_model``, ``is_final_output``, ``design_sensitive``)
+    pass through as ``node_kwargs``; node classes that pin their own ``response_model``
+    simply do not receive one.
+
+    ``template_vars`` is an explicit dict rather than ``**kwargs`` so a Jinja2 variable can
+    never collide with a node argument.
+    """
+    return node_cls(
+        client=client,
+        model=model,
+        system_prompt=render_prompt(prompt_template, **(template_vars or {})),
+        model_kwargs=model_kwargs,
+        cache_manager=cache_manager,
+        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
+        prompt_set=prompt_set,
+        **node_kwargs,
+    )
+
+
 def make_decomposer_node(
     client: RateLimitOpenAIClient,
     model: str,
@@ -877,17 +914,16 @@ def make_decomposer_node(
     """
     Create a DecomposerNode with prompt loaded from a Jinja2 template.
     """
-    from qaai.core.cache import ReviewCacheManager
-    system_prompt = render_prompt(prompt_template, **template_vars)
-    return DecomposerNode(
+    return build_llm_node(
+        DecomposerNode,
         client=client,
         model=model,
-        response_model=DecomposedRequirement,
-        system_prompt=system_prompt,
         model_kwargs=model_kwargs,
+        prompt_template=prompt_template,
         cache_manager=cache_manager,
-        prompt_version=ReviewCacheManager.extract_prompt_version(prompt_template),
         prompt_set=prompt_set,
+        template_vars=template_vars,
+        response_model=DecomposedRequirement,
     )
 
 
