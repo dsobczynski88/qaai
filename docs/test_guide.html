@@ -42,6 +42,7 @@
 <div class="layout">
 <nav class="toc" aria-label="Table of contents">
   <strong>Test Guide</strong>
+  <a href="#catalog">Interactive test catalog</a>
   <a href="#setup">Setup &amp; install</a>
   <a href="#layout">Suite layout</a>
   <a href="#running">Running the suites</a>
@@ -55,6 +56,7 @@
   <a href="index.html">← Docs home</a>
   <a href="api.html">API guide</a>
   <a href="configuration.html">Configuration</a>
+  <a href="test_catalog.html">Test catalog</a>
   <a href="design/agents.html">Agent design</a>
 </nav>
 <main>
@@ -75,6 +77,47 @@ call-counting stub client and CLI knobs (<code>--cache-mode</code> / <code>--tes
 <code>--include-edge-case-analysis</code>) were threaded through <code>conftest.py</code>, and the
 API review endpoints became <strong>asynchronous background jobs</strong> (submit → poll →
 result). The sections below reflect that layout.</div>
+
+<h2 id="catalog">Interactive test catalog</h2>
+<p>Before working through the suites below, the fastest way to <em>see</em> what the test suite
+covers is the <strong>test catalog</strong> — a searchable, single-file HTML "book" of every test
+pytest collects. It is a pytest plugin registered via the <code>pytest11</code> entry point
+<span class="src">pyproject.toml:69-70</span>, so the <code>--test-catalog</code> flag is always
+available under <code>uv run pytest</code> with no <code>-p</code> needed
+<span class="src">plugins/qaai_testcatalog/plugin.py</span>. Because it is built from the tests
+pytest <em>actually collects</em>, it can never drift from the real suite.</p>
+
+<p>Generate it with a <strong>collection-only</strong> run — no tests execute and no LLM calls are
+made <span class="src">plugins/qaai_testcatalog/README.md:14-25</span>:</p>
+<pre><code>uv run pytest --collect-only --test-catalog
+#   -&gt; logs/test-catalog/test_catalog.html   (open in a browser)
+#   -&gt; logs/test-catalog/test_catalog.json   (the underlying data)
+
+# Scope it like any pytest run — the catalog tracks the selection:
+uv run pytest -m unit --collect-only --test-catalog
+uv run pytest tests/unit/eval --collect-only --test-catalog
+
+# Change the output directory:
+uv run pytest --collect-only --test-catalog --test-catalog-out docs/test-catalog</code></pre>
+
+<p>The page opens with a text search box (name / summary / fixtures / file), filter chips for
+<strong>type</strong> (unit / integration / api) and <strong>component</strong>
+(rtm / tc / hazard / eval / shared / api), sortable columns, a per-row <strong>I/O</strong> modal
+(each fixture, where it is defined, and an example input/output), a light/dark toggle, and
+<strong>Copy as Markdown</strong> / <strong>Export JSON</strong> buttons that respect the current
+filter <span class="src">plugins/qaai_testcatalog/README.md:28-31</span>. Each row's summary, type,
+component, fixtures, and example input are auto-derived from docstrings, markers,
+<code>item.fixturenames</code>, and parametrize params; the optional
+<code>@pytest.mark.catalog(summary=…, example_input=…, example_output=…)</code> marker curates any
+field (marker wins) <span class="src">plugins/qaai_testcatalog/README.md:40-69</span>.</p>
+
+<p>Re-render offline from the saved JSON without re-collecting
+<span class="src">plugins/qaai_testcatalog/README.md:35-37</span>:</p>
+<pre><code>python -m qaai_testcatalog logs/test-catalog/test_catalog.json</code></pre>
+
+<div class="note"><strong>Full reference.</strong> See the
+<a href="test_catalog.html">Test catalog</a> page for the auto-derivation rules, every
+<code>@pytest.mark.catalog</code> field, and the packaging details.</div>
 
 <h2 id="setup">Setup &amp; install</h2>
 <p>QAAI uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>

@@ -140,7 +140,7 @@ uv run pytest tests/unit -v           # unit suite only
 
 ### Test catalog
 
-`plugins/qaai-testcatalog/` is a **pytest plugin** (registered via the `pytest11` entry point, so no `-p` is needed) that emits a searchable, self-contained HTML book of the collected suite — each test's type, component, summary, fixtures, and example input/output. Because it is built from the tests pytest actually collects, it cannot drift.
+`plugins/qaai_testcatalog/` is a **pytest plugin** (registered via the `pytest11` entry point, so no `-p` is needed) that emits a searchable, self-contained HTML book of the collected suite — each test's type, component, summary, fixtures, and example input/output. Because it is built from the tests pytest actually collects, it cannot drift.
 
 ```bash
 uv run pytest --collect-only --test-catalog   # no tests run, no LLM calls

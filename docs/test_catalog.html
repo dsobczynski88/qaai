@@ -65,7 +65,7 @@
 <main>
 <header class="doc">
   <h1>Test Catalog</h1>
-  <div class="meta">QAAI (qaai) · <code>plugins/qaai-testcatalog</code> · pytest flag <code>--test-catalog</code> · generated from the codebase 2026-07-16</div>
+  <div class="meta">QAAI (qaai) · <code>plugins/qaai_testcatalog</code> · pytest flag <code>--test-catalog</code> · generated from the codebase 2026-07-16</div>
 </header>
 
 <p>The test catalog is a searchable, single-file HTML "book" of this repo's pytest suite. For
@@ -76,7 +76,7 @@ every collected test it answers: <strong>what type</strong> it is (unit / integr
 
 <div class="note"><strong>It cannot drift.</strong> The catalog is built from
 <code>session.items</code> — the tests pytest <em>actually collected</em> — rather than from a
-hand-maintained list <span class="src">plugins/qaai-testcatalog/qaai_testcatalog/plugin.py:262-265</span>.
+hand-maintained list <span class="src">plugins/qaai_testcatalog/plugin.py:262-265</span>.
 If a test exists, it is in the catalog; if it was deselected, it is not.</div>
 
 <h2 id="overview">Overview</h2>
@@ -144,7 +144,7 @@ to convert, the plugin records a placeholder row carrying the error text rather 
 <h2 id="page">What the page gives you</h2>
 <p>The HTML is fully self-contained — CSS and JS are inlined at import time from
 <code>assets/</code>, so there are no external dependencies and it opens straight from disk
-<span class="src">plugins/qaai-testcatalog/qaai_testcatalog/render.py:24</span>. It offers:</p>
+<span class="src">plugins/qaai_testcatalog/render.py:24</span>. It offers:</p>
 <table>
 <thead><tr><th>Feature</th><th>What it does</th></tr></thead>
 <tbody>
@@ -215,7 +215,7 @@ JSON-safe on a best-effort basis, including Pydantic models via <code>model_dump
 
 <h2 id="rerender">Re-rendering offline</h2>
 <p>To rebuild the HTML after an asset/template change without re-collecting, feed the saved JSON
-back through the module entry point <span class="src">plugins/qaai-testcatalog/qaai_testcatalog/__main__.py:19-33</span>:</p>
+back through the module entry point <span class="src">plugins/qaai_testcatalog/__main__.py:19-33</span>:</p>
 <pre><code>python -m qaai_testcatalog logs/test-catalog/test_catalog.json
 #   -> wrote logs/test-catalog/test_catalog.html
 
@@ -241,7 +241,7 @@ qaai_testcatalog = "qaai_testcatalog.plugin"</code></pre>
 <code>packages</code> explicitly disables hatchling's auto-detection, which is why
 <code>qaai</code> must be named alongside it <span class="src">pyproject.toml:78-82</span>:</p>
 <pre><code>[tool.hatch.build.targets.wheel]
-packages = ["qaai", "plugins/qaai-testcatalog/qaai_testcatalog"]</code></pre>
+packages = ["qaai", "plugins/qaai_testcatalog"]</code></pre>
 <div class="note warn"><strong>The entry point only takes effect on install.</strong> It is
 resolved from installed metadata, so a fresh clone needs <code>uv sync --frozen</code> before
 <code>--test-catalog</code> is recognised. If pytest reports <code>unrecognized arguments:
@@ -251,11 +251,11 @@ resolved from installed metadata, so a fresh clone needs <code>uv sync --frozen<
 <table>
 <thead><tr><th>Path</th><th>Role</th></tr></thead>
 <tbody>
-<tr><td><code>plugins/qaai-testcatalog/qaai_testcatalog/plugin.py</code></td><td>The pytest hooks: <code>pytest_addoption</code>, <code>pytest_configure</code>, <code>pytest_collection_finish</code>, plus every auto-derivation rule</td></tr>
-<tr><td><code>plugins/qaai-testcatalog/qaai_testcatalog/render.py</code></td><td><code>write_catalog()</code> / <code>write_catalog_from_json()</code> — inlines the assets and writes the JSON + HTML pair</td></tr>
-<tr><td><code>plugins/qaai-testcatalog/qaai_testcatalog/__main__.py</code></td><td>The <code>python -m qaai_testcatalog</code> re-render CLI</td></tr>
-<tr><td><code>plugins/qaai-testcatalog/qaai_testcatalog/assets/</code></td><td><code>layout.html</code>, <code>catalog.css</code>, <code>catalog.js</code> — inlined into the output, no external deps</td></tr>
-<tr><td><code>plugins/qaai-testcatalog/qaai_testcatalog/README.md</code></td><td>The short version of this page, next to the code</td></tr>
+<tr><td><code>plugins/qaai_testcatalog/plugin.py</code></td><td>The pytest hooks: <code>pytest_addoption</code>, <code>pytest_configure</code>, <code>pytest_collection_finish</code>, plus every auto-derivation rule</td></tr>
+<tr><td><code>plugins/qaai_testcatalog/render.py</code></td><td><code>write_catalog()</code> / <code>write_catalog_from_json()</code> — inlines the assets and writes the JSON + HTML pair</td></tr>
+<tr><td><code>plugins/qaai_testcatalog/__main__.py</code></td><td>The <code>python -m qaai_testcatalog</code> re-render CLI</td></tr>
+<tr><td><code>plugins/qaai_testcatalog/assets/</code></td><td><code>layout.html</code>, <code>catalog.css</code>, <code>catalog.js</code> — inlined into the output, no external deps</td></tr>
+<tr><td><code>plugins/qaai_testcatalog/README.md</code></td><td>The short version of this page, next to the code</td></tr>
 <tr><td><code>logs/test-catalog/</code></td><td>Default output directory (gitignored run artifacts)</td></tr>
 </tbody></table>
 <p>The HTML reuses the <code>qaai/viewer</code> theme and its placeholder <code>str.replace()</code>

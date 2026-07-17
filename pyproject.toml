@@ -76,7 +76,7 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 # The test-catalog pytest plugin was relocated out of the qaai package into
-# plugins/qaai-testcatalog/ but still ships inside the qaai wheel. Listing packages
+# plugins/qaai_testcatalog/ but still ships inside the qaai wheel. Listing packages
 # explicitly disables auto-detection, so qaai must be named here too.
 [tool.hatch.build.targets.wheel]
-packages = ["qaai", "plugins/qaai-testcatalog/qaai_testcatalog"]
+packages = ["qaai", "plugins/qaai_testcatalog"]
