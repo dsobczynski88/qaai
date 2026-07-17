@@ -584,6 +584,40 @@ class PyJamaTraceMatrix:
         else:
             return "other"
 
+    @staticmethod
+    def _filter_items_by_itemtype(
+        items_dict: Dict[int, Dict[str, Any]],
+        allowed_item_types: Tuple[int, ...],
+        expected_type: str = "requirement",
+    ) -> Dict[int, Dict[str, Any]]:
+        """Keep only items whose Jama ``itemType`` is in the allowlist.
+
+        Used to drop non-graphable items (e.g. modules/folders that a test case
+        traces up to) before assembly, so each reviewer graphs only its intended
+        item type. Items missing an ``itemType`` fall back to the doc-key typekey
+        classifier (matched against ``expected_type``) so nothing is silently
+        dropped when the API omits the field.
+
+        Args:
+            items_dict: Items keyed by API ID.
+            allowed_item_types: Accepted Jama itemType integer IDs.
+            expected_type: Type name (:meth:`_get_item_type_from_typekey` output)
+                used for the doc-key fallback when ``itemType`` is absent.
+
+        Returns:
+            A new dict containing only the retained items.
+        """
+        kept: Dict[int, Dict[str, Any]] = {}
+        for item_id, item in items_dict.items():
+            item_type = item.get("itemType")
+            if item_type in allowed_item_types:
+                kept[item_id] = item
+            elif item_type is None:
+                # itemType absent: fall back to document-key classification.
+                if PyJamaTraceMatrix._get_item_type_from_typekey(get_doc_key(item)) == expected_type:
+                    kept[item_id] = item
+        return kept
+
     def _baseline_cache_folder(self, baseline_id: str) -> str:
         """Folder for a baseline's cache artifacts."""
         return self._cache.resolve_folder(CACHE_BASELINES_SUBDIR, baseline_id)
@@ -956,6 +990,22 @@ class PyJamaTraceMatrix:
             self._logger.info(
                 "Retrieved %d requirement items and downstream data",
                 len(requirements_dict)
+            )
+
+            # Drop non-requirement primaries (e.g. modules/folders a test case
+            # traces up to) so the graph only reviews genuine requirements. Both
+            # the response payload and the ids projection derive from this dict,
+            # so filtering here keeps the paired cache files aligned.
+            before_filter = len(requirements_dict)
+            requirements_dict = self._filter_items_by_itemtype(
+                requirements_dict, REQUIREMENT_PRIMARY_ITEM_TYPE_IDS,
+                expected_type="requirement",
+            )
+            self._logger.info(
+                "Filtered requirement primaries by itemType: kept %d/%d "
+                "(dropped %d non-requirement items, e.g. modules)",
+                len(requirements_dict), before_filter,
+                before_filter - len(requirements_dict),
             )
 
             # Step 7: Assemble final structure using assembler
@@ -1462,6 +1512,13 @@ class PyJamaTraceMatrix:
                 len(failed_test_ids)
             )
             
+            # Ensure only genuine test cases are graphed. test_cases_dict is
+            # already itemType-filtered above; this makes the invariant explicit
+            # and central, guarding against future changes to the collection step.
+            test_cases_dict = self._filter_items_by_itemtype(
+                test_cases_dict, (TEST_CASE_ITEM_TYPE_ID,), expected_type="test_case",
+            )
+
             # Step 5: Assemble final structure using assembler
             self._logger.info("Step 5: Assembling test case reviewer structure")
             final_payload = self._test_case_assembler.assemble(

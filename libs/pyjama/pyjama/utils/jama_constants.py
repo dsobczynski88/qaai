@@ -130,3 +130,9 @@ PRODUCT_REQUIREMENT_TYPE_PICK_LIST_ID = 271
 REQUIREMENT_ITEM_TYPE_FIELD_NAME = "PRQ_type$63"
 SYSTEM_REQUIREMENT_TYPE_ID = 1382
 
+# itemTypes accepted as the primary "requirement" graphed by the test-suite reviewer.
+# Modules, folders, user needs (62), design (65) and any other container type are
+# excluded. Allowlist (not a module blocklist) since Jama has no module itemType
+# constant here and allowlisting is robust to unknown container types.
+REQUIREMENT_PRIMARY_ITEM_TYPE_IDS = (REQUIREMENT_ITEM_TYPE_ID, SYSTEM_REQUIREMENT_TYPE_ID)
+

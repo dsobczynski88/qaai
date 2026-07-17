@@ -13,7 +13,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from pyjama.utils.cache_manager import CacheMode, DiskCacheManager
-from pyjama.utils.jama_constants import CACHE_TIMESTAMP_FORMAT
+from pyjama.utils.jama_constants import (
+    CACHE_TIMESTAMP_FORMAT,
+    REQUIREMENT_PRIMARY_ITEM_TYPE_IDS,
+    TEST_CASE_ITEM_TYPE_ID,
+)
 from pyjama.utils.jama_project_cache import JamaProjectCache
 from pyjama.jama.pyjama import PyJamaTraceMatrix
 
@@ -187,6 +191,39 @@ class TestIdsDerivation:
         ]
 
 
+class TestItemTypeFilter:
+    def test_allowlist_keeps_and_drops_by_itemtype(self):
+        items = {
+            63: {"itemType": 63, "fields": {"documentKey": "REQ-1"}},   # requirement
+            1382: {"itemType": 1382, "fields": {"documentKey": "PRQ-1"}},  # system req
+            999: {"itemType": 999, "fields": {"documentKey": "MOD-1"}},  # module/container
+        }
+        kept = PyJamaTraceMatrix._filter_items_by_itemtype(
+            items, REQUIREMENT_PRIMARY_ITEM_TYPE_IDS, expected_type="requirement"
+        )
+        assert set(kept) == {63, 1382}
+
+    def test_missing_itemtype_falls_back_to_doc_key(self):
+        items = {
+            1: {"fields": {"documentKey": "REQ-7"}},   # no itemType -> classify REQ
+            2: {"fields": {"documentKey": "MOD-7"}},   # no itemType -> classify module
+        }
+        kept = PyJamaTraceMatrix._filter_items_by_itemtype(
+            items, REQUIREMENT_PRIMARY_ITEM_TYPE_IDS, expected_type="requirement"
+        )
+        assert set(kept) == {1}
+
+    def test_testcase_allowlist(self):
+        items = {
+            71: {"itemType": 71, "fields": {"documentKey": "TC-1"}},
+            999: {"itemType": 999, "fields": {"documentKey": "MOD-1"}},
+        }
+        kept = PyJamaTraceMatrix._filter_items_by_itemtype(
+            items, (TEST_CASE_ITEM_TYPE_ID,), expected_type="test_case"
+        )
+        assert set(kept) == {71}
+
+
 class TestIdentifierHelpers:
     def test_write_and_load_per_identifier(self, tmp_path):
         api = make_api(tmp_path)
@@ -295,3 +332,50 @@ class TestBehavioralCaching:
         api.get_test_suite_reviewer_structure("BASE-100")
         assert client.calls == after_first * 2  # recomputed every time
         assert not os.path.exists(os.path.join(str(tmp_path / "cache"), "baselines"))
+
+
+class ModuleTracingSuiteClient:
+    """A test case that traces upstream to a real requirement AND a module.
+
+    ``get_item`` returns an explicit ``itemType`` so the allowlist path (not the
+    doc-key fallback) is exercised: REQ-1 is itemType 63 (kept), MOD-1 is a
+    container itemType 999 (dropped).
+    """
+    def get_baselines_versioneditems(self, baseline_id):
+        return [{"id": 201, "itemType": 71, "fields": {"documentKey": "TEST-1"}}]
+
+    def get_items_upstream_relationships(self, item_id):
+        return [{"fromItem": 101}, {"fromItem": 102}]  # requirement + module
+
+    def get_item(self, item_id):
+        if item_id == 102:
+            return {"id": 102, "itemType": 999,
+                    "fields": {"documentKey": "MOD-1", "description": "Module container"}}
+        return {"id": 101, "itemType": 63,
+                "fields": {"documentKey": "REQ-1", "description": "Req text"}}
+
+    def get_items_downstream_related(self, req_id):
+        return [{"id": 201, "fields": {"documentKey": "TEST-1", "name": "TC one",
+                                       "setup$71": "setup text", "testCaseSteps": []}}]
+
+
+class TestItemTypeFilteringEndToEnd:
+    def test_module_dropped_from_payload_and_ids(self, tmp_path):
+        client = ModuleTracingSuiteClient()
+        api = _build_api(tmp_path, client, CacheMode.USE)
+
+        result = api.get_test_suite_reviewer_structure("BASE-200")
+
+        req_ids = {entry["requirement"]["req_id"] for entry in result}
+        assert req_ids == {"REQ-1"}          # module excluded
+        assert "MOD-1" not in req_ids
+
+        # Paired ids file carries no module row (realignment side effect).
+        folder = os.path.join(str(tmp_path / "cache"), "baselines", "BASE-200")
+        ids_path = next(
+            os.path.join(folder, n) for n in os.listdir(folder)
+            if "test_suite_reviewer_structure_ids_" in n
+        )
+        ids_rows = api._cache.read_jsonl(ids_path)
+        assert all(row["type"] != "module" for row in ids_rows)
+        assert {"id": "REQ-1", "type": "requirement"} in ids_rows
