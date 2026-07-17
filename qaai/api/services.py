@@ -44,6 +44,17 @@ def resolve_tc_prompt_set(include_decomposition_analysis: bool) -> str:
     return TC_PROMPT_SET_DECOMP if include_decomposition_analysis else TC_PROMPT_SET_NO_DECOMP
 
 
+def resolve_request_type(baseline_review_type: str) -> str:
+    """Map the UI's baseline_review_type to the pyjama fetch request_type.
+
+    'requirements' → the baseline items are requirement ids directly
+    (get_requirement_reviewer_structure); anything else (default 'tests') → the
+    original test-case baseline path (get_test_suite_reviewer_structure). Both emit
+    the identical per-requirement structure, so only the JAMA fetch differs.
+    """
+    return "requirement_review" if baseline_review_type == "requirements" else "test_suite_review"
+
+
 def _select_graph(graphs: dict, prompt_set: Optional[str], default_key: str):
     """Resolve the runnable for a prompt set, falling back to ``default_key`` then any.
 
@@ -329,13 +340,16 @@ class RTMReviewService:
         self, baseline_id: str, thread_id_prefix: str, cache_mode: str = "on",
         test_mode: Optional[bool] = None, prompt_set: str = PROMPT_SET_BASELINE,
         progress=None, include_design_summaries: bool = False,
+        baseline_review_type: str = "tests",
     ) -> str:
         """Fetch a JAMA baseline, run the RTM graph for every requirement, return viewer.html path.
 
         test_mode (None ⇒ use the config's default) runs the JAMA fetch cache-only
         with no live API calls when True. Cache mode "test" recreates the report
         entirely from cache, so it forces JAMA cache-only too. prompt_set selects
-        the v3/v4 graph. progress (the background Job) receives live progress.
+        the v3/v4 graph. baseline_review_type ('tests'|'requirements') selects the
+        pyjama fetch method (see resolve_request_type). progress (the background Job)
+        receives live progress.
         """
         from qaai.agents.shared.data_integration import (
             DataIntegrationNode,
@@ -366,11 +380,16 @@ class RTMReviewService:
         cfg = self.pyjama_config
         if cfg is not None and test_mode is not None:
             cfg = cfg.model_copy(update={"test_mode": test_mode})
+        request_type = resolve_request_type(baseline_review_type)
+        self._logger.info(
+            "RTM review baseline_review_type=%s -> request_type=%s",
+            baseline_review_type, request_type,
+        )
         node = DataIntegrationNode(pyjama_config=cfg)
         result = await node({
             "pyjama_request": PyJamaRequest(
                 baseline_id=baseline_id,
-                request_type="test_suite_review",
+                request_type=request_type,
             )
         })
         jama_data = result.get("jama_data", [])

@@ -62,3 +62,14 @@ class BaselineRequest(BaseModel):
             "never reads back a result computed under the other mode."
         ),
     )
+    baseline_review_type: Literal["requirements", "tests"] = Field(
+        default="tests",
+        description=(
+            "Test-suite reviewer only. Which kind of baseline this is: 'tests' "
+            "(baseline items are test cases, traced upstream to their requirements "
+            "— the original behavior, request_type='test_suite_review') or "
+            "'requirements' (baseline items are requirement ids directly, fetched "
+            "via request_type='requirement_review'). Both produce the identical "
+            "per-requirement structure, so only the JAMA fetch differs."
+        ),
+    )

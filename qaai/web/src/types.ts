@@ -19,6 +19,8 @@ export interface Identity {
 
 export type ReviewKind = "rtm" | "tc" | "hz";
 export type CacheMode = "on" | "test" | "off";
+/** Which kind of JAMA baseline the RTM/test-suite reviewer is fed. */
+export type BaselineReviewType = "requirements" | "tests";
 
 /** A run-log line surfaced during polling (problem/advisory notes). */
 export interface JobMessage {
@@ -52,4 +54,5 @@ export interface BaselineReviewRequest {
   include_edge_case_analysis: boolean;
   include_decomposition_analysis: boolean;
   include_design_summaries: boolean;
+  baseline_review_type?: BaselineReviewType;
 }

@@ -39,4 +39,6 @@ export const TOOLTIPS = {
     "When on, QAAI runs the design_summarizer so summarized design documents feed per-spec coverage and the R6 Design Alignment criterion. Off (default) skips that step in the graph. Cached results for design-sensitive nodes are keyed by this toggle so switching it never reuses a result computed under the other mode.",
   designSummariesHazard:
     "When on, the embedded per-requirement test-suite review runs its design_summarizer so design documents inform coverage and R6 Design Alignment. Off (default) skips it. Does not affect the hazard rubric's own H2/H3 design analysis. Cached results are keyed by this toggle.",
+  baselineReviewType:
+    "What the JAMA baseline contains. 'Tests' (default): the baseline holds test cases, and QAAI traces each upstream to its requirement (the original behavior). 'Requirements': the baseline holds requirements directly, and QAAI reviews each requirement's downstream test coverage. Both produce the same per-requirement report — only the JAMA fetch differs.",
 } as const;

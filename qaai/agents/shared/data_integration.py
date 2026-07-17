@@ -622,12 +622,11 @@ def transform_bidirectional_trace_to_state(
     iterates over the already-filtered bidirectional response (the JAMA fetch
     only returns the requested identifiers) rather than a row-id lookup.
 
-    Note: ``request_type="bidirectional_trace"`` is not exposed by the installed
-    pyjama 1.0.0 (its PyJamaRequest Literal only allows test_suite_review /
-    test_case_review / hierarchical_trace). This transform deliberately keys off
-    the SHAPE of ``jama_data``, never off request_type, so it is forward
-    compatible: it works as soon as a pyjama version emitting this shape is
-    installed, and never raises on the current version.
+    Note: this transform deliberately keys off the SHAPE of ``jama_data``, never off
+    request_type, so it stays forward compatible with any pyjama version emitting
+    this shape. (The vendored pyjama's PyJamaRequest Literal now includes
+    ``bidirectional_trace`` / ``requirement_review`` / ``rtm`` alongside the
+    baseline request types.)
 
     Args:
         jama_data: Raw bidirectional_trace response (list of per-requirement dicts).

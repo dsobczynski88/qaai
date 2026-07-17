@@ -48,6 +48,7 @@ class PyJamaRequest(BaseModel):
     request_type: Literal[
         "test_suite_review",
         "test_case_review",
+        "requirement_review",
         "hierarchical_trace",
         "bidirectional_trace",
         "rtm",
@@ -85,7 +86,7 @@ class PyJamaRequest(BaseModel):
     prq_type_field: Optional[str] = Field(None, description="PRQ type field name")
     
     # Request types keyed by a baseline vs. a project + identifier list
-    _BASELINE_TYPES = ("test_suite_review", "test_case_review")
+    _BASELINE_TYPES = ("test_suite_review", "test_case_review", "requirement_review")
     _IDENTIFIER_TYPES = ("hierarchical_trace", "bidirectional_trace", "rtm")
 
     @model_validator(mode="after")
@@ -340,6 +341,8 @@ class PyJamaDataSourceNode:
             data = await self._fetch_test_suite_review(request)
         elif request.request_type == "test_case_review":
             data = await self._fetch_test_case_review(request)
+        elif request.request_type == "requirement_review":
+            data = await self._fetch_requirement_review(request)
         elif request.request_type == "hierarchical_trace":
             data = await self._fetch_hierarchical_trace(request)
         elif request.request_type == "bidirectional_trace":
@@ -406,15 +409,58 @@ class PyJamaDataSourceNode:
         )
         
         result = await loop.run_in_executor(None, func)
-        
+
         self._logger.info(
             "Fetched %d requirements for baseline_id=%s",
             len(result),
             request.baseline_id
         )
-        
+
         return result
-    
+
+    async def _fetch_requirement_review(self, request: PyJamaRequest) -> List[Dict]:
+        """
+        Fetch requirement reviewer structure from Jama.
+
+        For a requirement-review baseline whose items are requirement ids directly.
+        Calls PyJamaTraceMatrix.get_requirement_reviewer_structure() in an executor
+        to avoid blocking the async event loop. Returns the same per-requirement
+        structure as test_suite_review.
+
+        Args:
+            request: PyJamaRequest with baseline_id
+
+        Returns:
+            List of requirement dictionaries with test cases and design docs
+        """
+        if not request.baseline_id:
+            raise ValueError("baseline_id is required for requirement_review")
+
+        self._logger.info(
+            "Fetching requirement review for baseline_id=%s",
+            request.baseline_id
+        )
+
+        # PyJamaTraceMatrix methods are synchronous, so run in executor
+        loop = asyncio.get_event_loop()
+        func = partial(
+            self._pyjama_api.get_requirement_reviewer_structure,
+            baseline_id=request.baseline_id,
+            api_id_key=request.api_id_key,
+            design_typekey=request.design_typekey,
+            testcase_typekey=request.testcase_typekey
+        )
+
+        result = await loop.run_in_executor(None, func)
+
+        self._logger.info(
+            "Fetched %d requirements for baseline_id=%s",
+            len(result),
+            request.baseline_id
+        )
+
+        return result
+
     async def _fetch_test_case_review(self, request: PyJamaRequest) -> List[Dict]:
         """
         Fetch test case reviewer structure from Jama.
