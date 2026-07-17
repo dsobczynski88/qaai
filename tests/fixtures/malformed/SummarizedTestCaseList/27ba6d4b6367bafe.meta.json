@@ -1,0 +1,7 @@
+{
+  "model": "SummarizedTestCaseList",
+  "source_node": "SummaryNode",
+  "first_seen": "2026-07-16T17:19:21",
+  "source_file": "logs\\failed_parse_SummaryNode_20260716_171921_607054.txt",
+  "repairable": true
+}

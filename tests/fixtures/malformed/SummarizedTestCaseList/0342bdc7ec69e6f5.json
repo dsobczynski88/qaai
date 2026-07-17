@@ -1,0 +1,41 @@
+{
+  "req_id": "REQ-HC-100",
+  "summaries": [
+    {
+      "test_case_id": "TC-HC-100-A",
+      "objective": "Verify behavior of the Vitals module when the requirement-specified action is executed in the HealthCore EHR test environment.",
+      "verifies": "verifies successful execution of the specified action in the Vitals module and resulting state update with audit logging",
+      "protocol": [
+        "Open the HealthCore EHR test environment with a logged-in user in the appropriate role and the Vitals module active.",
+        "Navigate to the Vitals module.",
+        "Execute the primary action specified in the requirement.",
+        "Verify the system response and state change."
+      ],
+      "acceptance_criteria": [
+        "Vitals module loads successfully.",
+        "Primary action completes without errors.",
+        "System state updated correctly.",
+        "Audit log entry created."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-100-D",
+      "objective": "Verify audit log creation and field contents after executing the requirement-specified action in the HealthCore EHR test environment.",
+      "verifies": "verifies completion of the specified action and creation of an audit log entry containing the required fields",
+      "protocol": [
+        "Open the HealthCore EHR test environment with the audit log viewer open.",
+        "Execute the action specified in the requirement.",
+        "Query the audit log for recent entries.",
+        "Verify the log entry contains the required fields."
+      ],
+      "acceptance_criteria": [
+        "Action completes successfully.",
+        "Audit log entry created.",
+        "Log entry includes timestamp.",
+        "Log entry includes user ID.",
+        "Log entry includes action type.",
+        "Log entry includes outcome."
+      ]
+    }
+  ]
+}

@@ -361,12 +361,31 @@ class BaseLLMNode(ABC):
             logger.debug("%s: could not dump failed-parse content — %s", node_name, e)
             return None
 
+    def _wants_array_response(self) -> bool:
+        """True when this node's response_model expects a TOP-LEVEL JSON array.
+
+        ``response_format={"type": "json_object"}`` constrains the model to emit a JSON
+        *object*, so it is fundamentally incompatible with a ``RootModel[List[...]]``
+        response model (e.g. SummarizedTestCaseList). Asked for both, the model obeys the
+        API constraint and abandons the schema — returning a single bare item, an
+        ``{"summaries": [...]}`` wrapper, or ``{}`` — which reads downstream as a
+        truncated batch rather than as the contradiction it is.
+
+        Derived from the schema rather than a per-node flag so it cannot drift out of
+        sync with the models.
+        """
+        try:
+            return self.response_model.model_json_schema().get("type") == "array"
+        except Exception:  # defensive: never let schema introspection break a call
+            return False
+
     async def _chat_completion(self, messages: list):
         """Call the LLM, requesting strict JSON output when enabled.
 
         Adds ``response_format={"type": "json_object"}`` (self.model_kwargs takes
-        precedence if it already sets one). If the endpoint rejects the parameter,
-        retries once without it and latches JSON mode off process-wide so the
+        precedence if it already sets one), EXCEPT for nodes whose response_model is a
+        top-level array — see :meth:`_wants_array_response`. If the endpoint rejects the
+        parameter, retries once without it and latches JSON mode off process-wide so the
         double-call penalty is paid at most once. Endpoints that don't support the
         parameter (some Ollama/vLLM/Bedrock configs) thus degrade gracefully.
         """
@@ -375,6 +394,7 @@ class BaseLLMNode(ABC):
             _json_mode["supported"]
             and "response_format" not in kwargs
             and getattr(settings, "enable_json_response_format", True)
+            and not self._wants_array_response()
         )
         if want_json:
             kwargs["response_format"] = {"type": "json_object"}
@@ -623,6 +643,14 @@ class BatchedLLMNode(BaseLLMNode, ABC):
         _get_skip_response() -> dict
     """
 
+    # One summary per input item, or skip. An LLM that silently summarizes only the
+    # first item of a batch yields a *plausible* partial result, and every downstream
+    # node then judges the requirement having seen a fraction of its test cases —
+    # producing a confident verdict off truncated input. Skipping keeps that visible as
+    # skip_rate instead of laundering it into a wrong answer. Subclasses whose items are
+    # genuinely reducible (many-to-fewer by design) may set this False.
+    REQUIRE_COMPLETE_BATCH: bool = True
+
     BATCH_SIZE: int = 10  # Override per subclass
 
     def __init__(
@@ -771,6 +799,15 @@ class BatchedLLMNode(BaseLLMNode, ABC):
             return self._get_skip_response()
 
         if len(all_summaries) != len(items):
+            if self.REQUIRE_COMPLETE_BATCH:
+                logger.warning(
+                    "%s: summary count mismatch: expected %d, got %d — skipping rather "
+                    "than judging on a truncated summary set (see REQUIRE_COMPLETE_BATCH)",
+                    self.__class__.__name__, len(items), len(all_summaries),
+                )
+                # Returns before the cache write-through below, so a partial set is
+                # never persisted and reused.
+                return self._get_skip_response()
             logger.warning(
                 "%s: summary count mismatch: expected %d, got %d",
                 self.__class__.__name__, len(items), len(all_summaries),

@@ -1,0 +1,14 @@
+{
+  "test_case_id": "TC-HC-123-A",
+  "objective": "Verify partial functionality for the vitals monitoring module in the HealthCore EHR test environment with the module active.",
+  "verifies": "verifies partial completion of the specified test actions and a resulting partial system state update",
+  "protocol": [
+    "Use the HealthCore EHR test environment with the Vitals module active.",
+    "Execute the subset of required actions.",
+    "Verify partial coverage."
+  ],
+  "acceptance_criteria": [
+    "Tested actions complete successfully.",
+    "Partial system state updated."
+  ]
+}

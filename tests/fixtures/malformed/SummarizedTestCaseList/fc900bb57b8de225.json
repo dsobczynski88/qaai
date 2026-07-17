@@ -1,0 +1,17 @@
+{
+  "test_case_id": "TC-HC-106-A",
+  "objective": "Verify the Vitals module behavior when the action described by REQ-HC-106 is executed in the HealthCore EHR test environment.",
+  "verifies": "verifies nominal completion of the requirement-specified action, with resulting system state update and audit logging",
+  "protocol": [
+    "Log in with the appropriate role in the HealthCore EHR test environment.",
+    "Open the Vitals module.",
+    "Execute the primary action specified in the requirement.",
+    "Verify the system response and state change."
+  ],
+  "acceptance_criteria": [
+    "Vitals module loads successfully.",
+    "Primary action completes without errors.",
+    "System state is updated correctly.",
+    "An audit log entry is created."
+  ]
+}

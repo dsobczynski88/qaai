@@ -1,0 +1,66 @@
+{
+  "response": [
+    {
+      "test_case_id": "TC-HC-104-A",
+      "objective": "Verify the system's handling of the primary action specified in REQ-HC-104 in the Vitals module and its resulting audit log entry.",
+      "verifies": "verifies nominal completion of the requirement-specified action and creation of an audit log entry",
+      "protocol": [
+        "Open the Vitals module.",
+        "Execute the primary action specified in the requirement.",
+        "Verify the system response and resulting state change."
+      ],
+      "acceptance_criteria": [
+        "Vitals module loads successfully.",
+        "Primary action completes without errors.",
+        "System state updated correctly.",
+        "Audit log entry created."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-104-B",
+      "objective": "Verify system behavior when invalid or malformed input is provided in the Vitals module under REQ-HC-104.",
+      "verifies": "verifies rejection of invalid or malformed input and blocking of the attempted action",
+      "protocol": [
+        "Open the Vitals module.",
+        "Provide invalid or malformed input.",
+        "Attempt to submit the action."
+      ],
+      "acceptance_criteria": [
+        "Module loads successfully.",
+        "System validates input and detects error.",
+        "Appropriate error message displayed.",
+        "Action blocked."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-104-C",
+      "objective": "Verify system behavior at a boundary or threshold value in the Vitals module for REQ-HC-104.",
+      "verifies": "verifies handling of a boundary value at the Vitals module per specification",
+      "protocol": [
+        "Open the Vitals module.",
+        "Test at the threshold or boundary value.",
+        "Verify system behavior at the edge case."
+      ],
+      "acceptance_criteria": [
+        "Module loads successfully.",
+        "Boundary value accepted or rejected appropriately.",
+        "System handles edge case correctly per specification."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-104-D",
+      "objective": "Verify audit log traceability for the requirement-specified action in REQ-HC-104.",
+      "verifies": "verifies audit log entry creation and presence of the specified log fields after the action is executed",
+      "protocol": [
+        "Execute the action specified in the requirement.",
+        "Query the audit log for recent entries.",
+        "Verify the log entry contains the required fields."
+      ],
+      "acceptance_criteria": [
+        "Action completes successfully.",
+        "Audit log entry created.",
+        "Log entry includes timestamp, user ID, action type, and outcome."
+      ]
+    }
+  ]
+}

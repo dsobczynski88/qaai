@@ -48,6 +48,7 @@ DEFAULT_SCAN_DIRS = ["logs", "shared/runs"]
 NODE_TO_MODEL = {
     "DecomposerNode": "DecomposedRequirement",
     "AggregatorNode": "TestCaseAssessment",
+    "SummaryNode": "SummarizedTestCaseList",
 }
 
 _FNAME_RE = re.compile(r"failed_parse_([A-Za-z0-9]+)_(\d{8}_\d{6})(?:_\d+)?\.txt$")
@@ -74,10 +75,12 @@ def _check_repairable(model_name: str, raw: str) -> Optional[bool]:
         from qaai.agents.shared.nodes import BaseLLMNode
         from qaai.agents.shared.core import DecomposedRequirement
         from qaai.agents.test_case_reviewer.core import TestCaseAssessment
+        from qaai.agents.test_suite_reviewer.core import SummarizedTestCaseList
 
         models = {
             "DecomposedRequirement": DecomposedRequirement,
             "TestCaseAssessment": TestCaseAssessment,
+            "SummarizedTestCaseList": SummarizedTestCaseList,
         }
         model = models.get(model_name)
         if model is None:

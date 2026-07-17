@@ -1,0 +1,14 @@
+{
+  "test_case_id": "TC-HC-129-A",
+  "objective": "Verify standard operation in the HealthCore EHR vitals module.",
+  "verifies": "verifies standard processing and normal system state update during routine operation",
+  "protocol": [
+    "Use the HealthCore EHR test environment with the Vitals module active.",
+    "Execute the routine action.",
+    "Verify normal processing."
+  ],
+  "acceptance_criteria": [
+    "Standard processing completes.",
+    "Regular system state updated."
+  ]
+}

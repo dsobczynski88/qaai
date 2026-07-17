@@ -1,0 +1,17 @@
+{
+  "test_case_id": "TC-HC-136-A",
+  "objective": "Verify the system response when the requirement-specified heart rate condition is exercised in the Vitals module.",
+  "verifies": "verifies nominal completion of the requirement-specified action in the Vitals module and resulting state/audit recording",
+  "protocol": [
+    "Log in to the HealthCore EHR test environment with the appropriate role and ensure the Vitals module is active.",
+    "Navigate to the Vitals module.",
+    "Execute the primary action specified in the requirement.",
+    "Verify the system response and any resulting state change."
+  ],
+  "acceptance_criteria": [
+    "Vitals module loads successfully.",
+    "Primary action completes without errors.",
+    "System state is updated correctly.",
+    "An audit log entry is created."
+  ]
+}
