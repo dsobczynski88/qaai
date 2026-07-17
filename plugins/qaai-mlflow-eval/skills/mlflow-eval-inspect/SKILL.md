@@ -41,8 +41,9 @@ uv run mlflow ui                      # http://localhost:5000, backend file:./ml
 ## From a run back to its predictions on disk
 
 A `--mode run` study also writes `<dataset>/predictions/<ts>/` containing the graph's
-`eval_outputs.jsonl`, their flat projection `eval_outputs_labels.jsonl` (the PREDICTED
-values), and `run_metadata.json` — which carries `mlflow_run_id`, so any prediction set maps
+`predicted_outputs.jsonl`, their flat projection `predicted_labels.jsonl` (the PREDICTED
+values), the `predicted_inputs.jsonl` it scored, and `run_metadata.json` — which carries
+`mlflow_run_id`, so any prediction set maps
 back to the run that made it, and vice versa. Use it to re-score a past run offline against
 new metrics without paying for the LLM again (mlflow-eval-run, score-only). Compare two
 timestamped sets directly:
@@ -50,8 +51,8 @@ timestamped sets directly:
 ```bash
 uv run python -c "
 from qaai.eval.datasets import load_jsonl
-a = load_jsonl('eval/datasets/test_suite/predictions/<ts_a>/eval_outputs_labels.jsonl')
-b = load_jsonl('eval/datasets/test_suite/predictions/<ts_b>/eval_outputs_labels.jsonl')
+a = load_jsonl('eval/datasets/test_suite/predictions/<ts_a>/predicted_labels.jsonl')
+b = load_jsonl('eval/datasets/test_suite/predictions/<ts_b>/predicted_labels.jsonl')
 print([i for i,(x,y) in enumerate(zip(a,b)) if x != y])  # rows where the runs disagree"
 ```
 

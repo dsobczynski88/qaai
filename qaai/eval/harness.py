@@ -13,11 +13,14 @@ from typing import Any, Dict, List, Optional
 
 from qaai.eval.artifacts import _json_default, write_all
 from qaai.eval.datasets import (
+    ACTUAL_LABELS_NAME,
+    ACTUAL_OUTPUTS_NAME,
     METADATA_NAME,
-    OUTPUTS_NAME,
+    PREDICTED_INPUTS_NAME,
+    PREDICTED_LABELS_NAME,
+    PREDICTED_OUTPUTS_NAME,
     PREDICTIONS_DIRNAME,
     EvalDataset,
-    LABELS_NAME,
     file_sha256,
     new_predictions_dir,
     outputs_to_labels,
@@ -48,10 +51,10 @@ def _entity_id(row: Any) -> Optional[str]:
 
 
 def _ground_truth(spec: EvalSpec, dataset: EvalDataset, n: int) -> tuple[List[Dict[str, Any]], str]:
-    """Resolve the ACTUAL values for run mode, preferring the answer-key eval_outputs.jsonl.
+    """Resolve the ACTUAL values for run mode, preferring the answer-key actual_outputs.jsonl.
 
-    ``eval_outputs.jsonl`` is the labelled dataset's outputs — the answer key in graph-output
-    shape — so flattening it yields ground truth directly. ``eval_outputs_labels.jsonl`` is
+    ``actual_outputs.jsonl`` is the labelled dataset's outputs — the answer key in graph-output
+    shape — so flattening it yields ground truth directly. ``actual_labels.jsonl`` is
     its flat projection and should say the same thing; when both exist they are cross-checked
     on the keys the answer key defines, and any disagreement raises. A dataset that
     contradicts itself makes every number downstream meaningless, so it fails loudly here
@@ -59,7 +62,7 @@ def _ground_truth(spec: EvalSpec, dataset: EvalDataset, n: int) -> tuple[List[Di
     """
     key_labels = dataset.labels[:n]
     if not dataset.outputs:
-        return key_labels, "eval_outputs_labels"
+        return key_labels, "actual_labels"
 
     derived = outputs_to_labels(spec, dataset.outputs[:n])
     for i, (d_row, k_row) in enumerate(zip(derived, key_labels)):
@@ -68,31 +71,35 @@ def _ground_truth(spec: EvalSpec, dataset: EvalDataset, n: int) -> tuple[List[Di
         clashes = {k: (k_row[k], d_row.get(k)) for k in k_row if k in d_row and d_row[k] != k_row[k]}
         if clashes:
             raise ValueError(
-                f"Dataset is internally inconsistent at row {i}: {OUTPUTS_NAME} and "
-                f"{LABELS_NAME} disagree on {clashes} (key: (labels, outputs)). "
+                f"Dataset is internally inconsistent at row {i}: {ACTUAL_OUTPUTS_NAME} and "
+                f"{ACTUAL_LABELS_NAME} disagree on {clashes} (key: (labels, outputs)). "
                 f"Fix the dataset before evaluating."
             )
-    return derived, "eval_outputs"
+    return derived, "actual_outputs"
 
 
 def _write_prediction_set(
     base_dir: Path,
     spec: EvalSpec,
+    inputs: List[Any],
     outputs: List[Any],
     metadata: Dict[str, Any],
 ) -> Path:
     """Persist one run's predictions as a timestamped, self-contained dataset fragment.
 
-    Canonical filenames inside the timestamped directory, so the result is re-scorable with
-    ``--mode score`` against the parent's answer key without any special-casing.
+    The ``predicted_*`` filenames inside the timestamped directory mirror the parent's
+    ``actual_*`` answer key, so the result is re-scorable with ``--mode score`` (pointing the
+    ``--actual-*`` flags at these files) without any special-casing. The inputs this run
+    scored are copied in too, so the folder stands alone.
     """
     pred_dir = new_predictions_dir(base_dir)
-    (pred_dir / OUTPUTS_NAME).write_text(
+    write_jsonl(pred_dir / PREDICTED_INPUTS_NAME, inputs)
+    (pred_dir / PREDICTED_OUTPUTS_NAME).write_text(
         "\n".join(json.dumps(o, default=_json_default) if o is not None else "null" for o in outputs) + "\n",
         encoding="utf-8",
     )
     # The PREDICTED values: the graph's own outputs in answer-key shape.
-    write_jsonl(pred_dir / LABELS_NAME, outputs_to_labels(spec, outputs))
+    write_jsonl(pred_dir / PREDICTED_LABELS_NAME, outputs_to_labels(spec, outputs))
     (pred_dir / METADATA_NAME).write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
     return pred_dir
 
@@ -115,8 +122,8 @@ def evaluate(
 ) -> Dict[str, Any]:
     """Run one evaluation study and log it as a single MLflow run.
 
-    ``mode='score'`` scores pre-computed eval_outputs (no LLM). ``mode='run'`` invokes the
-    graph on eval_inputs first, then persists what it produced to a timestamped prediction
+    ``mode='score'`` scores pre-computed actual_outputs (no LLM). ``mode='run'`` invokes the
+    graph on actual_inputs first, then persists what it produced to a timestamped prediction
     set (see ``_write_prediction_set``) so the run can be re-scored offline later.
     Returns a small summary dict for the CLI.
     """
@@ -132,7 +139,7 @@ def evaluate(
     run_dir = Path(tempfile.mkdtemp(prefix="qaai_eval_"))
     cost: Optional[Dict[str, float]] = None
     model = "unknown"
-    gt_source = "eval_outputs_labels"
+    gt_source = "actual_labels"
     pred_dir: Optional[Path] = None
 
     # --- Gather outputs (either freshly produced or read from the dataset) ---
@@ -141,7 +148,7 @@ def evaluate(
         from qaai.eval import runners
 
         inputs = dataset.inputs[:limit] if limit else dataset.inputs
-        # ACTUAL values: the answer key (eval_outputs.jsonl), cross-checked against its
+        # ACTUAL values: the answer key (actual_outputs.jsonl), cross-checked against its
         # flat projection. --limit truncates inputs and ground truth together.
         labels, gt_source = _ground_truth(spec, dataset, len(inputs))
         tracker = TokenUsageTracker(file_path=str(run_dir / "token_usage.jsonl"))
@@ -155,7 +162,7 @@ def evaluate(
         )
         entity_ids = [_entity_id(r) for r in inputs]
         # Staged into the MLflow artifacts too, so a run is self-describing in the UI.
-        (run_dir / OUTPUTS_NAME).write_text(
+        (run_dir / PREDICTED_OUTPUTS_NAME).write_text(
             "\n".join(json.dumps(o, default=_json_default) if o is not None else "null" for o in outputs) + "\n",
             encoding="utf-8",
         )
@@ -165,7 +172,7 @@ def evaluate(
             )
             if base:
                 pred_dir = _write_prediction_set(
-                    Path(base), spec, outputs,
+                    Path(base), spec, inputs, outputs,
                     {
                         "component": spec.component,
                         "spec": spec.name,

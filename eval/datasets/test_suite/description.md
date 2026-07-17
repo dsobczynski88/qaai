@@ -61,9 +61,9 @@ convenient fiction; the whole point of this set is that labels follow from conte
 
 ## Files
 - `source_gold.jsonl` — hand-authored source of truth (requirement + test_cases + labels)
-- `eval_inputs.jsonl` / `eval_outputs.jsonl` / `eval_outputs_labels.jsonl` — generated from it
-  by `scripts/convert_to_eval.py gold --synthesize-outputs`. `eval_outputs*.jsonl` are the
-  **answer key** (actual); predictions come only from `--mode run`.
+- `actual_inputs.jsonl` / `actual_outputs.jsonl` / `actual_labels.jsonl` — generated from it
+  by `scripts/convert_to_eval.py gold --synthesize-outputs`. The `actual_*` files are the
+  **answer key** (actual); predictions come only from `--mode run` (written as `predicted_*`).
 
 ## Assumptions and rulings
 - **M3 = N-A** where the requirement states no threshold, limit, or timing edge (e.g.
@@ -83,6 +83,6 @@ convenient fiction; the whole point of this set is that labels follow from conte
 1. `unique requirement text == n_records` (design effect 1).
 2. Rubric rule holds for every row: `Overall_Verdict == Yes` iff all M1–M5 ∈ {Yes, N-A}.
 3. M1/M4/M5 are never N-A.
-4. Round-trip: `outputs_to_labels(spec, eval_outputs) == eval_outputs_labels`.
+4. Round-trip: `outputs_to_labels(spec, actual_outputs) == actual_labels`.
 5. Pilot gate: `cohen_kappa > 0` and `prevalence_pred_positive > 0`. A constant predictor
    means labels and content disagree — fix the data, do not scale up.

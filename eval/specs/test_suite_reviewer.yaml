@@ -4,13 +4,13 @@ name: test_suite_reviewer
 component: test_suite_reviewer
 prompt_set: test_suite_reviewer_v3          # baseline set; override with --prompt-set
 
-# run+score: how to build graph input state from an eval_inputs row.
+# run+score: how to build graph input state from an actual_inputs row.
 input:
   requirement: requirement
   test_cases: test_cases
   design_docs: design_docs                  # optional; omitted rows are fine
 
-# where predictions live in an eval_outputs / graph-state row.
+# where predictions live in an actual_outputs / graph-state row.
 output:
   verdict_path: synthesized_assessment.overall_verdict
   rubric:

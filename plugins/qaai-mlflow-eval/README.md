@@ -55,9 +55,9 @@ uv run python scripts/evaluate_with_mlflow.py \
 uv run mlflow ui
 ```
 
-**Predicted vs actual.** The committed `eval_outputs.jsonl` is the *answer key* (ACTUAL).
+**Predicted vs actual.** The committed `actual_outputs.jsonl` is the *answer key* (ACTUAL).
 `--mode run` produces the *predictions* and writes them to
-`eval/datasets/<name>/predictions/<ts>/eval_outputs_labels.jsonl` (PREDICTED). Accuracy
+`eval/datasets/<name>/predictions/<ts>/predicted_labels.jsonl` (PREDICTED). Accuracy
 compares the two. Step 3 skips the graph entirely, which is why it always reports 1.000.
 
 The harness, specs, datasets, CLIs, and tests live in the main repo (`qaai/eval/`,

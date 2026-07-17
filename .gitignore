@@ -35,6 +35,12 @@ mlflow.db
 mlruns/
 eval/datasets/test_suite/*
 !eval/datasets/test_suite/.gitkeep
+# The committed RTM pilot (answer key); predictions/ stays ignored via the glob above.
+!eval/datasets/test_suite/actual_inputs.jsonl
+!eval/datasets/test_suite/actual_outputs.jsonl
+!eval/datasets/test_suite/actual_labels.jsonl
+!eval/datasets/test_suite/source_gold.jsonl
+!eval/datasets/test_suite/description.md
 eval/datasets/test_case/*
 !eval/datasets/test_case/.gitkeep
 eval/datasets/hazard/*

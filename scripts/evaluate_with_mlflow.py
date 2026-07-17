@@ -29,10 +29,10 @@ from qaai.eval.spec import load_spec
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--spec", type=Path, required=True, help="Path to eval/specs/<name>.yaml")
-    ap.add_argument("--dataset-dir", type=Path, help="Dir with eval_inputs/eval_outputs/eval_outputs_labels.jsonl")
-    ap.add_argument("--eval-inputs", type=Path, help="Override path to eval_inputs.jsonl")
-    ap.add_argument("--eval-outputs", type=Path, help="Override path to eval_outputs.jsonl")
-    ap.add_argument("--eval-outputs-labels", type=Path, help="Override path to eval_outputs_labels.jsonl")
+    ap.add_argument("--dataset-dir", type=Path, help="Dir with actual_inputs/actual_outputs/actual_labels.jsonl")
+    ap.add_argument("--actual-inputs", type=Path, help="Override path to actual_inputs.jsonl")
+    ap.add_argument("--actual-outputs", type=Path, help="Override path to actual_outputs.jsonl")
+    ap.add_argument("--actual-labels", type=Path, help="Override path to actual_labels.jsonl")
     ap.add_argument("--mode", choices=("score", "run"), default="score")
     ap.add_argument("--prompt-set", help="Override the spec's prompt_set (run mode)")
     ap.add_argument("--run-name")
@@ -62,9 +62,9 @@ def main() -> None:
     dataset = load_dataset(
         args.dataset_dir,
         mode=args.mode,
-        inputs_path=args.eval_inputs,
-        outputs_path=args.eval_outputs,
-        labels_path=args.eval_outputs_labels,
+        inputs_path=args.actual_inputs,
+        outputs_path=args.actual_outputs,
+        labels_path=args.actual_labels,
     )
     summary = evaluate(
         spec, dataset,
@@ -95,9 +95,9 @@ def main() -> None:
     print(f"[mlflow] artifacts staged at {summary['artifacts_dir']}")
     if summary.get("predictions_dir"):
         print(f"[mlflow] predictions saved to {summary['predictions_dir']}")
-        print(f"[mlflow]   re-score offline: --mode score --eval-outputs "
-              f"{Path(summary['predictions_dir']) / 'eval_outputs.jsonl'} "
-              f"--eval-outputs-labels <answer-key labels>")
+        print(f"[mlflow]   re-score offline: --mode score --actual-outputs "
+              f"{Path(summary['predictions_dir']) / 'predicted_outputs.jsonl'} "
+              f"--actual-labels <answer-key labels>")
     if summary.get("oracle_selftest"):
         print(
             "[mlflow] WARNING: every prediction matched the answer key exactly. This is an "

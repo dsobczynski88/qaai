@@ -5,7 +5,7 @@ description: |
   prepare its labelled dataset. Authors an eval spec (eval/specs/<name>.yaml) that
   maps a reviewer's input / output / label schema — verdict path, rubric list + code/
   verdict fields, label keys — so the harness works without code changes. Prepares the
-  three-file dataset (eval_inputs.jsonl / eval_outputs.jsonl / eval_outputs_labels.jsonl)
+  three-file dataset (actual_inputs.jsonl / actual_outputs.jsonl / actual_labels.jsonl)
   via scripts/convert_to_eval.py, including converting the existing gold_dataset*.jsonl.
   Use when the user asks to "set up MLflow evaluation", "onboard a new eval dataset /
   model", "define the eval input/output/label schema", "map a reviewer for scoring",
@@ -34,7 +34,7 @@ the harness (`qaai/eval/`) never hard-codes field names. Fields:
   (selects the runnable + input builder in `qaai/eval/runners.py`). For a brand-new
   pipeline, add an entry to the `COMPONENTS` registry there.
 - `prompt_set` — default prompt set; `--prompt-set` overrides at run time.
-- `input` — maps a graph-state key to a dotted path in an `eval_inputs` row (run mode).
+- `input` — maps a graph-state key to a dotted path in an `actual_inputs` row (run mode).
 - `output.verdict_path` / `output.rubric` — where the prediction lives in an output row.
 - `labels.verdict_key` / `labels.rubric_keys` — how to read the flat answer key.
 - `scoring.advisory_codes` — cells excluded from the overall verdict (e.g. `R6`, `R7`).
@@ -46,10 +46,10 @@ Three ready specs ship in `eval/specs/`: `test_suite_reviewer.yaml`,
 
 The canonical dataset is row-aligned — row *i* of every file describes the same item:
 
-    eval/datasets/<name>/eval_inputs.jsonl          # graph input          (run mode)
-                        /eval_outputs.jsonl          # ANSWER KEY, output shape
-                        /eval_outputs_labels.jsonl   # ANSWER KEY, flat projection
-                        /predictions/<ts>/...        # one live run's PREDICTIONS
+    eval/datasets/<name>/actual_inputs.jsonl        # graph input          (run mode)
+                        /actual_outputs.jsonl        # ANSWER KEY, output shape
+                        /actual_labels.jsonl         # ANSWER KEY, flat projection
+                        /predictions/<ts>/...        # one live run's PREDICTIONS (predicted_*)
 
 All three committed files describe the **actual** (labelled) truth: inputs, and the expected
 answer in two shapes. Nothing in the dataset is a prediction. Predictions are produced by
@@ -78,7 +78,7 @@ uv run python scripts/convert_to_eval.py outputs \
 ```
 
 You can also skip committing data and point the harness at your own files with
-`--dataset-dir` (or `--eval-inputs/--eval-outputs/--eval-outputs-labels`).
+`--dataset-dir` (or `--actual-inputs/--actual-outputs/--actual-labels`).
 
 ## Prerequisites
 
@@ -95,10 +95,10 @@ uv run python scripts/evaluate_with_mlflow.py \
 ```
 Expect a run with `overall_accuracy`, per-rubric metrics, and artifacts. Oracle data
 scores 1.0 and tags itself `oracle_selftest=true` — that only proves the plumbing; real
-evaluation uses `--mode run` (mlflow-eval-run) or your own `eval_outputs`.
+evaluation uses `--mode run` (mlflow-eval-run) or your own `actual_outputs`.
 
-A stronger offline check, if you have both answer-key files: flattening `eval_outputs.jsonl`
-must reproduce `eval_outputs_labels.jsonl` exactly, since the two converters are inverses.
+A stronger offline check, if you have both answer-key files: flattening `actual_outputs.jsonl`
+must reproduce `actual_labels.jsonl` exactly, since the two converters are inverses.
 
 ```bash
 uv run python -c "
@@ -106,7 +106,7 @@ from qaai.eval.spec import load_spec
 from qaai.eval.datasets import load_jsonl, outputs_to_labels
 s = load_spec('eval/specs/test_suite_reviewer.yaml')
 d = 'eval/datasets/test_suite'
-assert outputs_to_labels(s, load_jsonl(f'{d}/eval_outputs.jsonl')) == load_jsonl(f'{d}/eval_outputs_labels.jsonl')
+assert outputs_to_labels(s, load_jsonl(f'{d}/actual_outputs.jsonl')) == load_jsonl(f'{d}/actual_labels.jsonl')
 print('answer key is self-consistent')"
 ```
 The harness enforces this at run time too, failing with the offending row index.
