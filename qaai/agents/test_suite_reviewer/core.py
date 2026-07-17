@@ -6,9 +6,11 @@ live in qaai.agents.shared.core and are re-exported here for
 backward compatibility with existing call sites.
 """
 
-from pydantic import BaseModel, Field, RootModel
+import logging
 import operator
-from typing import Optional, List, Literal, TypedDict, Annotated, Any, Dict
+from typing import Optional, List, Literal, TypedDict, Annotated, Any, Dict, Tuple
+
+from pydantic import BaseModel, Field, RootModel, model_validator
 
 from qaai.agents.shared.core import (
     Requirement,
@@ -20,6 +22,14 @@ from qaai.agents.shared.core import (
     VerdictNA,
     BaseReviewState,
 )
+
+logger = logging.getLogger(__name__)
+
+# Rubric codes that are RECOMMENDED only and never gate overall_verdict. Named once
+# here because the exclusion rule is asserted in several places (the model field
+# descriptions, the synthesizer prompt, and eval/specs/test_suite_reviewer.yaml's
+# scoring.advisory_codes) and they must not drift apart.
+ADVISORY_CODES: Tuple[str, ...] = ("R6",)
 
 __all__ = [
     "Requirement",
@@ -225,6 +235,40 @@ class SynthesizedAssessment(BaseModel):
             "valid or applicable in context. Empty list ⇒ N/A (no questions needed)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _derive_overall_verdict(self) -> "SynthesizedAssessment":
+        """Recompute overall_verdict from the findings; the LLM cannot re-grade itself.
+
+        The synthesizer emits the per-cell verdicts AND the summary verdict in one call,
+        so the two can disagree — observed on 2/20 records with gpt-5.4-mini, e.g. cells
+        ``M2=No, M3=No`` returned alongside ``overall_verdict=Yes``. That is a
+        SoP-gating verdict contradicting the very evidence printed beside it, which is
+        worse than a wrong cell: a reviewer reading the report sees "Yes" and stops.
+
+        Mirrors ``hazard_risk_reviewer.nodes._FinalAssessorNode._aggregate_verdict``
+        ("overall_verdict is computed in code so the LLM cannot accidentally re-grade
+        or drop a dimension"). R6 is advisory and excluded, exactly as it is there.
+
+        Deterministic and non-fabricating: it only re-reads verdicts the model already
+        produced. With no mandatory findings there is nothing to derive from, so the
+        stated verdict stands.
+        """
+        mandatory = [f for f in self.mandatory_findings if f.code not in ADVISORY_CODES]
+        if not mandatory:
+            return self
+        derived = "Yes" if all(f.verdict in ("Yes", "N-A") for f in mandatory) else "No"
+        if self.overall_verdict != derived:
+            logger.warning(
+                "SynthesizedAssessment(%s): overall_verdict=%r contradicts its own "
+                "mandatory findings (%s); correcting to %r",
+                getattr(self.requirement, "req_id", "?"),
+                self.overall_verdict,
+                ", ".join(f"{f.code}={f.verdict}" for f in mandatory),
+                derived,
+            )
+            self.overall_verdict = derived
+        return self
 
 
 class RTMReviewState(BaseReviewState, total=False):
