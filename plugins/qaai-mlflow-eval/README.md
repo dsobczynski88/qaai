@@ -30,23 +30,35 @@ skills if copied to `.claude/skills/` — they auto-load with no marketplace ste
 ## Quick start
 
 ```bash
-# 1. dataset from gold (with offline oracle outputs)
+# 1. dataset from gold (answer key rendered into graph-output shape)
 uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
   --out eval/datasets/test_suite \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 
-# 2. score-only study (no LLM)
+# 2. size the labelled set  (95% / +/-0.05 -> 385 at p=0.5, 196 at p=0.85)
+uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.85
+
+# 3. smoke the plumbing offline (no LLM). Scores 1.000 by construction: this is the
+#    answer key matching itself, tagged oracle_selftest=true. Not a measurement.
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite --mode score --run-name gold-baseline
+  --dataset-dir eval/datasets/test_suite --mode score --run-name plumbing-smoke
 
-# 3. inspect
+# 4. THE actual study: run the graph, save predictions/<ts>/, score them vs the answer key
+uv run python scripts/evaluate_with_mlflow.py \
+  --spec eval/specs/test_suite_reviewer.yaml \
+  --dataset-dir eval/datasets/test_suite \
+  --mode run --limit 40 --max-concurrent 5 --run-name pilot-40
+
+# 5. inspect
 uv run mlflow ui
-
-# 4. size the labelled set
-uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.85
 ```
+
+**Predicted vs actual.** The committed `eval_outputs.jsonl` is the *answer key* (ACTUAL).
+`--mode run` produces the *predictions* and writes them to
+`eval/datasets/<name>/predictions/<ts>/eval_outputs_labels.jsonl` (PREDICTED). Accuracy
+compares the two. Step 3 skips the graph entirely, which is why it always reports 1.000.
 
 The harness, specs, datasets, CLIs, and tests live in the main repo (`qaai/eval/`,
 `eval/`, `scripts/`, `tests/unit/eval/`); this plugin is the skill layer over them.

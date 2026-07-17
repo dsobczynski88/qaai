@@ -2,11 +2,19 @@
 
 Two levels, matching the reviewer's own structure:
   * **overall verdict** — binary {positive, negative}: accuracy / precision / recall /
-    F1 (positive class = ``spec.scoring.positive_label``) + a confusion matrix.
-  * **per-rubric cells** — multiclass {Yes, No, N-A} by default: per-cell accuracy +
-    macro-F1, plus an aggregate ``rubric_macro_f1``.
+    F1 (positive class = ``spec.scoring.positive_label``) + macro-F1, balanced accuracy,
+    Cohen's kappa, and class prevalence + a confusion matrix.
+  * **per-rubric cells** — multiclass {Yes, No, N-A} by default: per-cell accuracy,
+    macro-F1, balanced accuracy, kappa, and per-class support, plus an aggregate
+    ``rubric_macro_f1``.
 
-Two QAAI-specific signals are also computed:
+Balanced accuracy and macro-F1 are the ones to read when a class dominates; plain
+accuracy flatters a model that always guesses the majority label. ``support_by_class``
+is what tells you whether a given cell's number is trustworthy at all.
+
+Three QAAI-specific signals are also computed:
+  * **exact-match rate** — fraction of records where *every mandatory* rubric cell is
+    right (advisory codes excluded). Strict row-level correctness.
   * **helper-invariant pass-rate** — does the model's overall verdict equal the
     deterministic rule "Yes iff every mandatory cell ∈ {positive, N-A}"? A drop here
     means the synthesizer/aggregator contradicted its own rubric.
@@ -17,11 +25,14 @@ All computation is pure and LLM-free, so it is unit-testable in isolation.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 from sklearn.metrics import (
     accuracy_score,
+    balanced_accuracy_score,
+    cohen_kappa_score,
     f1_score,
     precision_recall_fscore_support,
 )
@@ -122,6 +133,22 @@ def _binary(labels: List[str], positive: str) -> List[int]:
     return [1 if v == positive else 0 for v in labels]
 
 
+def _safe_kappa(y_true: Sequence[Any], y_pred: Sequence[Any]) -> Optional[float]:
+    """Cohen's kappa, or None when it is undefined.
+
+    Kappa divides by (1 - expected agreement), which is 0 when both raters use a
+    single class throughout (e.g. an M-cell whose gt and pred are all "Yes").
+    sklearn returns nan there; MLflow would happily log the nan and it would read as
+    a real score. None means "not computable for this sample" and the caller omits it.
+    """
+    import math
+
+    if len(set(y_true)) < 2 and len(set(y_pred)) < 2:
+        return None
+    k = float(cohen_kappa_score(y_true, y_pred))
+    return None if math.isnan(k) else k
+
+
 def _derive_overall(spec: EvalSpec, rubric: Dict[str, Optional[str]]) -> Optional[str]:
     """Deterministic rule: positive iff every mandatory cell ∈ {positive, N-A}."""
     mandatory = spec.mandatory_codes
@@ -152,14 +179,25 @@ def compute_metrics(spec: EvalSpec, records: List[RecordResult]) -> Dict[str, An
         prec, rec, f1, _ = precision_recall_fscore_support(
             yt, yp, average="binary", pos_label=1, zero_division=0
         )
-        out["overall"] = {
+        n = len(yt)
+        overall: Dict[str, Any] = {
             "accuracy": float(accuracy_score(y_true, y_pred)),
             "precision": float(prec),
             "recall": float(rec),
+            # Positive-class F1 (kept for continuity) alongside macro-F1, which
+            # weights Yes and No equally and is the honest headline under imbalance.
             "f1": float(f1),
+            "f1_macro": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+            "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
             "support_positive": int(sum(yt)),
-            "support_negative": int(len(yt) - sum(yt)),
+            "support_negative": int(n - sum(yt)),
+            "prevalence_gt_positive": float(sum(yt) / n),
+            "prevalence_pred_positive": float(sum(yp) / n),
         }
+        kappa = _safe_kappa(y_true, y_pred)
+        if kappa is not None:
+            overall["cohen_kappa"] = kappa
+        out["overall"] = overall
 
     # --- Per-rubric multi-cell classifier ---
     if "per_rubric" in enabled and spec.output.rubric:
@@ -182,16 +220,42 @@ def compute_metrics(spec: EvalSpec, records: List[RecordResult]) -> Dict[str, An
                 gt = [pos if v == spec.scoring.na_label else v for v in gt]
                 pd = [pos if v == spec.scoring.na_label else v for v in pd]
             cell_f1 = float(f1_score(gt, pd, average="macro", zero_division=0))
-            per_rubric[code] = {
+            cell: Dict[str, Any] = {
                 "accuracy": float(accuracy_score(gt, pd)),
                 "f1_macro": cell_f1,
+                "balanced_accuracy": float(balanced_accuracy_score(gt, pd)),
                 "support": len(pairs),
+                # Per-class ground-truth counts: a cell whose minority class has a
+                # handful of rows has a wide CI no matter how good its accuracy looks.
+                "support_by_class": dict(Counter(gt)),
             }
+            cell_kappa = _safe_kappa(gt, pd)
+            if cell_kappa is not None:
+                cell["cohen_kappa"] = cell_kappa
+            per_rubric[code] = cell
             if code not in spec.scoring.advisory_codes:
                 macro_f1s.append(cell_f1)
         out["per_rubric"] = per_rubric
         if macro_f1s:
             out["rubric_macro_f1"] = float(sum(macro_f1s) / len(macro_f1s))
+
+    # --- Exact match: every mandatory cell correct on a record ---
+    if "exact_match" in enabled and spec.output.rubric:
+        mandatory = set(spec.mandatory_codes)
+        flags: List[bool] = []
+        for r in scored:
+            cells = [
+                rc for rc in r.per_rubric
+                if rc["code"] in mandatory and rc["gt"] is not None and rc["pred"] is not None
+            ]
+            # No comparable mandatory cells => nothing to be right about. Counting this
+            # as a pass would inflate the rate with unlabelled rows.
+            if not cells:
+                continue
+            flags.append(all(rc["match"] for rc in cells))
+        if flags:
+            out["exact_match_rate"] = sum(flags) / len(flags)
+            out["exact_match_n"] = len(flags)
 
     # --- Helper-invariant pass rate (predicted overall vs deterministic derivation) ---
     if "helper_invariant" in enabled and spec.output.rubric:
