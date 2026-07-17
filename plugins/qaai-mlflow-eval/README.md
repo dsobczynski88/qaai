@@ -1,7 +1,7 @@
 # qaai-mlflow-eval
 
 A repo-committed Claude Code plugin for MLflow-based evaluation of the QAAI reviewer
-pipelines. Five skills wrap a spec-driven harness (`qaai/eval/`) and CLIs (`scripts/`):
+pipelines. Six skills wrap a spec-driven harness (`qaai/eval/`) and CLIs (`scripts/`):
 
 | Skill | Purpose |
 |-------|---------|
@@ -9,6 +9,7 @@ pipelines. Five skills wrap a spec-driven harness (`qaai/eval/`) and CLIs (`scri
 | `mlflow-eval-run` | Run a scoring study (score-only or run+score) → one MLflow run |
 | `mlflow-eval-metrics` | Add/remove params, tags, and metric families |
 | `mlflow-eval-inspect` | MLflow UI, run comparison, artifacts, tracing, CI gate |
+| `mlflow-eval-compare` | Side-by-side actual-vs-predicted diff (compare.html) for one run |
 | `mlflow-eval-sample-size` | Size the labelled set for an accuracy confidence interval |
 
 ## Activation
@@ -53,6 +54,9 @@ uv run python scripts/evaluate_with_mlflow.py \
 
 # 5. inspect
 uv run mlflow ui
+
+# 6. eyeball the diff: side-by-side actual vs predicted for that run
+python -m qaai.eval.compare eval/datasets/test_suite/predictions/<ts>/   # writes compare.html
 ```
 
 **Predicted vs actual.** The committed `actual_outputs.jsonl` is the *answer key* (ACTUAL).

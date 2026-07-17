@@ -9,6 +9,7 @@ import sys
 from typing import Iterable, Optional, Union
 
 from qaai.viewer.template import HTML_TEMPLATE
+from qaai.viewer.template_eval_compare import EVAL_COMPARE_TEMPLATE
 from qaai.viewer.template_hazard_review import HZ_HTML_TEMPLATE
 from qaai.viewer.template_test_case import TC_HTML_TEMPLATE
 
@@ -49,6 +50,7 @@ _VIEWER_SPECS: dict[str, tuple[str, str, str, str]] = {
     "test_suite": (HTML_TEMPLATE, "Batch output viewer", "test_suite", "viewer.html"),
     "test_case": (TC_HTML_TEMPLATE, "Test case output viewer", "test_case", "viewer_tc.html"),
     "hazard": (HZ_HTML_TEMPLATE, "Hazard reviewer output viewer", "hazard", "viewer_hz.html"),
+    "eval_compare": (EVAL_COMPARE_TEMPLATE, "Actual vs predicted", "eval_compare", "compare.html"),
 }
 
 
@@ -96,6 +98,21 @@ def build_viewer_hz(
     records using the hazard template.
     """
     return _build("hazard", records, source_label, run_key, log_entries)
+
+
+def build_viewer_compare(
+    records: Iterable[dict], source_label: str, run_key: str,
+    log_entries: Optional[list] = None,
+) -> str:
+    """Render the single-file actual-vs-predicted diff viewer.
+
+    Unlike the three reviewer viewers, ``records`` here are the merged comparison
+    rows built in memory by :mod:`qaai.eval.compare` (each carries both the actual
+    answer-key values and the run's predicted values), not a plain ``outputs.jsonl``.
+    ``run_key`` namespaces the localStorage feedback (usually the predictions
+    timestamp).
+    """
+    return _build("eval_compare", records, source_label, run_key, log_entries)
 
 
 def _read_records(jsonl_path: PathLike) -> tuple[pathlib.Path, list[dict]]:
