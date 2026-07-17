@@ -12,7 +12,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from qaai.eval.artifacts import _json_default, write_all
-from qaai.eval.datasets import EvalDataset
+from qaai.eval.datasets import (
+    METADATA_NAME,
+    OUTPUTS_NAME,
+    PREDICTIONS_DIRNAME,
+    EvalDataset,
+    LABELS_NAME,
+    file_sha256,
+    new_predictions_dir,
+    outputs_to_labels,
+    write_jsonl,
+)
 from qaai.eval.metrics import flatten_metrics
 from qaai.eval.scoring import build_records, compute_metrics
 from qaai.eval.spec import EvalSpec
@@ -37,6 +47,56 @@ def _entity_id(row: Any) -> Optional[str]:
     return None
 
 
+def _ground_truth(spec: EvalSpec, dataset: EvalDataset, n: int) -> tuple[List[Dict[str, Any]], str]:
+    """Resolve the ACTUAL values for run mode, preferring the answer-key eval_outputs.jsonl.
+
+    ``eval_outputs.jsonl`` is the labelled dataset's outputs — the answer key in graph-output
+    shape — so flattening it yields ground truth directly. ``eval_outputs_labels.jsonl`` is
+    its flat projection and should say the same thing; when both exist they are cross-checked
+    on the keys the answer key defines, and any disagreement raises. A dataset that
+    contradicts itself makes every number downstream meaningless, so it fails loudly here
+    rather than scoring against a coin flip.
+    """
+    key_labels = dataset.labels[:n]
+    if not dataset.outputs:
+        return key_labels, "eval_outputs_labels"
+
+    derived = outputs_to_labels(spec, dataset.outputs[:n])
+    for i, (d_row, k_row) in enumerate(zip(derived, key_labels)):
+        # The answer-key file defines which cells are labelled; extra keys in the derived
+        # row (e.g. an R6 the flat file omits) are additional information, not a conflict.
+        clashes = {k: (k_row[k], d_row.get(k)) for k in k_row if k in d_row and d_row[k] != k_row[k]}
+        if clashes:
+            raise ValueError(
+                f"Dataset is internally inconsistent at row {i}: {OUTPUTS_NAME} and "
+                f"{LABELS_NAME} disagree on {clashes} (key: (labels, outputs)). "
+                f"Fix the dataset before evaluating."
+            )
+    return derived, "eval_outputs"
+
+
+def _write_prediction_set(
+    base_dir: Path,
+    spec: EvalSpec,
+    outputs: List[Any],
+    metadata: Dict[str, Any],
+) -> Path:
+    """Persist one run's predictions as a timestamped, self-contained dataset fragment.
+
+    Canonical filenames inside the timestamped directory, so the result is re-scorable with
+    ``--mode score`` against the parent's answer key without any special-casing.
+    """
+    pred_dir = new_predictions_dir(base_dir)
+    (pred_dir / OUTPUTS_NAME).write_text(
+        "\n".join(json.dumps(o, default=_json_default) if o is not None else "null" for o in outputs) + "\n",
+        encoding="utf-8",
+    )
+    # The PREDICTED values: the graph's own outputs in answer-key shape.
+    write_jsonl(pred_dir / LABELS_NAME, outputs_to_labels(spec, outputs))
+    (pred_dir / METADATA_NAME).write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+    return pred_dir
+
+
 def evaluate(
     spec: EvalSpec,
     dataset: EvalDataset,
@@ -50,11 +110,15 @@ def evaluate(
     allow_prod: bool = False,
     trace: bool = True,
     tracking_uri: Optional[str] = None,
+    predictions_dir: Optional[Path] = None,
+    save_predictions: bool = True,
 ) -> Dict[str, Any]:
     """Run one evaluation study and log it as a single MLflow run.
 
-    ``mode='score'`` scores pre-computed eval_outputs (no LLM). ``mode='run'`` invokes
-    the graph on eval_inputs first. Returns a small summary dict for the CLI.
+    ``mode='score'`` scores pre-computed eval_outputs (no LLM). ``mode='run'`` invokes the
+    graph on eval_inputs first, then persists what it produced to a timestamped prediction
+    set (see ``_write_prediction_set``) so the run can be re-scored offline later.
+    Returns a small summary dict for the CLI.
     """
     import mlflow
 
@@ -68,6 +132,8 @@ def evaluate(
     run_dir = Path(tempfile.mkdtemp(prefix="qaai_eval_"))
     cost: Optional[Dict[str, float]] = None
     model = "unknown"
+    gt_source = "eval_outputs_labels"
+    pred_dir: Optional[Path] = None
 
     # --- Gather outputs (either freshly produced or read from the dataset) ---
     if mode == "run":
@@ -75,7 +141,9 @@ def evaluate(
         from qaai.eval import runners
 
         inputs = dataset.inputs[:limit] if limit else dataset.inputs
-        labels = dataset.labels[: len(inputs)]
+        # ACTUAL values: the answer key (eval_outputs.jsonl), cross-checked against its
+        # flat projection. --limit truncates inputs and ground truth together.
+        labels, gt_source = _ground_truth(spec, dataset, len(inputs))
         tracker = TokenUsageTracker(file_path=str(run_dir / "token_usage.jsonl"))
         client, model = runners.build_client(allow_prod=allow_prod, telemetry_tracker=tracker)
         outputs, latencies, completes, errors = asyncio.run(
@@ -86,11 +154,34 @@ def evaluate(
             )
         )
         entity_ids = [_entity_id(r) for r in inputs]
-        # Persist the produced outputs so the run is reproducible / re-scorable offline.
-        (run_dir / "eval_outputs.jsonl").write_text(
+        # Staged into the MLflow artifacts too, so a run is self-describing in the UI.
+        (run_dir / OUTPUTS_NAME).write_text(
             "\n".join(json.dumps(o, default=_json_default) if o is not None else "null" for o in outputs) + "\n",
             encoding="utf-8",
         )
+        if save_predictions:
+            base = predictions_dir or (
+                (dataset.inputs_path.parent / PREDICTIONS_DIRNAME) if dataset.inputs_path else None
+            )
+            if base:
+                pred_dir = _write_prediction_set(
+                    Path(base), spec, outputs,
+                    {
+                        "component": spec.component,
+                        "spec": spec.name,
+                        "model": model,
+                        "prompt_set": prompt_set,
+                        "prompt_versions": {r: p.get("version") for r, p in provenance.get("prompts", {}).items()},
+                        "git_sha": mr.git_sha(),
+                        "git_dirty": mr.git_dirty(),
+                        "source_inputs_path": str(dataset.inputs_path),
+                        "source_outputs_path": str(dataset.outputs_path) if dataset.outputs_path else None,
+                        "source_fixture_sha256": file_sha256(dataset.inputs_path),
+                        "ground_truth_source": gt_source,
+                        "n_records": len(outputs),
+                        "limit": limit,
+                    },
+                )
         s = tracker.summary()
         cost = {
             "total_input_tokens": s["total_prompt_tokens"],
@@ -122,13 +213,28 @@ def evaluate(
     if trace and mode == "run":
         mr.enable_tracing()
 
+    # A score run whose "predictions" match the answer key on every record is scoring the
+    # answer key against itself — the committed oracle dataset does exactly this. It is a
+    # valid plumbing check but not a measurement, and a silent 1.000 is the failure mode
+    # that looks most like success, so label it in MLflow and say so on stdout.
+    oracle_selftest = (
+        mode == "score"
+        and bool(records)
+        and all(r.overall_match for r in records if r.scored)
+        and nested.get("n_scored", 0) > 0
+    )
+
     with mlflow.start_run(run_name=run_name) as run:
         params = mr.build_params(
             spec, dataset, mode=mode, model=model, prompt_set=prompt_set,
             max_concurrent=max_concurrent, provenance=provenance,
         )
+        params["ground_truth_source"] = gt_source
         mlflow.log_params(params)
-        mlflow.set_tags(mr.build_tags(spec))
+        tags = mr.build_tags(spec)
+        if oracle_selftest:
+            tags["oracle_selftest"] = "true"
+        mlflow.set_tags(tags)
         mlflow.log_metrics(flat)
         fixture_meta = {
             "spec": spec.name,
@@ -141,6 +247,15 @@ def evaluate(
         mlflow.log_artifacts(str(run_dir))
         run_id = run.info.run_id
 
+    # The prediction set is written before scoring so a crash never discards the expensive
+    # LLM outputs; the run_id only exists afterwards, so stamp it in now.
+    if pred_dir:
+        meta_path = pred_dir / METADATA_NAME
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["mlflow_run_id"] = run_id
+        meta["mlflow_experiment"] = experiment or mr.experiment_name(spec)
+        meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
+
     return {
         "run_id": run_id,
         "experiment": experiment or mr.experiment_name(spec),
@@ -148,4 +263,7 @@ def evaluate(
         "n_records": len(records),
         "n_scored": nested.get("n_scored"),
         "artifacts_dir": str(run_dir),
+        "predictions_dir": str(pred_dir) if pred_dir else None,
+        "ground_truth_source": gt_source,
+        "oracle_selftest": oracle_selftest,
     }

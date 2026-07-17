@@ -33,6 +33,8 @@ scoring:
 
 mlflow:
   experiment: test_suite_reviewer
-  params: {}                                 # e.g. {dataset_label: healthcore-v1}
+  # scoring_rev pins the metric semantics: bumped to 2 when macro-F1 / balanced accuracy /
+  # kappa / exact-match were added, so pre-change runs stay distinguishable in the UI.
+  params: {dataset_label: rtm-study-v1, scoring_rev: 2}
   tags: {}                                   # e.g. {owner: dsobc}
-  metrics_enabled: [overall, per_rubric, latency, cost, helper_invariant]
+  metrics_enabled: [overall, per_rubric, exact_match, latency, cost, helper_invariant]

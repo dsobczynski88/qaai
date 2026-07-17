@@ -13,10 +13,12 @@ def flatten_metrics(nested: Dict[str, Any], cost: Optional[Dict[str, float]] = N
     """Turn compute_metrics() output into flat scalar metrics for MLflow."""
     flat: Dict[str, float] = {}
 
-    for k in ("n_total", "n_scored", "skip_rate"):
+    for k in ("n_total", "n_scored", "skip_rate", "exact_match_rate", "exact_match_n"):
         if k in nested:
             flat[k] = float(nested[k])
 
+    # Every scalar in the overall block becomes overall_<key>: accuracy, precision,
+    # recall, f1, f1_macro, balanced_accuracy, cohen_kappa, support_*, prevalence_*.
     overall = nested.get("overall")
     if overall:
         for k, v in overall.items():
@@ -27,6 +29,14 @@ def flatten_metrics(nested: Dict[str, Any], cost: Optional[Dict[str, float]] = N
         for code, cell in per_rubric.items():
             flat[f"rubric_accuracy.{code}"] = float(cell["accuracy"])
             flat[f"rubric_f1.{code}"] = float(cell["f1_macro"])
+            flat[f"rubric_balanced_accuracy.{code}"] = float(cell["balanced_accuracy"])
+            flat[f"rubric_support.{code}"] = float(cell["support"])
+            # cohen_kappa is absent when the cell has no class variability.
+            if "cohen_kappa" in cell:
+                flat[f"rubric_kappa.{code}"] = float(cell["cohen_kappa"])
+            # Per-class counts, e.g. rubric_support.M1.No — the sparse-cell warning sign.
+            for cls, n in cell.get("support_by_class", {}).items():
+                flat[f"rubric_support.{code}.{cls}"] = float(n)
 
     if "rubric_macro_f1" in nested:
         flat["rubric_macro_f1"] = float(nested["rubric_macro_f1"])

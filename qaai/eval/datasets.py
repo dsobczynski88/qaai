@@ -8,9 +8,21 @@ Canonical layout under a dataset directory::
 
 Rows are positionally aligned: row *i* of each file describes the same item.
 
+A live run additionally writes a timestamped *prediction* set beside the dataset::
+
+    predictions/<ts>/eval_inputs -- not repeated; the parent set is the source
+                    /eval_outputs.jsonl         # what the graph actually produced
+                    /eval_outputs_labels.jsonl  # those outputs, flattened = PREDICTED
+                    /run_metadata.json          # provenance tying it to an MLflow run
+
+The distinction that matters: the parent ``eval_outputs.jsonl`` is the **answer key**
+(the ACTUAL values); a ``predictions/<ts>/eval_outputs_labels.jsonl`` holds the
+**PREDICTED** values from one graph run. Scoring compares the two.
+
 Converters
     gold_to_eval()        gold_dataset_labeled.jsonl -> eval_inputs + eval_outputs_labels
-    synthesize_outputs()  build oracle eval_outputs from labels (offline demo/tests)
+    synthesize_outputs()  labels -> oracle eval_outputs (the answer key, in output shape)
+    outputs_to_labels()   eval_outputs -> flat labels (the exact inverse of the above)
     passthrough_outputs() a live run's outputs.jsonl (full state) -> eval_outputs
 """
 from __future__ import annotations
@@ -26,6 +38,8 @@ from qaai.eval.spec import EvalSpec
 INPUTS_NAME = "eval_inputs.jsonl"
 OUTPUTS_NAME = "eval_outputs.jsonl"
 LABELS_NAME = "eval_outputs_labels.jsonl"
+PREDICTIONS_DIRNAME = "predictions"
+METADATA_NAME = "run_metadata.json"
 
 
 def load_jsonl(path: Union[str, Path]) -> List[Dict[str, Any]]:
@@ -149,6 +163,53 @@ def synthesize_outputs(spec: EvalSpec, labels: List[Dict[str, Any]]) -> List[Dic
             _set_path(row, rub.list_path, findings)
         out_rows.append(row)
     return out_rows
+
+
+def new_predictions_dir(base: Union[str, Path]) -> Path:
+    """Create and return ``<base>/<timestamp>/`` for one run's predictions.
+
+    Uses the same timestamp format and timezone as
+    ``qaai.core.logging_config.create_timestamped_run_directory`` (``logs/run-<ts>/``), so
+    a prediction set and its run log sort and read alike. Append-only by construction:
+    each run gets a new directory, none are overwritten.
+    """
+    from datetime import datetime
+
+    from qaai.core.logging_config import US_CENTRAL
+
+    d = Path(base) / datetime.now(tz=US_CENTRAL).strftime("%Y-%m-%d_%H-%M-%S")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def outputs_to_labels(spec: EvalSpec, outputs: List[Optional[Any]]) -> List[Dict[str, Any]]:
+    """Flatten graph output rows into answer-key label rows — the inverse of synthesize_outputs.
+
+    Applied to a live run's outputs this yields the **predicted** values; applied to the
+    dataset's own ``eval_outputs.jsonl`` it yields the **actual** values. Same function
+    both ways, which is what makes the two sides directly comparable.
+
+    Reads plain dicts and Pydantic graph state alike (via ``spec.extract_prediction``).
+    A row that soft-failed is kept as ``{verdict_key: None}`` rather than dropped —
+    positional alignment with eval_inputs is the dataset's core invariant, so a missing
+    prediction must still occupy its row.
+
+    A rubric code absent from the output is omitted rather than written as None, so this
+    round-trips ``synthesize_outputs`` exactly (an answer key with no R6 column produces
+    no R6 key).
+    """
+    rub = spec.output.rubric
+    keys = spec.labels.rubric_keys or (rub.codes if rub else [])
+    rows: List[Dict[str, Any]] = []
+    for out in outputs:
+        if out is None:
+            rows.append({spec.labels.verdict_key: None})
+            continue
+        verdict, rubric = spec.extract_prediction(out)
+        row: Dict[str, Any] = {spec.labels.verdict_key: verdict}
+        row.update({code: rubric[code] for code in keys if code in rubric})
+        rows.append(row)
+    return rows
 
 
 def passthrough_outputs(outputs_jsonl_path: Union[str, Path]) -> List[Dict[str, Any]]:

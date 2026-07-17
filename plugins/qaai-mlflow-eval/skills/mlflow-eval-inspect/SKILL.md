@@ -25,15 +25,35 @@ uv run mlflow ui                      # http://localhost:5000, backend file:./ml
 - **Experiment list** → runs named by `--run-name` (e.g. prompt set + git sha).
 - **Compare** (select 2+ runs) → param deltas next to metric deltas; sort by
   `overall_f1` / `rubric_macro_f1` to rank prompt sets.
-- **Run → Metrics** → `overall_accuracy`, `rubric_accuracy.M1..`, `skip_rate`,
+- **Run → Metrics** → `overall_accuracy`, `overall_balanced_accuracy`, `overall_cohen_kappa`,
+  `exact_match_rate`, `rubric_accuracy.M1..`, `rubric_support.M1.No`, `skip_rate`,
   `helper_invariant_pass_rate`, latency, cost.
 - **Run → Artifacts** → the inspection surface:
   - `predictions.jsonl` — every record's gt vs pred + per-rubric cells + latency.
   - `failures.jsonl` — just the overall-verdict mismatches (quick regression triage).
-  - `per_rubric.csv` — per-cell accuracy / macro-F1 / support.
+  - `per_rubric.csv` — per-cell accuracy / macro-F1 / balanced accuracy / kappa / per-class support.
   - `confusion_matrix.png` — overall verdict Yes/No.
+  - `per_rubric_confusion.png` — one panel per rubric cell: *which* cell drove a wrong
+    verdict, and in which direction.
   - `prompt_versions.json` — exact prompt-set provenance (role → version + sha256).
   - `fixture_metadata.json` — dataset identity + label distribution.
+
+## From a run back to its predictions on disk
+
+A `--mode run` study also writes `<dataset>/predictions/<ts>/` containing the graph's
+`eval_outputs.jsonl`, their flat projection `eval_outputs_labels.jsonl` (the PREDICTED
+values), and `run_metadata.json` — which carries `mlflow_run_id`, so any prediction set maps
+back to the run that made it, and vice versa. Use it to re-score a past run offline against
+new metrics without paying for the LLM again (mlflow-eval-run, score-only). Compare two
+timestamped sets directly:
+
+```bash
+uv run python -c "
+from qaai.eval.datasets import load_jsonl
+a = load_jsonl('eval/datasets/test_suite/predictions/<ts_a>/eval_outputs_labels.jsonl')
+b = load_jsonl('eval/datasets/test_suite/predictions/<ts_b>/eval_outputs_labels.jsonl')
+print([i for i,(x,y) in enumerate(zip(a,b)) if x != y])  # rows where the runs disagree"
+```
 
 ## Per-node tracing (Langfuse-like)
 
@@ -69,6 +89,9 @@ Tune thresholds to a measured baseline minus a small buffer.
   already gitignored.
 - A high `skip_rate` silently depresses accuracy denominators — always read it alongside
   accuracy.
+- A run tagged `oracle_selftest=true` scored the answer key against itself and is pinned at
+  1.000 by construction. It proves the harness works; it says nothing about the reviewer.
+  Filter it out when ranking runs: `tags.oracle_selftest != "true"`.
 - `helper_invariant_pass_rate < 1.0` means the reviewer's verdict contradicts its own
   rubric on some records; open those in `failures.jsonl` / `predictions.jsonl`.
 

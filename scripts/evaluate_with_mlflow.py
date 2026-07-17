@@ -42,6 +42,16 @@ def main() -> None:
     ap.add_argument("--allow-prod", action="store_true", help="Permit a base_url containing 'prod'")
     ap.add_argument("--no-trace", action="store_true", help="Disable MLflow LangGraph autolog tracing")
     ap.add_argument(
+        "--predictions-dir",
+        type=Path,
+        help="Where run mode saves its timestamped prediction set (default <dataset-dir>/predictions)",
+    )
+    ap.add_argument(
+        "--no-save-predictions",
+        action="store_true",
+        help="Do not persist a prediction set (run mode); outputs stay in MLflow artifacts only",
+    )
+    ap.add_argument(
         "--tracking-uri",
         default=os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
         help="MLflow tracking URI (default file:./mlruns)",
@@ -67,6 +77,8 @@ def main() -> None:
         allow_prod=args.allow_prod,
         trace=not args.no_trace,
         tracking_uri=args.tracking_uri,
+        predictions_dir=args.predictions_dir,
+        save_predictions=not args.no_save_predictions,
     )
 
     m = summary["metrics"]
@@ -79,7 +91,19 @@ def main() -> None:
               f"rubric_macro_f1={m.get('rubric_macro_f1', float('nan')):.3f}")
     if "helper_invariant_pass_rate" in m:
         print(f"[mlflow] helper_invariant_pass_rate={m['helper_invariant_pass_rate']:.3f}")
+    print(f"[mlflow] ground_truth_source={summary['ground_truth_source']}")
     print(f"[mlflow] artifacts staged at {summary['artifacts_dir']}")
+    if summary.get("predictions_dir"):
+        print(f"[mlflow] predictions saved to {summary['predictions_dir']}")
+        print(f"[mlflow]   re-score offline: --mode score --eval-outputs "
+              f"{Path(summary['predictions_dir']) / 'eval_outputs.jsonl'} "
+              f"--eval-outputs-labels <answer-key labels>")
+    if summary.get("oracle_selftest"):
+        print(
+            "[mlflow] WARNING: every prediction matched the answer key exactly. This is an "
+            "oracle self-test - it measures the harness, not the reviewer. Use --mode run "
+            "to produce real predictions. (Tagged oracle_selftest=true.)"
+        )
 
 
 if __name__ == "__main__":

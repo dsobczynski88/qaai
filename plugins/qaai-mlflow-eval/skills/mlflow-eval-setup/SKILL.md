@@ -44,11 +44,18 @@ Three ready specs ship in `eval/specs/`: `test_suite_reviewer.yaml`,
 
 ## Prepare the dataset
 
-The canonical dataset is row-aligned:
+The canonical dataset is row-aligned — row *i* of every file describes the same item:
 
-    eval/datasets/<name>/eval_inputs.jsonl          # graph input        (run mode)
-                        /eval_outputs.jsonl          # graph output state (score mode)
-                        /eval_outputs_labels.jsonl   # flat answer key    (always)
+    eval/datasets/<name>/eval_inputs.jsonl          # graph input          (run mode)
+                        /eval_outputs.jsonl          # ANSWER KEY, output shape
+                        /eval_outputs_labels.jsonl   # ANSWER KEY, flat projection
+                        /predictions/<ts>/...        # one live run's PREDICTIONS
+
+All three committed files describe the **actual** (labelled) truth: inputs, and the expected
+answer in two shapes. Nothing in the dataset is a prediction. Predictions are produced by
+`--mode run`, which writes `predictions/<ts>/` holding the graph's outputs plus their flat
+projection (mlflow-eval-run). Keep that distinction straight and the rest of the harness
+follows; blur it and you will "measure" 100% accuracy.
 
 From the existing gold fixtures (gives working data immediately):
 
@@ -59,9 +66,11 @@ uv run python scripts/convert_to_eval.py gold \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 ```
 
-`--synthesize-outputs` writes an *oracle* `eval_outputs.jsonl` (predictions == labels)
-so score-only mode runs offline for smoke/CI. Real `eval_outputs` come from a live run
-(`--mode run` persists them) or from your own data. To harvest outputs from a prior run:
+`--synthesize-outputs` renders the labels into graph-output shape via
+`datasets.py::synthesize_outputs` — that *is* the answer key, and it is the intended,
+correct artifact. Because it equals the labels by construction, score-only mode against it
+returns 1.000 and self-tags `oracle_selftest`; it exercises the plumbing offline for
+smoke/CI and measures nothing about the reviewer. To harvest outputs from a prior run:
 
 ```bash
 uv run python scripts/convert_to_eval.py outputs \
@@ -85,8 +94,22 @@ uv run python scripts/evaluate_with_mlflow.py \
   --dataset-dir eval/datasets/test_suite --mode score --run-name setup-smoke
 ```
 Expect a run with `overall_accuracy`, per-rubric metrics, and artifacts. Oracle data
-scores 1.0 — that only proves the plumbing; real evaluation uses `--mode run` or your
-own `eval_outputs`.
+scores 1.0 and tags itself `oracle_selftest=true` — that only proves the plumbing; real
+evaluation uses `--mode run` (mlflow-eval-run) or your own `eval_outputs`.
+
+A stronger offline check, if you have both answer-key files: flattening `eval_outputs.jsonl`
+must reproduce `eval_outputs_labels.jsonl` exactly, since the two converters are inverses.
+
+```bash
+uv run python -c "
+from qaai.eval.spec import load_spec
+from qaai.eval.datasets import load_jsonl, outputs_to_labels
+s = load_spec('eval/specs/test_suite_reviewer.yaml')
+d = 'eval/datasets/test_suite'
+assert outputs_to_labels(s, load_jsonl(f'{d}/eval_outputs.jsonl')) == load_jsonl(f'{d}/eval_outputs_labels.jsonl')
+print('answer key is self-consistent')"
+```
+The harness enforces this at run time too, failing with the offending row index.
 
 ## Pitfalls
 
