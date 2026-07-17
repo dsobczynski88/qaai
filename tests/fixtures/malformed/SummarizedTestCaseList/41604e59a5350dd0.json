@@ -1,0 +1,1 @@
+{"test_case_id":"TC-HC-115-A","objective":"Verify error handling in the Vitals module.","verifies":"verifies rejection of invalid input and display of an error message","protocol":["Provide invalid input.","Verify the error response."],"acceptance_criteria":["System rejects invalid input.","Error message displayed."]}

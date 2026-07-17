@@ -1,0 +1,71 @@
+{
+  "req_id": "REQ-HC-134",
+  "summaries": [
+    {
+      "test_case_id": "TC-HC-134-A",
+      "objective": "Verify the Vitals module supports the primary action described by the requirement and records an audit log entry when it completes.",
+      "verifies": "verifies nominal completion of the primary action in the Vitals module and creation of an audit log entry",
+      "protocol": [
+        "Log in to the HealthCore EHR test environment with an appropriate role; keep the Vitals module active.",
+        "Navigate to the Vitals module.",
+        "Execute the primary action specified in the requirement.",
+        "Verify the system response and state change."
+      ],
+      "acceptance_criteria": [
+        "Vitals module loads successfully.",
+        "Primary action completes without errors.",
+        "System state is updated correctly.",
+        "An audit log entry is created."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-134-B",
+      "objective": "Verify the Vitals module detects invalid input and blocks submission of the action.",
+      "verifies": "verifies rejection of invalid or malformed input and blocking of the submitted action",
+      "protocol": [
+        "Use the HealthCore EHR test environment with the Vitals module active.",
+        "Navigate to the Vitals module.",
+        "Provide invalid or malformed input.",
+        "Attempt to submit the action."
+      ],
+      "acceptance_criteria": [
+        "Module loads successfully.",
+        "System validates input and detects an error.",
+        "An appropriate error message is displayed.",
+        "The action is blocked."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-134-C",
+      "objective": "Verify the Vitals module handles a boundary value at the specified threshold or edge case.",
+      "verifies": "verifies system behavior for a boundary value in the Vitals module per specification",
+      "protocol": [
+        "Use the HealthCore EHR test environment with the Vitals module active.",
+        "Navigate to the Vitals module.",
+        "Test at the threshold or boundary value.",
+        "Verify system behavior at the edge case."
+      ],
+      "acceptance_criteria": [
+        "Module loads successfully.",
+        "Boundary value is accepted or rejected appropriately.",
+        "System handles the edge case correctly per specification."
+      ]
+    },
+    {
+      "test_case_id": "TC-HC-134-D",
+      "objective": "Verify that executing the required action results in an audit log entry that includes the specified fields.",
+      "verifies": "verifies creation of an audit log entry after the action completes and presence of the listed fields in that entry",
+      "protocol": [
+        "Use the HealthCore EHR test environment with the audit log viewer open.",
+        "Execute the action specified in the requirement.",
+        "Query the audit log for recent entries.",
+        "Verify the log entry contains the required fields."
+      ],
+      "acceptance_criteria": [
+        "Action completes successfully.",
+        "Audit log entry is created.",
+        "Log entry includes timestamp, user ID, action type, and outcome."
+      ]
+    }
+  ]
+}

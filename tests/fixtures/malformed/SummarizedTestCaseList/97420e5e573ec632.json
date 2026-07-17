@@ -1,0 +1,14 @@
+{
+  "test_case_id": "TC-HC-117-A",
+  "objective": "Verify the documented primary action completes successfully in the HealthCore EHR test environment with the Vitals module active.",
+  "verifies": "verifies successful completion of the primary action and a resulting system state update",
+  "protocol": [
+    "Use the HealthCore EHR test environment with the Vitals module active.",
+    "Execute the primary action.",
+    "Verify success."
+  ],
+  "acceptance_criteria": [
+    "Action completes successfully.",
+    "System state updated."
+  ]
+}

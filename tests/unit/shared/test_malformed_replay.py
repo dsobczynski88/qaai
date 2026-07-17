@@ -27,6 +27,7 @@ import pytest
 from qaai.agents.shared.core import DecomposedRequirement
 from qaai.agents.shared.nodes import BaseLLMNode
 from qaai.agents.test_case_reviewer.core import TestCaseAssessment
+from qaai.agents.test_suite_reviewer.core import SummarizedTestCaseList
 
 pytestmark = pytest.mark.unit
 
@@ -36,6 +37,7 @@ _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "fixtures" / "malformed"
 _MODELS = {
     "DecomposedRequirement": DecomposedRequirement,
     "TestCaseAssessment": TestCaseAssessment,
+    "SummarizedTestCaseList": SummarizedTestCaseList,
 }
 
 

@@ -1,0 +1,18 @@
+{
+  "test_case_id": "TC-HC-138-A",
+  "objective": "Verify the Vitals module behavior for incoming sensor data in the HealthCore EHR test environment.",
+  "verifies": "verifies nominal handling of the Vitals module workflow, including completion of the primary action and resulting system state update with an audit log entry",
+  "protocol": [
+    "Log in as a test user with the appropriate role in the HealthCore EHR test environment.",
+    "Ensure the Vitals module is active.",
+    "Navigate to the Vitals module.",
+    "Execute the primary action specified in the requirement.",
+    "Verify the system response and state change."
+  ],
+  "acceptance_criteria": [
+    "Vitals module loads successfully.",
+    "Primary action completes without errors.",
+    "System state is updated correctly.",
+    "An audit log entry is created."
+  ]
+}

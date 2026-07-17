@@ -54,6 +54,19 @@ SPEC_KEY_ALIASES: Tuple[str, ...] = (
 # where a spec dict appears where a DecomposedRequirement was expected).
 _SPEC_MARKER_FIELDS = ("spec_id", "acceptance_criteria")
 
+# Fields that identify a dict as a bare SummarizedTestCase (the "unwrapped singleton"
+# malformation, where one summary object appears where a list of them was expected).
+_SUMMARIZED_TC_MARKER_FIELDS = ("test_case_id", "objective")
+
+# Keys the LLM has been observed to nest the summarized-test-case list under instead of
+# returning the bare array that SummarizedTestCaseList requires.
+SUMMARY_LIST_KEY_ALIASES: Tuple[str, ...] = (
+    "summaries",
+    "response",
+    "summarized_test_cases",
+    "test_cases",
+)
+
 # Verdict strings the LLM emits instead of (verdict='Yes', partial=True).
 PARTIAL_VERDICT_ALIASES = {"partial", "yes-partial", "yes (partial)", "yes-with-partial"}
 
@@ -101,6 +114,81 @@ def rehome_decomposed_specs(data: Any) -> Any:
             data = dict(data)
             data["decomposed_specifications"] = data.pop(alias)
             break
+    return data
+
+
+def unwrap_summarized_test_case_list(data: Any) -> Any:
+    """Lift the summary list out of a wrapper object the LLM put it in.
+
+    Observed variants (gpt-5.4-mini, SummaryNode)::
+
+        {"req_id": "REQ-HC-100", "summaries": [ {...}, {...} ]}
+        {"response": [ {...} ]}
+
+    ``SummarizedTestCaseList`` is a ``RootModel[List[...]]`` and wants the bare array, so
+    the wrapper reads as "not a list" and the whole batch is skipped. Returns the nested
+    list when exactly that shape is present; the ``req_id`` echo is discarded because the
+    model has no field for it and the caller already knows the requirement.
+
+    ROOT CAUSE (fixed at source): these wrappers were the model obeying
+    ``response_format={"type": "json_object"}`` — which forbids a top-level array — while
+    still trying to honour the prompt's array schema. ``BaseLLMNode._wants_array_response``
+    now suppresses JSON mode for array-root models, so a compliant endpoint returns the
+    bare array and this repair is a no-op. Retained as a net for endpoints that force JSON
+    mode regardless, and to keep the harvested corpus replayable.
+
+    A dict that is itself a bare summary is left alone for
+    :func:`wrap_bare_summarized_test_case` to handle. Never fabricates: if no alias holds
+    a list, the input is returned unchanged and validation fails as it would have.
+    """
+    if not isinstance(data, dict):
+        return data
+    if all(k in data for k in _SUMMARIZED_TC_MARKER_FIELDS):
+        return data  # a bare summary, not a wrapper
+    for alias in SUMMARY_LIST_KEY_ALIASES:
+        if isinstance(data.get(alias), list):
+            logger.warning(
+                "unwrap_summarized_test_case_list: lifted the summary list out of a "
+                "%r wrapper key", alias,
+            )
+            return data[alias]
+    return data
+
+
+def wrap_bare_summarized_test_case(data: Any) -> Any:
+    """Wrap ONE bare SummarizedTestCase object into the single-element list it should be.
+
+    Observed malformation (gpt-5.4-mini, test_suite_reviewer SummaryNode)::
+
+        {"test_case_id": "TC-HC-138-A", "objective": "...", "protocol": [...]}
+
+    where ``SummarizedTestCaseList`` (a ``RootModel[List[SummarizedTestCase]]``) requires
+    ``[{...}]``. Pydantic reports "Input should be a valid list" and the batch is skipped.
+
+    ROOT CAUSE (fixed at source): ``response_format={"type": "json_object"}`` forbids a
+    top-level array, so the model emitted the single *item* object — the closest legal
+    object to the requested schema — regardless of how many test cases were in the batch.
+    ``BaseLLMNode._wants_array_response`` now suppresses JSON mode for array-root models.
+    Retained as a net for endpoints that force JSON mode regardless.
+
+    Note this repair CANNOT distinguish "one test case, correctly summarised" from "four
+    test cases, three dropped" — both arrive as one object. ``REQUIRE_COMPLETE_BATCH``
+    (BatchedLLMNode) is what catches the latter, by comparing the recovered count against
+    the batch size and skipping rather than judging on partial evidence.
+
+    ``test_case_id`` + ``objective`` together identify the shape: both are required fields
+    of SummarizedTestCase and neither appears on any other model routed through this
+    parser. Wrapping re-homes a value that already exists in full and fabricates nothing;
+    when the payload is already a list (or any other shape) this is a no-op, so validation
+    still fails exactly as it would have.
+    """
+    if isinstance(data, dict) and all(k in data for k in _SUMMARIZED_TC_MARKER_FIELDS):
+        logger.warning(
+            "wrap_bare_summarized_test_case: wrapped a bare SummarizedTestCase (id=%s) "
+            "into a single-element list",
+            data.get("test_case_id"),
+        )
+        return [data]
     return data
 
 
@@ -245,6 +333,8 @@ def _repair_test_case_assessment(data: Any) -> Any:
 REPAIRS_BY_MODEL: Dict[str, List[Callable[[Any], Any]]] = {
     "DecomposedRequirement": [rehome_decomposed_specs],
     "TestCaseAssessment": [_repair_test_case_assessment],
+    # Order matters: lift a list out of a wrapper first, then wrap a still-bare object.
+    "SummarizedTestCaseList": [unwrap_summarized_test_case_list, wrap_bare_summarized_test_case],
 }
 
 
