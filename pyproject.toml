@@ -67,10 +67,16 @@ qaai-api = "qaai.api.run:main"
 # Pytest plugin that emits a searchable HTML test catalog. Registering it here makes
 # the --test-catalog flag always available under `uv run pytest` (no -p needed).
 [project.entry-points.pytest11]
-qaai_testcatalog = "qaai.testcatalog.plugin"
+qaai_testcatalog = "qaai_testcatalog.plugin"
 
 # Declaring a build system allows uv to install your project editably during sync.
 # This does not publish anything by itself; it just makes local imports work cleanly.
 [build-system]
 requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
+
+# The test-catalog pytest plugin was relocated out of the qaai package into
+# plugins/qaai-testcatalog/ but still ships inside the qaai wheel. Listing packages
+# explicitly disables auto-detection, so qaai must be named here too.
+[tool.hatch.build.targets.wheel]
+packages = ["qaai", "plugins/qaai-testcatalog/qaai_testcatalog"]

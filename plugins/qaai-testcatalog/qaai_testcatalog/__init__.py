@@ -1,6 +1,6 @@
 """Test catalog — a searchable HTML lookup for this repo's pytest suite.
 
-The :mod:`qaai.testcatalog.plugin` pytest plugin adds a ``--test-catalog`` flag.
+The :mod:`qaai_testcatalog.plugin` pytest plugin adds a ``--test-catalog`` flag.
 When set, it introspects the tests pytest actually collects (markers, fixtures,
 parametrize params, docstrings, and the optional ``@pytest.mark.catalog`` marker)
 and writes a JSON record file plus a single self-contained, dependency-free HTML
@@ -10,6 +10,6 @@ Because collection is what's hooked, ``pytest --collect-only --test-catalog``
 produces the catalog without running any tests (no LLM calls).
 """
 
-from qaai.testcatalog.render import build_catalog_html, write_catalog
+from qaai_testcatalog.render import build_catalog_html, write_catalog
 
 __all__ = ["build_catalog_html", "write_catalog"]

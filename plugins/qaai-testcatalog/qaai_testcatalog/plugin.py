@@ -7,7 +7,7 @@ are always available under ``uv run pytest``. The plugin is a no-op unless
 Data flow: ``pytest_collection_modifyitems`` turns each collected ``item`` into a
 JSON-safe record (see :func:`_item_to_record`); ``pytest_collection_finish`` writes
 ``test_catalog.json`` and renders ``test_catalog.html`` via
-:mod:`qaai.testcatalog.render`. Nothing here runs the tests, so pairing the flag
+:mod:`qaai_testcatalog.render`. Nothing here runs the tests, so pairing the flag
 with ``--collect-only`` produces the catalog fast and offline.
 """
 
@@ -277,7 +277,7 @@ def pytest_collection_finish(session: pytest.Session) -> None:
                 "example_output": None,
             })
 
-    from qaai.testcatalog.render import write_catalog
+    from qaai_testcatalog.render import write_catalog
 
     out_dir = Path(config.getoption("--test-catalog-out"))
     source_label = " ".join(str(a) for a in config.invocation_params.args) or "pytest"

@@ -33,7 +33,7 @@ chips for **type** and **component**, sortable columns, a per-row **I/O** modal
 ## Re-render without re-collecting
 
 ```bash
-python -m qaai.testcatalog logs/test-catalog/test_catalog.json
+python -m qaai_testcatalog logs/test-catalog/test_catalog.json
 ```
 
 ## Curate a test's entry

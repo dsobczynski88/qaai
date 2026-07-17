@@ -1,7 +1,5 @@
 .vscode/
 output/
-CLAUDE.md
-.claude/
 
 # Config files
 config.yaml
@@ -35,6 +33,13 @@ tests/fixtures/mlflow/*
 !tests/fixtures/mlflow/.gitkeep
 mlflow.db
 mlruns/
+eval/datasets/test_suite/*
+!eval/datasets/test_suite/.gitkeep
+eval/datasets/test_case/*
+!eval/datasets/test_case/.gitkeep
+eval/datasets/hazard/*
+!eval/datasets/hazard/.gitkeep
+
 
 # logs
 logs/*

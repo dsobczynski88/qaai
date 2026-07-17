@@ -1,7 +1,7 @@
 """Re-render the test-catalog HTML from a saved test_catalog.json.
 
 Usage:
-    python -m qaai.testcatalog logs/test-catalog/test_catalog.json [-o out.html]
+    python -m qaai_testcatalog logs/test-catalog/test_catalog.json [-o out.html]
 
 Generating the catalog in the first place is done via the pytest plugin:
     uv run pytest --collect-only --test-catalog
@@ -13,7 +13,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from qaai.testcatalog.render import write_catalog_from_json
+from qaai_testcatalog.render import write_catalog_from_json
 
 
 def main(argv: list[str] | None = None) -> int:
