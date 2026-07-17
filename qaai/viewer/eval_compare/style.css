@@ -1,0 +1,47 @@
+/* Actual-vs-predicted diff viewer. Reuses base.css chips / verdict badges /
+   tr.covered-uncovered / table.detail / modal. This adds only the compare-specific
+   layout: the study summary banner, the two-column actual|predicted rubric grid, and
+   the side-by-side raw-JSON panes. */
+
+.study-summary {
+  margin: 0 0 16px; padding: 10px 12px;
+  background: #f2f4f7; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; color: var(--mute);
+}
+.study-summary .headline { font-size: 13px; color: var(--ink); font-weight: 600; margin-bottom: 4px; }
+.study-summary .headline .bad { color: var(--chip-no); }
+.study-summary .headline .ok { color: var(--chip-yes); }
+.study-summary .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; }
+.study-summary .meta span code { font-family: ui-monospace, Menlo, monospace; color: var(--ink); }
+.study-summary .cell-counts { margin-top: 6px; }
+.study-summary .cell-counts .miss { color: var(--chip-no); font-weight: 600; }
+
+.record-status { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; }
+.record-status .match-flag { font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 6px; }
+.record-status .match-flag.match { background: var(--ok); color: #1b5e20; }
+.record-status .match-flag.mismatch { background: var(--bad); color: #a1390a; }
+.record-status .match-flag.skipped { background: var(--warn); color: #6b4f00; }
+
+/* two-column actual | predicted rubric grid */
+table.cmp { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0 4px; }
+table.cmp th, table.cmp td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: middle; }
+table.cmp th { background: #f2f4f7; font-weight: 600; font-size: 12px; color: var(--mute); }
+table.cmp td.cell-code { font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+table.cmp tr.diff { background: var(--bad); }
+table.cmp tr.diff.advisory { background: var(--warn); }
+table.cmp tr.verdict-row td { border-top: 2px solid var(--line); font-weight: 600; }
+table.cmp .diff-marker { color: var(--chip-no); font-weight: 700; margin-left: 6px; }
+table.cmp tr.diff.advisory .diff-marker { color: var(--chip-warn); }
+table.cmp td.advisory-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mute); }
+
+/* raw-JSON side-by-side panes (inside the modal) */
+.json-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.json-panes .pane h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mute); }
+.json-panes pre {
+  margin: 0; padding: 10px; background: #1e1e2e; color: #e6e6f0;
+  border-radius: 6px; font: 12px/1.5 ui-monospace, Menlo, monospace;
+  overflow: auto; max-height: 60vh; white-space: pre; tab-size: 2;
+}
+.json-panes .pane.empty pre { background: #f2f4f7; color: var(--mute); }
+
+.modal { max-width: 1100px; width: 94vw; max-height: 88vh; }

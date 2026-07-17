@@ -56,6 +56,10 @@ b = load_jsonl('eval/datasets/test_suite/predictions/<ts_b>/predicted_labels.jso
 print([i for i,(x,y) in enumerate(zip(a,b)) if x != y])  # rows where the runs disagree"
 ```
 
+For a **visual, record-by-record side-by-side** of a run's predictions against the answer key
+(inputs + verdict/rubric diff + raw-output drill-down in one `compare.html`), see
+**mlflow-eval-compare** — the per-record complement to this aggregate view.
+
 ## Per-node tracing (Langfuse-like)
 
 Run+score runs enable `mlflow.langchain.autolog()` by default, so each graph invocation's
