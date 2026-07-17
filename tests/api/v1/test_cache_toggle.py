@@ -344,7 +344,7 @@ async def test_test_suite_design_summaries_forwarded(
 
     async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None,
-                       include_design_summaries=False):
+                       include_design_summaries=False, **kwargs):
         rec["include_design_summaries"] = include_design_summaries
         return dummy_html
 
@@ -363,7 +363,7 @@ async def test_test_suite_design_summaries_default_is_false(submit_and_wait, dum
 
     async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
                        prompt_set="test_suite_reviewer_v3", progress=None,
-                       include_design_summaries=False):
+                       include_design_summaries=False, **kwargs):
         rec["include_design_summaries"] = include_design_summaries
         return dummy_html
 
@@ -397,6 +397,68 @@ async def test_hazard_design_summaries_forwarded(
     )
     assert resp.status_code == status.HTTP_200_OK
     assert rec["include_design_summaries"] is expected
+
+
+# --- "Baseline Review Type" → baseline_review_type forwarding + request_type ----
+
+@pytest.mark.parametrize(
+    "sent,expected",
+    [("requirements", "requirements"), ("tests", "tests")],
+)
+async def test_test_suite_baseline_review_type_forwarded(
+    submit_and_wait, dummy_html, sent, expected
+):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3", progress=None,
+                       baseline_review_type="tests", **kwargs):
+        rec["baseline_review_type"] = baseline_review_type
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    resp = await submit_and_wait(
+        "/api/v1/test-suite-review",
+        json={"baseline_id": "B", "baseline_review_type": sent},
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["baseline_review_type"] == expected
+
+
+async def test_test_suite_baseline_review_type_default_is_tests(submit_and_wait, dummy_html):
+    rec = {}
+
+    async def fake_run(baseline_id, thread_id, cache_mode="on", test_mode=None,
+                       prompt_set="test_suite_reviewer_v3", progress=None,
+                       baseline_review_type="tests", **kwargs):
+        rec["baseline_review_type"] = baseline_review_type
+        return dummy_html
+
+    app.state.rtm_service.run_from_baseline = AsyncMock(side_effect=fake_run)
+
+    # omitted → schema default "tests" (backward-compatible)
+    resp = await submit_and_wait("/api/v1/test-suite-review", json={"baseline_id": "B"})
+    assert resp.status_code == status.HTTP_200_OK
+    assert rec["baseline_review_type"] == "tests"
+
+
+@pytest.mark.parametrize(
+    "review_type,expected_request_type",
+    [("requirements", "requirement_review"), ("tests", "test_suite_review")],
+)
+def test_resolve_request_type(review_type, expected_request_type):
+    from qaai.api.services import resolve_request_type
+    assert resolve_request_type(review_type) == expected_request_type
+
+
+def test_baseline_request_review_type_default_and_validation():
+    from pydantic import ValidationError
+    from qaai.api.schemas import BaselineRequest
+    assert BaselineRequest(baseline_id="B").baseline_review_type == "tests"
+    assert BaselineRequest(baseline_id="B", baseline_review_type="requirements").baseline_review_type == "requirements"
+    with pytest.raises(ValidationError):
+        BaselineRequest(baseline_id="B", baseline_review_type="bogus")
 
 
 # --- service _select() fallback (no graph building; sentinel runnables) --------

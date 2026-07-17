@@ -107,6 +107,7 @@ async def test_suite_review(
             body.baseline_id, job.job_id, cache_mode, test_mode,
             prompt_set=prompt_set, progress=job,
             include_design_summaries=body.include_design_summaries,
+            baseline_review_type=body.baseline_review_type,
         ),
         "qaai_rtm_review.html",
     )
