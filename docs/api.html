@@ -55,6 +55,7 @@
   <a href="#prod">Production</a>
   <strong style="margin-top:16px">More docs</strong>
   <a href="index.html">← Docs home</a>
+  <a href="review_options.html">Review options</a>
   <a href="configuration.html">Configuration</a>
   <a href="test_guide.html">Test guide</a>
   <a href="design/agents.html">Agent design</a>
@@ -63,7 +64,7 @@
 <main>
 <header class="doc">
   <h1>API Server &amp; Frontend Guide</h1>
-  <div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
+  <div class="meta">QAAI (qaai) · generated from the codebase 2026-07-17</div>
 </header>
 
 <p>QAAI exposes three LangGraph reviewers behind a FastAPI app
@@ -169,20 +170,34 @@ uvicorn worker — see <a href="#prod">Production</a>. The frontend performs sub
 download automatically (polling every ~4&nbsp;s, showing elapsed time and per-item progress).</div>
 
 <h2 id="hazard">Testing the hazard upload endpoint</h2>
-<p>The hazard reviewer works with just an Excel file — no JAMA credentials required.</p>
+<p>The hazard endpoint takes an uploaded SHA Excel workbook instead of a
+<code>baseline_id</code>. The example below runs offline against <strong>cached JAMA
+results</strong> by passing <code>test_mode=true</code>:</p>
 <pre><code># 1. Submit the job -> 202 {"job_id": "...", "status": "pending"}
 JOB=$(curl -s -X POST http://localhost:8000/api/v1/hazard-risk-review \
   -F "project_name=Test Project" \
   -F "file=@tests/fixtures/external/software_hazard_analysis.xlsx" \
   -F "sheet_name=SHA Table" \
-  -F "use_cache=true" | jq -r .job_id)
+  -F "test_mode=true" | jq -r .job_id)   # cached JAMA only; omit for a live JAMA fetch
 
 # 2. Poll until "status" is "completed"
 curl -s http://localhost:8000/api/v1/jobs/$JOB
 
 # 3. Download the completed report
 curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_hazard_review.html</code></pre>
-<p>Multipart form fields <span class="src">routes.py:141-151</span>:</p>
+<div class="note warn"><strong>The Excel alone is not enough — the hazard reviewer needs JAMA.</strong>
+The uploaded workbook supplies only the hazard-register fields and the requirement <em>ID
+references</em> (GIDs scraped from the Risk Control Measures column); it does <strong>not</strong>
+contain the requirement text, test cases, or design documents the review evaluates. Those are
+fetched from JAMA via a <code>bidirectional_trace</code> request keyed on the extracted IDs
+<span class="src">qaai/api/services.py:503-515,586-594</span>. So the reviewer needs either
+<strong>live JAMA credentials</strong> (see <a href="#baseline">Baseline reviews</a>) or
+<strong>cached JAMA results</strong> (<code>test_mode=true</code> / <code>cache_mode=test</code>) to
+run correctly. Only the scalar hazard-register dimensions (H1, H3, H6, R7, and H2) come from the
+Excel alone; the per-requirement RTM sub-review and the H4/H5 coverage/verification dimensions
+depend on the JAMA-traced data and evaluate empty inputs without it
+<span class="src">qaai/agents/hazard_risk_reviewer/loader.py:91-115</span>.</div>
+<p>Multipart form fields <span class="src">routes.py:142-153</span>:</p>
 <table>
 <thead><tr><th>Field</th><th>Required</th><th>Default</th><th>Notes</th></tr></thead>
 <tbody>
@@ -194,6 +209,7 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_hazard_revie
 <tr><td><code>use_cache</code></td><td>No</td><td><code>true</code></td><td>Legacy toggle: <code>true</code> → <code>on</code>, <code>false</code> → <code>off</code></td></tr>
 <tr><td><code>test_mode</code></td><td>No</td><td>server default</td><td>Cache-only JAMA; omit to use <code>PYJAMA_TEST_MODE</code></td></tr>
 <tr><td><code>include_edge_case_analysis</code></td><td>No</td><td><code>false</code></td><td><code>true</code> → embedded RTM uses <code>test_suite_reviewer_v4</code> (edge-case); <code>false</code> → <code>v3</code> baseline</td></tr>
+<tr><td><code>include_design_summaries</code></td><td>No</td><td><code>false</code></td><td><code>true</code> → embedded RTM runs its <code>design_summarizer</code> (design context feeds coverage &amp; R6); does not affect the hazard rubric's own H2/H3</td></tr>
 </tbody></table>
 <p>The per-row thread ID is derived server-side from the hazard's <code>hazard_id</code>
 (falling back to the job-derived index) <span class="src">qaai/api/services.py:293-298</span>.</p>
@@ -220,7 +236,7 @@ JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-case-review \
   -d '{"baseline_id": "BASE-67890", "use_cache": true}' | jq -r .job_id)
 curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_tc_review.html</code></pre>
 <p>Both endpoints accept a <code>BaselineRequest</code> body
-<span class="src">qaai/api/schemas.py:6-54</span>:</p>
+<span class="src">qaai/api/schemas.py:6-64</span>:</p>
 <table>
 <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -230,20 +246,16 @@ curl -s http://localhost:8000/api/v1/jobs/$JOB/result --output qaai_tc_review.ht
 <tr><td><code>test_mode</code></td><td>bool?</td><td><code>null</code></td><td>Cache-only JAMA (no live calls); <code>null</code> → <code>PYJAMA_TEST_MODE</code></td></tr>
 <tr><td><code>include_edge_case_analysis</code></td><td>bool</td><td><code>false</code></td><td><code>true</code> → prompt set <code>test_suite_reviewer_v4</code> (edge-case decomposer v6); <code>false</code> → <code>test_suite_reviewer_v3</code> (baseline v5). Applies to the test-suite review only. <span class="src">routes.py:102</span></td></tr>
 <tr><td><code>include_decomposition_analysis</code></td><td>bool</td><td><code>true</code></td><td>Test-case review only: <code>true</code> → <code>test_case_reviewer_v2</code> (decomposition); <code>false</code> → <code>test_case_reviewer_v3</code> (no-decomposition) <span class="src">routes.py:134</span></td></tr>
+<tr><td><code>include_design_summaries</code></td><td>bool</td><td><code>false</code></td><td>Test-suite review only: <code>true</code> → run the <code>design_summarizer</code> so design context feeds per-spec coverage and the R6 criterion; <code>false</code> skips that branch <span class="src">qaai/api/schemas.py:55-64</span></td></tr>
 </tbody></table>
-<div class="note">The canonical cache modes are <code>off</code> / <code>on</code> / <code>test</code>,
-chosen per endpoint by the UI's <strong>cache-mode radio</strong> (<code>on</code> "reuse
-cached, fresh final" · <code>test</code> "recreate from cache, no LLM" · <code>off</code>
-"re-run all, save timestamped"). The legacy <code>use_cache</code> checkbox maps only to
-<code>on</code>/<code>off</code>, and legacy radio values <code>partial</code>/<code>full</code>
-are still accepted and map to <code>on</code>/<code>test</code>. See
-<a href="configuration.html#caching">Configuration → Caching</a>.</div>
-<div class="note"><strong>"Include Edge Case Analysis" toggle.</strong> The
-<code>include_edge_case_analysis</code> flag selects the prompt set per request for
-the test-suite reviewer and the hazard reviewer's embedded RTM subgraph (the
-hazard endpoint accepts it as a multipart form field). The test-case reviewer is
-unaffected. Cached results are namespaced by prompt set so v3 and v4 never alias —
-see <a href="configuration.html#caching">Configuration → Caching</a>.</div>
+<div class="note"><strong>Every run option is documented in one place.</strong> The cache-mode radio
+(<code>off</code> / <code>on</code> / <code>test</code>) and the three analysis toggles
+(<code>include_edge_case_analysis</code>, <code>include_decomposition_analysis</code>,
+<code>include_design_summaries</code>) apply whether you call the API directly or use the SPA —
+what each does, its values, default, and which reviewer it affects are all in
+<strong><a href="review_options.html">Review options &amp; toggles</a></strong>. For the caching
+mechanics behind the cache modes, see <a href="configuration.html#caching">Configuration →
+Caching</a>.</div>
 
 <h2 id="outputs">Understanding the response &amp; viewers</h2>
 <p>The review endpoints return <code>202</code> + a <code>job_id</code>; the HTML report
@@ -306,7 +318,7 @@ to a shared backend.</div>
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000</code></pre>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-07-06. Code examples that
+<footer class="doc">Generated from the QAAI codebase on 2026-07-17. Code examples that
 reference <code>http://localhost:8000</code> are sample commands, not external resources.
 · <a href="index.html">Docs home</a></footer>
 </main>

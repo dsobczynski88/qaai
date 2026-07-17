@@ -50,6 +50,7 @@
   <a href="#overview">Overview</a>
   <a href="#layout">SPA layout &amp; build</a>
   <a href="#job-flow">Async job engine</a>
+  <a href="#controls">Run controls &amp; options</a>
   <a href="#client">API client &amp; proxy base</a>
   <a href="#rbac">RBAC model</a>
   <a href="#identity">Identity endpoint</a>
@@ -57,6 +58,7 @@
   <a href="#followup">Backend &amp; AWS follow-up</a>
   <strong style="margin-top:16px">More docs</strong>
   <a href="../index.html">← Docs home</a>
+  <a href="../review_options.html">Review options</a>
   <a href="../api.html">API guide</a>
   <a href="../configuration.html">Configuration</a>
   <a href="agents.html">Reviewer agents (design)</a>
@@ -64,7 +66,7 @@
 <main>
 <header class="doc">
   <h1>Frontend (Vue 3) &amp; Role-Based Access</h1>
-  <div class="meta">QAAI (qaai) · Vue 3 frontend &amp; RBAC · generated from the codebase 2026-07-06</div>
+  <div class="meta">QAAI (qaai) · Vue 3 frontend &amp; RBAC · generated from the codebase 2026-07-17</div>
 </header>
 
 <h2 id="overview">Overview</h2>
@@ -160,6 +162,35 @@ cancels the job server-side.
 <span class="src">qaai/web/src/stores/job.ts:86</span>
 <span class="src">qaai/web/src/stores/job.ts:95</span>
 <span class="src">qaai/web/src/stores/job.ts:166</span></p>
+
+<h2 id="controls">Run controls &amp; options</h2>
+<p>Each reviewer form is a thin Vue component that binds a few reusable controls to reactive
+refs and posts them under the exact request field names — the payload contract is unchanged from
+the old vanilla UI. The controls live in <code>qaai/web/src/components/controls/</code> and the
+forms in <code>qaai/web/src/components/forms/</code>.</p>
+<table>
+<thead><tr><th>Control</th><th>Renders</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td><code>TextField</code></td><td>A labelled text input (baseline id, project name, sheet, prefix)</td><td><span class="src">qaai/web/src/components/controls/TextField.vue</span></td></tr>
+<tr><td><code>CacheModeRadio</code></td><td>The three-way <code>on</code>/<code>test</code>/<code>off</code> cache-mode radio</td><td><span class="src">qaai/web/src/components/controls/CacheModeRadio.vue:8-12</span></td></tr>
+<tr><td><code>LabeledCheckbox</code></td><td>A checkbox + label for each boolean toggle</td><td><span class="src">qaai/web/src/components/controls/LabeledCheckbox.vue</span></td></tr>
+<tr><td><code>FileDropzone</code></td><td>The SHA Excel upload (hazard only)</td><td><span class="src">qaai/web/src/components/controls/FileDropzone.vue</span></td></tr>
+<tr><td><code>InfoTooltip</code></td><td>The per-option help copy (from <code>TOOLTIPS</code>)</td><td><span class="src">qaai/web/src/constants.ts:23-42</span></td></tr>
+<tr><td><code>SubmitButton</code></td><td>The role-gated <strong>Run</strong> button (see <a href="#rbac">RBAC</a>)</td><td><span class="src">qaai/web/src/components/controls/SubmitButton.vue</span></td></tr>
+</tbody></table>
+<p>Which controls each form shows, and the request field each one sets:</p>
+<table>
+<thead><tr><th>Form</th><th>Controls → request field</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td><code>RtmForm</code><br>(test-suite)</td><td><code>baseline_id</code>, <code>cache_mode</code>, <code>test_mode</code>, <code>include_edge_case_analysis</code>, <code>include_design_summaries</code> (<code>include_decomposition_analysis</code> is sent hard-coded <code>true</code>)</td><td><span class="src">qaai/web/src/components/forms/RtmForm.vue:26-73</span></td></tr>
+<tr><td><code>TcForm</code><br>(test-case)</td><td><code>baseline_id</code>, <code>cache_mode</code>, <code>test_mode</code>, <code>include_decomposition_analysis</code> (edge-case &amp; design-summaries sent hard-coded <code>false</code>)</td><td><span class="src">qaai/web/src/components/forms/TcForm.vue:27-38</span></td></tr>
+<tr><td><code>HazardForm</code><br>(hazard)</td><td><code>project_name</code>, <code>file</code>, <code>sheet_name</code>, <code>identifier_pattern</code>, <code>cache_mode</code>, <code>test_mode</code>, <code>include_edge_case_analysis</code>, <code>include_design_summaries</code></td><td><span class="src">qaai/web/src/components/forms/HazardForm.vue:36-44</span></td></tr>
+</tbody></table>
+<div class="note"><strong>What each option means lives in one place.</strong> These forms only
+<em>bind</em> the controls; for what every option does, its values, default, and which reviewer it
+affects — identical whether set here or via <code>curl</code> — see
+<a href="../review_options.html">Review options &amp; toggles</a>. The
+<a href="../api.html#baseline">API guide</a> documents the request bodies.</div>
 
 <h2 id="client">API client &amp; proxy base</h2>
 <p>All requests flow through one client module. <code>detectRootPath()</code> is ported
@@ -298,7 +329,7 @@ uvicorn/gunicorn. Reuse the existing secret loader (<code>qaai/core/secrets.py</
 in-memory <code>JobManager</code>, so the API must run with a single worker; horizontal
 scaling on ECS would need a shared job store. <span class="src">qaai/api/jobs.py</span></div>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-07-06.</footer>
+<footer class="doc">Generated from the QAAI codebase on 2026-07-17.</footer>
 </main>
 </div>
 <script>
