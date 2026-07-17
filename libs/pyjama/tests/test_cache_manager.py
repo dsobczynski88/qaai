@@ -379,3 +379,91 @@ class TestItemTypeFilteringEndToEnd:
         ids_rows = api._cache.read_jsonl(ids_path)
         assert all(row["type"] != "module" for row in ids_rows)
         assert {"id": "REQ-1", "type": "requirement"} in ids_rows
+
+
+# ----------------------------------------------------------------------
+# Requirement-baseline workflow (get_requirement_reviewer_structure)
+# ----------------------------------------------------------------------
+class TestRequirementBaselineCollector:
+    def test_collects_only_requirement_itemtypes(self):
+        api = PyJamaTraceMatrix.__new__(PyJamaTraceMatrix)  # no I/O; call the method directly
+        api._logger = MagicMock()
+        items = [
+            {"id": 101, "itemType": 63, "fields": {"documentKey": "REQ-1"}},    # software req
+            {"id": 102, "itemType": 1382, "fields": {"documentKey": "PRQ-2"}},  # system req
+            {"id": 201, "itemType": 71, "fields": {"documentKey": "TEST-1"}},   # test case
+            {"id": 301, "itemType": 999, "fields": {"documentKey": "MOD-1"}},   # module/container
+        ]
+        keys, ids = api._collect_requirements_from_baseline(items, api_id_key="id")
+        assert ids == [101, 102]
+        assert keys == {"REQ-1", "PRQ-2"}
+
+
+class RequirementBaselineClient:
+    """Baseline whose items ARE requirements; each requirement has a downstream
+    test case (also in the baseline) and a design doc."""
+    def get_baselines_versioneditems(self, baseline_id):
+        return [
+            {"id": 101, "itemType": 63, "fields": {"documentKey": "REQ-1"}},
+            {"id": 102, "itemType": 1382, "fields": {"documentKey": "PRQ-2"}},
+            {"id": 201, "itemType": 71, "fields": {"documentKey": "TEST-1"}},  # test in baseline
+        ]
+
+    def get_item(self, item_id):
+        keymap = {101: "REQ-1", 102: "PRQ-2"}
+        itype = {101: 63, 102: 1382}[item_id]
+        return {"id": item_id, "itemType": itype,
+                "fields": {"documentKey": keymap[item_id], "description": f"Requirement {item_id}"}}
+
+    def get_items_downstream_related(self, req_id):
+        return [
+            {"id": 201, "fields": {"documentKey": "TEST-1", "name": "TC one",
+                                   "setup$71": "setup text", "testCaseSteps": []}},
+            {"id": 302, "fields": {"documentKey": "DES-1", "name": "Design", "description": "dd"}},
+        ]
+
+
+class TestRequirementBaselineWorkflow:
+    def test_structure_and_cache(self, tmp_path):
+        client = RequirementBaselineClient()
+        api = _build_api(tmp_path, client, CacheMode.USE)
+
+        result = api.get_requirement_reviewer_structure("BASE-300")
+
+        # One entry per requirement, identical shape to the test-suite workflow.
+        by_req = {entry["requirement"]["req_id"]: entry for entry in result}
+        assert set(by_req) == {"REQ-1", "PRQ-2"}
+        for entry in result:
+            assert entry["test_cases"][0]["test_id"] == "TEST-1"
+            # TEST-1 is in the baseline -> flagged in_review_baseline
+            assert entry["test_cases"][0]["in_review_baseline"] is True
+            assert entry["design_docs"][0]["doc_id"] == "DES-1"
+
+        # Cache files written under the requirement-review prefix.
+        folder = os.path.join(str(tmp_path / "cache"), "baselines", "BASE-300")
+        names = os.listdir(folder)
+        assert any("requirement_reviewer_structure_response_" in n for n in names)
+        assert any("requirement_reviewer_structure_ids_" in n for n in names)
+
+        # USE re-run replays from disk with no new API calls.
+        result2 = api.get_requirement_reviewer_structure("BASE-300")
+        assert result2 == result
+
+    def test_empty_when_no_requirements(self, tmp_path):
+        class NoReqClient:
+            def get_baselines_versioneditems(self, baseline_id):
+                return [{"id": 201, "itemType": 71, "fields": {"documentKey": "TEST-1"}}]
+        api = _build_api(tmp_path, NoReqClient(), CacheMode.USE)
+        assert api.get_requirement_reviewer_structure("BASE-301") == []
+
+
+class TestRequirementReviewRequest:
+    def test_request_type_validates(self):
+        from pyjama.langgraph.nodes import PyJamaRequest
+        req = PyJamaRequest(request_type="requirement_review", baseline_id="BASE-300")
+        assert req.request_type == "requirement_review"
+
+    def test_request_type_requires_baseline_id(self):
+        from pyjama.langgraph.nodes import PyJamaRequest
+        with pytest.raises(Exception):
+            PyJamaRequest(request_type="requirement_review")

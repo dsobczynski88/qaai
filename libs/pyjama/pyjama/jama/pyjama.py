@@ -443,8 +443,53 @@ class PyJamaTraceMatrix:
             "Collected %d test cases from baseline (itemType filtering)",
             len(test_case_ids)
         )
-        
+
         return test_case_keys, test_case_ids
+
+    @timing(PYJAMA_LOGGERNAME)
+    def _collect_requirements_from_baseline(
+        self,
+        baseline_versioned_items: List[Dict[str, Any]],
+        api_id_key: Optional[str] = None
+    ) -> Tuple[Set[str], List[int]]:
+        """Collect requirement ids directly from baseline versioned items by itemType.
+
+        Mirror of :meth:`_collect_test_cases_from_baseline` for the requirement-review
+        workflow, where the baseline's items are requirements (not test cases). Keeps
+        items whose integer ``itemType`` is in ``REQUIREMENT_PRIMARY_ITEM_TYPE_IDS``
+        (software + system requirements), excluding modules/folders and other types.
+
+        Args:
+            baseline_versioned_items: List of baseline versioned item dictionaries.
+            api_id_key: Key for item ID in API responses (default: ``"id"``).
+
+        Returns:
+            Tuple of (requirement_doc_keys_set, requirement_api_ids_list).
+        """
+        api_id_key = api_id_key or ID_KEY
+
+        self._logger.debug(
+            "Collecting requirements from %d baseline items (itemType in %s)",
+            len(baseline_versioned_items),
+            REQUIREMENT_PRIMARY_ITEM_TYPE_IDS,
+        )
+
+        req_keys: Set[str] = set()
+        req_ids: List[int] = []
+
+        for item in baseline_versioned_items:
+            if item.get("itemType") in REQUIREMENT_PRIMARY_ITEM_TYPE_IDS:
+                doc_key = get_doc_key(item)
+                req_keys.add(doc_key)
+                req_ids.append(item[api_id_key])
+                self._logger.debug("Found requirement in baseline: %s (ID: %d)", doc_key, item[api_id_key])
+
+        self._logger.info(
+            "Collected %d requirements from baseline (itemType filtering)",
+            len(req_ids),
+        )
+
+        return req_keys, req_ids
 
     @timing(PYJAMA_LOGGERNAME)
     def _extract_requirement_ids_from_relationships(
@@ -789,6 +834,86 @@ class PyJamaTraceMatrix:
         self._cache.write_jsonl(folder, prefix, ts, [result])
 
     @timing(PYJAMA_LOGGERNAME)
+    def _assemble_requirement_structure(
+        self,
+        requirement_ids: Set[int],
+        review_test_keys: Set[str],
+        api_id_key: str,
+        design_typekey: Union[str, List[str]],
+        testcase_typekey: Union[str, List[str]],
+    ) -> List[Dict[str, Any]]:
+        """Fetch requirement items + their downstream items and assemble the payload.
+
+        Shared by :meth:`get_test_suite_reviewer_structure` (requirements discovered
+        via test-case relationships) and :meth:`get_requirement_reviewer_structure`
+        (requirements read straight from the baseline) so both emit an identical
+        per-requirement structure ``{requirement, test_cases, design_docs}``.
+
+        Args:
+            requirement_ids: Requirement API ids to fetch and assemble.
+            review_test_keys: Test-case doc keys present in the baseline (used to set
+                ``in_review_baseline`` flags on downstream test cases).
+            api_id_key: Key for item ID in API responses.
+            design_typekey / testcase_typekey: Typekeys forwarded to the assembler.
+
+        Returns:
+            The assembled per-requirement payload list.
+        """
+        requirements_dict: Dict[int, Dict[str, Any]] = {}
+        downstream_results_dict: Dict[int, List[Dict[str, Any]]] = {}
+        failed_req_ids: List[int] = []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Fetch requirement items
+            req_item_futures = {
+                executor.submit(self._get_item_by_id, req_id): req_id
+                for req_id in requirement_ids
+            }
+            # Fetch downstream items
+            downstream_futures = {
+                executor.submit(self._get_downstream, req_id): req_id
+                for req_id in requirement_ids
+            }
+
+            for future in concurrent.futures.as_completed(req_item_futures):
+                req_id = req_item_futures[future]
+                try:
+                    requirements_dict[req_id] = future.result()
+                except Exception as e:
+                    self._logger.error("Failed to fetch requirement item ID %d: %s", req_id, str(e))
+                    failed_req_ids.append(req_id)
+
+            for future in concurrent.futures.as_completed(downstream_futures):
+                req_id, downstream_items = future.result()
+                downstream_results_dict[req_id] = downstream_items
+
+        self._logger.info("Retrieved %d requirement items and downstream data", len(requirements_dict))
+
+        # Drop non-requirement primaries (e.g. modules/folders a test case traces up
+        # to) so only genuine requirements are assembled. Both the response payload
+        # and the ids projection derive from this dict, keeping the paired cache
+        # files aligned. Harmless (no-op) when items were already collected by
+        # requirement itemType, and preserves the doc-key fallback path.
+        before_filter = len(requirements_dict)
+        requirements_dict = self._filter_items_by_itemtype(
+            requirements_dict, REQUIREMENT_PRIMARY_ITEM_TYPE_IDS,
+            expected_type="requirement",
+        )
+        self._logger.info(
+            "Filtered requirement primaries by itemType: kept %d/%d "
+            "(dropped %d non-requirement items, e.g. modules)",
+            len(requirements_dict), before_filter, before_filter - len(requirements_dict),
+        )
+
+        return self._test_suite_assembler.assemble(
+            requirements_dict=requirements_dict,
+            downstream_results=downstream_results_dict,
+            review_test_keys=review_test_keys,
+            testcase_typekey=testcase_typekey,
+            design_typekey=design_typekey,
+        )
+
+    @timing(PYJAMA_LOGGERNAME)
     def get_test_suite_reviewer_structure(
         self,
         baseline_id: str,
@@ -945,77 +1070,14 @@ class PyJamaTraceMatrix:
                     self._cache.mark_refreshed(cache_key)
                 return []
 
-            # Step 6: Fetch requirement items and downstream items concurrently
+            # Steps 6-7: Fetch requirement items + downstream and assemble (shared
+            # with the requirement-baseline workflow so both emit identical structure).
             self._logger.info(
-                "Step 6: Fetching %d requirement items and their downstream items",
+                "Steps 6-7: Fetching %d requirement items + downstream and assembling",
                 len(requirement_ids)
             )
-            
-            requirements_dict = {}
-            downstream_results_dict = {}
-            failed_req_ids = []
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # Fetch requirement items
-                req_item_futures = {
-                    executor.submit(self._get_item_by_id, req_id): req_id
-                    for req_id in requirement_ids
-                }
-                
-                # Fetch downstream items
-                downstream_futures = {
-                    executor.submit(self._get_downstream, req_id): req_id
-                    for req_id in requirement_ids
-                }
-                
-                # Collect requirement items
-                for future in concurrent.futures.as_completed(req_item_futures):
-                    req_id = req_item_futures[future]
-                    try:
-                        req_item = future.result()
-                        requirements_dict[req_id] = req_item
-                    except Exception as e:
-                        self._logger.error(
-                            "Failed to fetch requirement item ID %d: %s",
-                            req_id,
-                            str(e)
-                        )
-                        failed_req_ids.append(req_id)
-                
-                # Collect downstream items
-                for future in concurrent.futures.as_completed(downstream_futures):
-                    req_id, downstream_items = future.result()
-                    downstream_results_dict[req_id] = downstream_items
-            
-            self._logger.info(
-                "Retrieved %d requirement items and downstream data",
-                len(requirements_dict)
-            )
-
-            # Drop non-requirement primaries (e.g. modules/folders a test case
-            # traces up to) so the graph only reviews genuine requirements. Both
-            # the response payload and the ids projection derive from this dict,
-            # so filtering here keeps the paired cache files aligned.
-            before_filter = len(requirements_dict)
-            requirements_dict = self._filter_items_by_itemtype(
-                requirements_dict, REQUIREMENT_PRIMARY_ITEM_TYPE_IDS,
-                expected_type="requirement",
-            )
-            self._logger.info(
-                "Filtered requirement primaries by itemType: kept %d/%d "
-                "(dropped %d non-requirement items, e.g. modules)",
-                len(requirements_dict), before_filter,
-                before_filter - len(requirements_dict),
-            )
-
-            # Step 7: Assemble final structure using assembler
-            self._logger.info("Step 7: Assembling test suite reviewer structure")
-            final_payload = self._test_suite_assembler.assemble(
-                requirements_dict=requirements_dict,
-                downstream_results=downstream_results_dict,
-                review_test_keys=review_test_keys,
-                testcase_typekey=testcase_typekey,
-                design_typekey=design_typekey,
+            final_payload = self._assemble_requirement_structure(
+                requirement_ids, review_test_keys, api_id_key, design_typekey, testcase_typekey
             )
 
             self._logger.info("=" * 60)
@@ -1051,6 +1113,137 @@ class PyJamaTraceMatrix:
         except Exception as e:
             self._logger.error(
                 "Fatal error in get_test_suite_reviewer_structure: %s",
+                str(e),
+                exc_info=True
+            )
+            raise
+
+    @timing(PYJAMA_LOGGERNAME)
+    def get_requirement_reviewer_structure(
+        self,
+        baseline_id: str,
+        api_id_key: Optional[str] = None,
+        design_typekey: Optional[Union[str, List[str]]] = None,
+        testcase_typekey: Optional[Union[str, List[str]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Extract reviewer structure from a **requirement-review** baseline.
+
+        Alternative to :meth:`get_test_suite_reviewer_structure` for the case where
+        the baseline's items are requirement ids **directly** (rather than test cases
+        traced upstream to requirements). Workflow:
+
+        1. Parse baseline ID from 'BASE-12345' format.
+        2. Fetch baseline versioned items.
+        3. Collect requirement ids directly from the baseline (itemType filtering).
+        4. Fetch each requirement's items + downstream test cases/design docs and
+           assemble — shared with the test-suite workflow via
+           :meth:`_assemble_requirement_structure`.
+
+        Produces the **identical** per-requirement response structure
+        ``{requirement, test_cases, design_docs}`` so every downstream consumer works
+        unchanged. Cached under its own prefix (:data:`REQUIREMENT_REVIEW_CACHE_PREFIX`).
+
+        Args:
+            baseline_id: Baseline identifier (e.g. 'BASE-84398').
+            api_id_key: Key for item ID in API responses (default: 'id').
+            design_typekey: Type key(s) for design documents (default: 'DES').
+            testcase_typekey: Type key(s) for test cases (default: 'TEST').
+
+        Returns:
+            List of requirement dictionaries (see :meth:`get_test_suite_reviewer_structure`).
+
+        Raises:
+            ValueError: If baseline_id format is invalid.
+        """
+        self._logger.info("=" * 60)
+        self._logger.info("Starting requirement reviewer structure extraction")
+        self._logger.info("Baseline ID: %s", baseline_id)
+        self._logger.info("=" * 60)
+
+        # Test mode: serve strictly from cache, never touch the Jama API.
+        if self._test_mode:
+            cached = self._load_baseline_response(baseline_id, REQUIREMENT_REVIEW_CACHE_PREFIX)
+            return self._require_cached(
+                cached, f"baseline '{baseline_id}' (requirement_review)",
+                self._baseline_cache_folder(baseline_id),
+            )
+
+        # Tier-3 cache check
+        cache_key = f"baselines:{baseline_id}:requirement_review"
+        if not self._cache.should_recompute(cache_key):
+            cached = self._load_baseline_response(baseline_id, REQUIREMENT_REVIEW_CACHE_PREFIX)
+            if cached is not None:
+                return cached
+
+        # Set defaults
+        api_id_key = api_id_key or ID_KEY
+        design_typekey = normalize_typekeys(design_typekey, DEFAULT_DESIGN_TYPEKEYS)
+        testcase_typekey = normalize_typekeys(testcase_typekey, [DEFAULT_TESTCASE_TYPEKEY])
+
+        try:
+            # Step 1: Parse baseline ID from 'BASE-12345' format
+            self._logger.info("Step 1: Parsing baseline ID")
+            baseline_id_int = self._parse_baseline_id(baseline_id)
+
+            # Step 2: Fetch baseline versioned items
+            self._logger.info("Step 2: Fetching baseline versioned items for baseline_id: %d", baseline_id_int)
+            raw_review_items = self.client.get_baselines_versioneditems(baseline_id_int)
+            self._logger.info("Retrieved %d baseline versioned items", len(raw_review_items))
+
+            # Step 3: Collect requirement ids directly from the baseline (itemType filtering)
+            self._logger.info("Step 3: Collecting requirements from baseline (itemType filtering)")
+            _, requirement_ids = self._collect_requirements_from_baseline(
+                raw_review_items, api_id_key=api_id_key
+            )
+
+            if not requirement_ids:
+                self._logger.warning("No requirements found in baseline. Returning empty result.")
+                if self._cache.writes_enabled():
+                    self._write_baseline_cache(baseline_id, REQUIREMENT_REVIEW_CACHE_PREFIX, [], [])
+                    self._cache.mark_refreshed(cache_key)
+                return []
+
+            # Any test cases that ARE in this baseline set in_review_baseline flags on
+            # downstream test cases (usually empty for a pure requirement baseline;
+            # populated for a mixed requirement+test baseline).
+            review_test_keys, _ = self._collect_test_cases_from_baseline(
+                raw_review_items, api_id_key=api_id_key
+            )
+
+            # Step 4: Fetch requirement items + downstream and assemble (shared helper)
+            self._logger.info(
+                "Step 4: Fetching %d requirement items + downstream and assembling",
+                len(requirement_ids)
+            )
+            final_payload = self._assemble_requirement_structure(
+                set(requirement_ids), review_test_keys, api_id_key, design_typekey, testcase_typekey
+            )
+
+            self._logger.info("=" * 60)
+            self._logger.info("Completed requirement reviewer structure extraction")
+            self._logger.info("Total requirements processed: %d", len(final_payload))
+
+            total_tests = sum(len(req[TEST_CASES_KEY]) for req in final_payload)
+            total_design_docs = sum(len(req[DESIGN_DOCS_KEY]) for req in final_payload)
+            self._logger.info("Summary:")
+            self._logger.info("  Requirements: %d", len(final_payload))
+            self._logger.info("  Test cases (total): %d", total_tests)
+            self._logger.info("  Design documents: %d", total_design_docs)
+            self._logger.info("=" * 60)
+
+            # Tier-3 cache write
+            if self._cache.writes_enabled():
+                self._write_baseline_cache(
+                    baseline_id, REQUIREMENT_REVIEW_CACHE_PREFIX,
+                    final_payload, self._test_suite_ids_rows(final_payload)
+                )
+                self._cache.mark_refreshed(cache_key)
+
+            return final_payload
+
+        except Exception as e:
+            self._logger.error(
+                "Fatal error in get_requirement_reviewer_structure: %s",
                 str(e),
                 exc_info=True
             )

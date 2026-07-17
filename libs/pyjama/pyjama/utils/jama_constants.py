@@ -21,6 +21,10 @@ CACHE_IDENTIFIERS_SUBDIR = "identifiers"
 # Per-method cache filename prefixes
 TEST_SUITE_CACHE_PREFIX = "test_suite_reviewer_structure"
 TEST_CASE_CACHE_PREFIX = "test_case_reviewer_structure"
+# Requirement-baseline workflow: baseline items are requirement ids directly.
+# Distinct prefix so its cached response/ids files stay isolated from the
+# test-suite workflow (test_mode replay is per-prefix); ids rows use the same builder.
+REQUIREMENT_REVIEW_CACHE_PREFIX = "requirement_reviewer_structure"
 BIDIRECTIONAL_CACHE_PREFIX = "bidirectional_trace"
 HIERARCHICAL_CACHE_PREFIX = "hierarchical_trace"
 RTM_CACHE_PREFIX = "rtm"
