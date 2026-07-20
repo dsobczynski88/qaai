@@ -102,6 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="root under which <type>/actual/<timestamp>/ is created")
     p_ing.add_argument("--out", default=None, metavar="DIR",
                        help="write to this exact directory instead of a fresh timestamped one")
+    p_ing.add_argument("--append", default=None, metavar="DIR",
+                       help="append the ingested rows onto an existing dataset "
+                            "(keeps its reviewed labels) instead of creating a new folder; "
+                            "mutually exclusive with --out")
     p_ing.add_argument("--reviewer", default=None,
                        help="name recorded in source.json and edits.log (default: the OS user)")
     p_ing.add_argument("--quiet", action="store_true",
@@ -280,6 +284,10 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         print("error: give a run directory, or --outputs", file=sys.stderr)
         return EXIT_USAGE
 
+    if args.append and args.out:
+        print("error: pass either --append or --out, not both", file=sys.stderr)
+        return EXIT_USAGE
+
     try:
         result = ingest_run(
             args.run_dir or ".",
@@ -290,7 +298,8 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
             reviewer=args.reviewer,
         )
         out = write_ingested(
-            result, out_dir=args.out, base_dir=args.base_dir, reviewer=args.reviewer
+            result, out_dir=args.out, append_to=args.append,
+            base_dir=args.base_dir, reviewer=args.reviewer,
         )
     except IngestError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -305,7 +314,13 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     if args.quiet:
         print(out)
     else:
-        print(f"ingested {result.n_records} rows -> {out}")
+        if args.append:
+            from qaai.eval.datasets import ACTUAL_INPUTS_NAME, load_jsonl
+
+            total = len(load_jsonl(out / ACTUAL_INPUTS_NAME))
+            print(f"appended {result.n_records} rows -> {out} (total {total})")
+        else:
+            print(f"ingested {result.n_records} rows -> {out}")
         print(f"  type:    {result.dataset_type}")
         print(f"  source:  {result.provenance.get('source_outputs_path')}")
         if result.skipped:
