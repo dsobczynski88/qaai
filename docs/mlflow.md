@@ -1,79 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QAAI · MLflow Evaluation</title>
-<style>
-  :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
-    --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--bad:#b22;--maxw:860px}
-  @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;
-    --line:#222a33;--accent:#6ea8ff;--code-bg:#161b22;--sidebar:#11161c;--ok:#5bd07e;--warn:#e3b341;--bad:#ff7b72}}
-  *{box-sizing:border-box}html{scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  .layout{display:grid;grid-template-columns:266px 1fr;min-height:100vh}
-  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:24px 18px;background:var(--sidebar);border-right:1px solid var(--line);font-size:14px}
-  nav.toc strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
-  nav.toc a{display:block;color:var(--mute);text-decoration:none;padding:3px 0}
-  nav.toc a:hover,nav.toc a.active{color:var(--accent)}
-  main{max-width:var(--maxw);padding:32px 30px 90px;margin:0 auto;width:100%}
-  header.doc{border-bottom:1px solid var(--line);margin-bottom:8px;padding-bottom:12px}
-  header.doc .meta{color:var(--mute);font-size:13px}
-  h1,h2,h3{line-height:1.25;scroll-margin-top:14px}
-  h2{margin-top:40px;border-bottom:1px solid var(--line);padding-bottom:6px}
-  h3{margin-top:26px}
-  a{color:var(--accent)}
-  code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
-  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
-  pre code{background:none;padding:0}
-  pre.diagram{line-height:1.35}
-  table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
-  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
-  th{background:var(--code-bg)}
-  .src{color:var(--mute);font:12px ui-monospace,monospace}
-  .pill{display:inline-block;font:12px ui-monospace,monospace;padding:1px 7px;border-radius:999px;border:1px solid var(--line)}
-  .get{color:var(--ok)}.post{color:var(--accent)}
-  .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
-  .note.warn{border-left-color:var(--warn)}
-  figure{margin:18px 0}
-  figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
-  figure figcaption{color:var(--mute);font-size:13px;margin-top:6px}
-  footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
-  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}}
-  @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
-<div class="layout">
-<nav class="toc" aria-label="Table of contents">
-  <strong>MLflow Evaluation</strong>
-  <a href="#overview">Overview</a>
-  <a href="#install">Install &amp; activate</a>
-  <a href="#datasets">Datasets &amp; converter</a>
-  <a href="#spec">The eval spec</a>
-  <a href="#run">Running a study</a>
-  <a href="#predictions">Where predictions go</a>
-  <a href="#metrics">Metrics &amp; scoring</a>
-  <a href="#inspect">Inspecting runs</a>
-  <a href="#samplesize">Sample size</a>
-  <a href="#layout">Package layout</a>
-  <strong style="margin-top:16px">More docs</strong>
-  <a href="index.html">← Docs home</a>
-  <a href="test_guide.html">Test guide</a>
-  <a href="test_catalog.html">Test catalog</a>
-  <a href="configuration.html">Configuration</a>
-  <a href="design/test_suite_reviewer.html">RTM design</a>
-</nav>
-<main>
-<header class="doc">
-  <h1>MLflow Evaluation</h1>
-  <div class="meta">QAAI (qaai) · <code>qaai.eval</code> + <code>scripts/</code> + <code>plugins/qaai-mlflow-eval</code> · generated from the codebase 2026-07-17</div>
-</header>
+# MLflow Evaluation
 
-<p>This guide covers the spec-driven MLflow evaluation harness for the three QAAI reviewer
-pipelines: how it scores each reviewer as a classifier, the three-file dataset format, the
-YAML spec that makes the schema swappable per project, the CLIs under <code>scripts/</code>,
-and the <code>qaai-mlflow-eval</code> plugin that wraps it in skills.</p>
+<div class="meta">QAAI (qaai) · qaai.eval + scripts/ + plugins/qaai-mlflow-eval · generated from the codebase 2026-07-17</div>
+
+This guide covers the spec-driven MLflow evaluation harness for the three QAAI reviewer pipelines: how it scores each reviewer as a classifier, the three-file dataset format, the YAML spec that makes the schema swappable per project, the CLIs under `scripts/`, and the `qaai-mlflow-eval` plugin that wraps it in skills.
 
 <div class="note"><strong>New subsystem.</strong> The <code>qaai/eval/</code> package, the
 <code>eval/</code> spec + dataset tree, the four <code>scripts/</code> CLIs, and the
@@ -81,10 +10,10 @@ and the <code>qaai-mlflow-eval</code> plugin that wraps it in skills.</p>
 reviewer runnables, prompt registry, client, and telemetry rather than duplicating them —
 it does not modify the pipelines or the pytest suites.</div>
 
-<h2 id="overview">Overview</h2>
-<p>Each reviewer emits a binary <code>overall_verdict</code> plus a per-cell rubric. The
-harness treats every reviewer as a stack of two classifiers and scores predictions against a
-labelled dataset <span class="src">qaai/eval/__init__.py:1-14</span>:</p>
+## Overview
+
+Each reviewer emits a binary `overall_verdict` plus a per-cell rubric. The harness treats every reviewer as a stack of two classifiers and scores predictions against a labelled dataset <span class="src">qaai/eval/__init__.py:1-14</span>:
+
 <table>
 <thead><tr><th>Reviewer</th><th>Binary classifier</th><th>Per-rubric multi-cell classifier</th></tr></thead>
 <tbody>
@@ -92,10 +21,9 @@ labelled dataset <span class="src">qaai/eval/__init__.py:1-14</span>:</p>
 <tr><td>Hazard Risk</td><td><code>overall_verdict</code> ∈ {Yes, No}</td><td>H1–H6 × {Yes, No, N-A} (+ R7 recommended)</td></tr>
 <tr><td>Test Case</td><td><code>overall_verdict</code> ∈ {Yes, No}</td><td>5 objectives × {Yes, No}</td></tr>
 </tbody></table>
-<p>The design is two layers so the skills stay thin and the logic stays unit-testable: a
-Python package <code>qaai/eval/</code> holds the harness (spec, dataset loading, scoring,
-metrics, MLflow wiring, sample-size math, artifacts), and thin CLIs under
-<code>scripts/</code> plus the plugin skills drive it.</p>
+
+The design is two layers so the skills stay thin and the logic stays unit-testable: a Python package `qaai/eval/` holds the harness (spec, dataset loading, scoring, metrics, MLflow wiring, sample-size math, artifacts), and thin CLIs under `scripts/` plus the plugin skills drive it.
+
 <pre class="diagram"><code>load spec + dataset
    ├─ score mode ─→ read actual_outputs.jsonl      (no LLM)
    └─ run mode   ─→ graph.ainvoke × N              (asyncio.gather, cache_mode=off)
@@ -105,26 +33,30 @@ metrics, MLflow wiring, sample-size math, artifacts), and thin CLIs under
          │
          ▼
    mlflow.start_run: log_params + log_metrics + log_artifacts</code></pre>
-<p>The orchestrator is <code>evaluate()</code> <span class="src">qaai/eval/harness.py:107</span>;
-the CLI <code>scripts/evaluate_with_mlflow.py</code> is a thin wrapper over it.</p>
+
+The orchestrator is `evaluate()` <span class="src">qaai/eval/harness.py:107</span>; the CLI `scripts/evaluate_with_mlflow.py` is a thin wrapper over it.
 
 <h2 id="install">Install &amp; activate</h2>
-<p>The evaluation dependencies are already declared in the <strong>dev dependency group</strong> —
-<code>mlflow</code>, <code>scikit-learn</code>, <code>matplotlib</code>, <code>numpy</code>
-<span class="src">pyproject.toml:40-47</span>. The sample-size math uses only the standard
-library (<code>statistics.NormalDist</code>), so no <code>scipy</code> is required.</p>
-<pre><code>uv sync --frozen                 # dev group already includes mlflow / scikit-learn / matplotlib</code></pre>
-<p>MLflow tracking defaults to a local file store <code>file:./mlruns</code>, which is already
-gitignored <span class="src">.gitignore:33-37</span>. Committed eval assets live under the
-separate <code>eval/</code> tree.</p>
 
-<h3>Activate the plugin</h3>
-<p>The repo ships a local marketplace at <code>.claude-plugin/marketplace.json</code> and the
-plugin at <code>plugins/qaai-mlflow-eval/.claude-plugin/plugin.json</code>. From a Claude Code
-session in this repo:</p>
-<pre><code>/plugin marketplace add .
-/plugin install qaai-mlflow-eval@qaai-mlflow-eval</code></pre>
-<p>The plugin bundles five skills under <code>plugins/qaai-mlflow-eval/skills/</code>:</p>
+The evaluation dependencies are already declared in the **dev dependency group** — `mlflow`, `scikit-learn`, `matplotlib`, `numpy` <span class="src">pyproject.toml:40-47</span>. The sample-size math uses only the standard library (`statistics.NormalDist`), so no `scipy` is required.
+
+```
+uv sync --frozen                 # dev group already includes mlflow / scikit-learn / matplotlib
+```
+
+MLflow tracking defaults to a local file store `file:./mlruns`, which is already gitignored <span class="src">.gitignore:33-37</span>. Committed eval assets live under the separate `eval/` tree.
+
+### Activate the plugin
+
+The repo ships a local marketplace at `.claude-plugin/marketplace.json` and the plugin at `plugins/qaai-mlflow-eval/.claude-plugin/plugin.json`. From a Claude Code session in this repo:
+
+```
+/plugin marketplace add .
+/plugin install qaai-mlflow-eval@qaai-mlflow-eval
+```
+
+The plugin bundles five skills under `plugins/qaai-mlflow-eval/skills/`:
+
 <table>
 <thead><tr><th>Skill</th><th>Purpose</th></tr></thead>
 <tbody>
@@ -134,14 +66,16 @@ session in this repo:</p>
 <tr><td><code>mlflow-eval-inspect</code></td><td>MLflow UI, run comparison, artifacts, tracing, CI gate</td></tr>
 <tr><td><code>mlflow-eval-sample-size</code></td><td>Size the labelled set for an accuracy confidence interval</td></tr>
 </tbody></table>
+
 <div class="note"><strong>Zero-install alternative.</strong> The same
 <code>SKILL.md</code> directories under <code>skills/</code> also work as project skills if
 copied to <code>.claude/skills/</code> — they auto-load with no marketplace step
 <span class="src">plugins/qaai-mlflow-eval/README.md</span>.</div>
 
 <h2 id="datasets">Datasets &amp; converter</h2>
-<p>A dataset is three <strong>row-aligned</strong> JSONL files — row <em>i</em> of each
-describes the same item <span class="src">qaai/eval/datasets.py:9</span>:</p>
+
+A dataset is three **row-aligned** JSONL files — row *i* of each describes the same item <span class="src">qaai/eval/datasets.py:9</span>:
+
 <table>
 <thead><tr><th>File</th><th>Contents</th><th>Needed by</th></tr></thead>
 <tbody>
@@ -149,32 +83,21 @@ describes the same item <span class="src">qaai/eval/datasets.py:9</span>:</p>
 <tr><td><code>actual_outputs.jsonl</code></td><td>Graph output-state subset (<code>synthesized_assessment</code>, …)</td><td>score mode</td></tr>
 <tr><td><code>actual_labels.jsonl</code></td><td>Flat answer key (<code>{Overall_Verdict, M1..M5[, R6]}</code>)</td><td>always</td></tr>
 </tbody></table>
-<p>Each dataset lives in its own timestamped folder,
-<code>eval/datasets/&lt;type&gt;/actual/&lt;YYYY-MM-DD_HH-MM-SS&gt;/</code>, alongside an append-only
-<code>edits.log</code> recording who reviewed each row and why. <strong>A revision is never edited
-in place</strong> — corrections are saved as a new timestamped sibling, so a scored run always
-still has the exact answer key it was scored against. <code>predictions/&lt;ts&gt;/</code> hangs off
-the revision it scored <span class="src">qaai/dataset_studio/scaffold.py</span>. Folders are
-produced by Dataset Studio: <code>dataset_studio new</code> to author one, or
-<code>dataset_studio ingest &lt;run&gt;</code> to convert a completed run into one pre-filled with
-the model's own answers for a human to correct.</p>
 
-<p><code>load_dataset()</code> resolves a <code>--dataset-dir</code> (or explicit per-file paths)
-and enforces the mode's requirements — score mode needs outputs; run mode needs inputs
-<span class="src">qaai/eval/datasets.py:85-118</span>. Rows are aligned <strong>positionally</strong>
-across all three files; that alignment is the dataset's core invariant.</p>
+Each dataset lives in its own timestamped folder, `eval/datasets/<type>/actual/<YYYY-MM-DD_HH-MM-SS>/`, alongside an append-only `edits.log` recording who reviewed each row and why. **A revision is never edited in place** — corrections are saved as a new timestamped sibling, so a scored run always still has the exact answer key it was scored against. `predictions/<ts>/` hangs off the revision it scored <span class="src">qaai/dataset_studio/scaffold.py</span>. Folders are produced by Dataset Studio: `dataset_studio new` to author one, or `dataset_studio ingest <run>` to convert a completed run into one pre-filled with the model's own answers for a human to correct.
 
-<h3>The committed dataset (pilot)</h3>
-<p>There is <strong>one</strong> committed dataset — the grounded RTM <em>pilot</em> at
-<code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code>. Its answer key is the three <code>actual_*</code> files
-above, alongside <code>source_gold.jsonl</code> (the hand-authored source of truth the converter
-renders them from) and a <code>description.md</code>
-<span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>:</p>
+`load_dataset()` resolves a `--dataset-dir` (or explicit per-file paths) and enforces the mode's requirements — score mode needs outputs; run mode needs inputs <span class="src">qaai/eval/datasets.py:85-118</span>. Rows are aligned **positionally** across all three files; that alignment is the dataset's core invariant.
+
+### The committed dataset (pilot)
+
+There is **one** committed dataset — the grounded RTM *pilot* at `eval/datasets/test_suite/actual/2026-07-17_12-01-00/`. Its answer key is the three `actual_*` files above, alongside `source_gold.jsonl` (the hand-authored source of truth the converter renders them from) and a `description.md` <span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>:
+
 <table>
 <thead><tr><th>Dataset</th><th>Rows</th><th>Use it?</th></tr></thead>
 <tbody>
 <tr><td><code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code></td><td>20</td><td><strong>Yes</strong> — hand-authored, labels grounded in the row's own text, 10 known-good / 10 known-bad, with a documented failure-mode distribution <span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span></td></tr>
 </tbody></table>
+
 <div class="note warn"><strong>Labels must be grounded in content.</strong> An earlier 800-row set
 that once lived here was <em>replaced</em> by this pilot because its labels were not grounded: its
 test steps were templated placeholders (<em>"Execute primary action specified in requirement.
@@ -185,29 +108,26 @@ covered"</em> on a row labelled <code>Yes</code>. You cannot measure accuracy ag
 are wrong. The committed pilot holds to the rule that <strong>a row earns <code>Yes</code> only if
 a competent reviewer reading it would agree</strong>
 <span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>.</div>
+
 <div class="note"><strong>20 rows is a pilot, not the study.</strong> At n=20 the 95% accuracy CI
 is ±0.154 (Wilson) even assuming p=0.85, and ±0.20 at p=0.5 — so a 20-row result cannot
 distinguish a 0.75 reviewer from a 0.95 one. Per-cell counts of 2–4 are likewise far below the
 ~30/cell per-rubric metrics need; read them as anecdote until the set is scaled. See
 <a href="#samplesize">Sample size</a> for the target N.</div>
 
-<h3>Convert the existing gold data</h3>
-<p><code>scripts/convert_to_eval.py</code> has two subcommands
-<span class="src">scripts/convert_to_eval.py:61-70</span>. The <code>gold</code> subcommand
-turns <code>gold_dataset_labeled.jsonl</code> into <code>actual_inputs.jsonl</code> +
-<code>actual_labels.jsonl</code> by un-nesting the row's <code>labels</code> object
-<span class="src">qaai/eval/datasets.py:125-138</span>:</p>
-<pre><code>uv run python scripts/convert_to_eval.py gold \
+### Convert the existing gold data
+
+`scripts/convert_to_eval.py` has two subcommands <span class="src">scripts/convert_to_eval.py:61-70</span>. The `gold` subcommand turns `gold_dataset_labeled.jsonl` into `actual_inputs.jsonl` + `actual_labels.jsonl` by un-nesting the row's `labels` object <span class="src">qaai/eval/datasets.py:125-138</span>:
+
+```
+uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
   --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
-  --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs</code></pre>
-<p><code>--synthesize-outputs</code> also writes an <strong>oracle</strong>
-<code>actual_outputs.jsonl</code> (predictions == labels) so score-only mode runs offline for a
-smoke/CI check <span class="src">qaai/eval/datasets.py:149-170</span>. Real
-<code>actual_outputs</code> come from a live run (run mode persists them as
-<code>predicted_outputs</code>) or from your own data; a prior run's <code>outputs.jsonl</code>
-can be harvested with the <code>outputs</code> subcommand
-<span class="src">qaai/eval/datasets.py:222-224</span>.</p>
+  --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
+```
+
+`--synthesize-outputs` also writes an **oracle** `actual_outputs.jsonl` (predictions == labels) so score-only mode runs offline for a smoke/CI check <span class="src">qaai/eval/datasets.py:149-170</span>. Real `actual_outputs` come from a live run (run mode persists them as `predicted_outputs`) or from your own data; a prior run's `outputs.jsonl` can be harvested with the `outputs` subcommand <span class="src">qaai/eval/datasets.py:222-224</span>.
+
 <div class="note warn"><strong>The committed <code>actual_outputs.jsonl</code> is the answer key,
 not a prediction.</strong> Scoring it against its own labels returns <strong>1.000 by
 construction</strong> — it measures the harness, not the reviewer. The run self-detects this,
@@ -217,13 +137,12 @@ tags itself <code>oracle_selftest=true</code>, and prints a WARNING
 <a href="#predictions"><code>predictions/&lt;ts&gt;/</code></a>.</div>
 
 <h2 id="spec">The eval spec</h2>
-<p>One YAML per reviewer/project is the <strong>only</strong> thing that changes between eval
-schemas — the harness never hard-codes field names. <code>EvalSpec</code> is loaded by
-<code>load_spec()</code> <span class="src">qaai/eval/spec.py:91-131</span>. Three specs ship in
-<code>eval/specs/</code>: <code>test_suite_reviewer.yaml</code>,
-<code>hazard_risk_reviewer.yaml</code>, <code>test_case_reviewer.yaml</code>.</p>
-<pre><code>name: test_suite_reviewer
-component: test_suite_reviewer            # -&gt; runner registry
+
+One YAML per reviewer/project is the **only** thing that changes between eval schemas — the harness never hard-codes field names. `EvalSpec` is loaded by `load_spec()` <span class="src">qaai/eval/spec.py:91-131</span>. Three specs ship in `eval/specs/`: `test_suite_reviewer.yaml`, `hazard_risk_reviewer.yaml`, `test_case_reviewer.yaml`.
+
+```
+name: test_suite_reviewer
+component: test_suite_reviewer            # -> runner registry
 prompt_set: test_suite_reviewer_v3        # baseline; --prompt-set overrides
 input:                                    # run mode: build graph state from an actual_inputs row
   requirement: requirement
@@ -243,16 +162,11 @@ scoring:
   positive_label: "Yes"
   na_label: "N-A"
   advisory_codes: [R6]                    # excluded from overall + headline (mirrors R6/R7)
-  rubric_class_mode: multiclass           # {Yes, No, N-A}</code></pre>
-<p>The spec fields map onto small Pydantic models: <code>OutputSpec</code> /
-<code>RubricSpec</code> / <code>LabelSpec</code> / <code>ScoringSpec</code> / <code>MlflowSpec</code>
-<span class="src">qaai/eval/spec.py:50-89</span>. Extraction is done by
-<code>extract_prediction()</code> and <code>extract_label()</code>
-<span class="src">qaai/eval/spec.py:111-129</span>, and <code>get_path()</code> reads dotted
-paths from <strong>both</strong> plain dicts (score mode) and Pydantic models (run mode, where
-<code>graph.ainvoke</code> returns model instances) <span class="src">qaai/eval/spec.py:35-47</span>.
-<code>mandatory_codes</code> is the rubric minus <code>advisory_codes</code>
-<span class="src">qaai/eval/spec.py:104-109</span>.</p>
+  rubric_class_mode: multiclass           # {Yes, No, N-A}
+```
+
+The spec fields map onto small Pydantic models: `OutputSpec` / `RubricSpec` / `LabelSpec` / `ScoringSpec` / `MlflowSpec` <span class="src">qaai/eval/spec.py:50-89</span>. Extraction is done by `extract_prediction()` and `extract_label()` <span class="src">qaai/eval/spec.py:111-129</span>, and `get_path()` reads dotted paths from **both** plain dicts (score mode) and Pydantic models (run mode, where `graph.ainvoke` returns model instances) <span class="src">qaai/eval/spec.py:35-47</span>. `mandatory_codes` is the rubric minus `advisory_codes` <span class="src">qaai/eval/spec.py:104-109</span>.
+
 <table>
 <thead><tr><th>Reviewer spec</th><th><code>verdict_path</code></th><th>rubric <code>list_path</code> / <code>code_field</code></th><th>advisory</th></tr></thead>
 <tbody>
@@ -262,35 +176,36 @@ paths from <strong>both</strong> plain dicts (score mode) and Pydantic models (r
 </tbody></table>
 
 <h2 id="run">Running a study</h2>
-<p>One study = one MLflow run, driven by <code>scripts/evaluate_with_mlflow.py</code>. It has
-two modes <span class="src">scripts/evaluate_with_mlflow.py:36</span>.</p>
 
-<h3>Score-only <span class="pill get">no LLM</span></h3>
-<p>Scores an existing <code>actual_outputs.jsonl</code> against the labels — fast and offline. Its
-real use is <a href="#predictions">re-scoring a saved prediction set</a> for free; pointed at a
-committed dataset it is only a plumbing check (see the oracle warning above):</p>
-<pre><code>uv run python scripts/evaluate_with_mlflow.py \
+One study = one MLflow run, driven by `scripts/evaluate_with_mlflow.py`. It has two modes <span class="src">scripts/evaluate_with_mlflow.py:36</span>.
+
+### Score-only <span class="pill get">no LLM</span>
+
+Scores an existing `actual_outputs.jsonl` against the labels — fast and offline. Its real use is [re-scoring a saved prediction set](#predictions) for free; pointed at a committed dataset it is only a plumbing check (see the oracle warning above):
+
+```
+uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
   --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
-  --mode score --run-name plumbing-smoke</code></pre>
+  --mode score --run-name plumbing-smoke
+```
 
-<h3>Run+score <span class="pill post">live LLM</span></h3>
-<p>Invokes the compiled graph on <code>actual_inputs.jsonl</code>, persists the produced
-<code>predicted_outputs.jsonl</code>, then scores. Records run under bounded concurrency via
-<code>asyncio.gather</code>, and one failing record soft-fails without aborting the batch
-<span class="src">qaai/eval/runners.py:107-136</span>. <code>cache_mode</code> is forced to
-<code>off</code> so every node re-runs fresh <span class="src">qaai/eval/runners.py:14</span>:</p>
-<pre><code>uv run python scripts/evaluate_with_mlflow.py \
+### Run+score <span class="pill post">live LLM</span>
+
+Invokes the compiled graph on `actual_inputs.jsonl`, persists the produced `predicted_outputs.jsonl`, then scores. Records run under bounded concurrency via `asyncio.gather`, and one failing record soft-fails without aborting the batch <span class="src">qaai/eval/runners.py:107-136</span>. `cache_mode` is forced to `off` so every node re-runs fresh <span class="src">qaai/eval/runners.py:14</span>:
+
+```
+uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
   --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --mode run --prompt-set test_suite_reviewer_v4 \
-  --max-concurrent 5 --limit 20 --run-name v4-edge-case</code></pre>
-<p>The client is built from <code>settings</code> (<code>API_KEY</code> /
-<code>API_BASE_URL</code> / <code>API_MODEL</code>) with a <strong>production guard</strong>:
-a base URL containing <code>"prod"</code> is refused unless <code>--allow-prod</code> is passed
-<span class="src">qaai/eval/runners.py:86-104</span> — mirroring the test suite's
-<code>real_client</code> guard.</p>
-<p>The full flag surface <span class="src">scripts/evaluate_with_mlflow.py:31-58</span>:</p>
+  --max-concurrent 5 --limit 20 --run-name v4-edge-case
+```
+
+The client is built from `settings` (`API_KEY` / `API_BASE_URL` / `API_MODEL`) with a **production guard**: a base URL containing `"prod"` is refused unless `--allow-prod` is passed <span class="src">qaai/eval/runners.py:86-104</span> — mirroring the test suite's `real_client` guard.
+
+The full flag surface <span class="src">scripts/evaluate_with_mlflow.py:31-58</span>:
+
 <table>
 <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -312,48 +227,47 @@ a base URL containing <code>"prod"</code> is refused unless <code>--allow-prod</
 <tr><td><code>--tracking-uri</code></td><td><code>file:./mlruns</code></td><td>MLflow tracking URI (or <code>$MLFLOW_TRACKING_URI</code>)</td></tr>
 </tbody></table>
 
-<h3>A/B comparing prompt sets</h3>
-<p>Run twice into the same experiment, flipping <code>--prompt-set</code>. Each run pins the
-prompt-set manifest sha and per-role versions as params, so the diff in the UI is exact:</p>
-<pre><code>for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
+### A/B comparing prompt sets
+
+Run twice into the same experiment, flipping `--prompt-set`. Each run pins the prompt-set manifest sha and per-role versions as params, so the diff in the UI is exact:
+
+```
+for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
   uv run python scripts/evaluate_with_mlflow.py \
     --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
     --mode run --prompt-set $ps --run-name $ps
-done</code></pre>
+done
+```
 
 <h2 id="predictions">Where predictions go</h2>
-<p><strong>Predictions only ever come from <code>--mode run</code>.</strong> Unless
-<code>--no-save-predictions</code> is passed, each run writes a timestamped set next to the
-dataset <span class="src">qaai/eval/datasets.py:47-48,173</span>:</p>
+
+**Predictions only ever come from `--mode run`.** Unless `--no-save-predictions` is passed, each run writes a timestamped set next to the dataset <span class="src">qaai/eval/datasets.py:47-48,173</span>:
+
 <pre class="diagram"><code>eval/datasets/&lt;type&gt;/actual/&lt;ts&gt;/predictions/&lt;YYYY-MM-DD_HH-MM-SS&gt;/
   ├─ predicted_inputs.jsonl      the inputs this run scored (a self-contained copy)
   ├─ predicted_outputs.jsonl     the predicted graph output-state rows
   ├─ predicted_labels.jsonl      their flat projection (outputs_to_labels)
   └─ run_metadata.json           model, prompt_set, prompt_versions, git_sha,
                                  fixture sha256, n_records, mlflow_run_id</code></pre>
-<p>The <code>predicted_*</code> filenames deliberately mirror the parent dataset's
-<code>actual_*</code> answer key, so a saved run re-scores with no special-casing — point
-<code>--actual-outputs</code> at the <code>predicted_outputs.jsonl</code> and
-<code>--actual-labels</code> at the parent's <code>actual_labels.jsonl</code>.</p>
-<p><code>run_metadata.json</code> carries the <code>mlflow_run_id</code>
-<span class="src">qaai/eval/harness.py:262</span>, so a saved prediction set always points back at
-the run that produced it. Because <code>outputs_to_labels()</code> is the exact inverse of
-<code>synthesize_outputs()</code>, both sides flatten to the same shape — which is what makes
-predictions and the answer key comparable at all.</p>
-<p>The CLI prints a ready-made re-score command when it saves a set
-<span class="src">scripts/evaluate_with_mlflow.py:96-100</span>. Re-scoring is free and offline —
-useful after changing scoring rules, since it never re-invokes the LLM:</p>
-<pre><code>uv run python scripts/evaluate_with_mlflow.py \
+
+The `predicted_*` filenames deliberately mirror the parent dataset's `actual_*` answer key, so a saved run re-scores with no special-casing — point `--actual-outputs` at the `predicted_outputs.jsonl` and `--actual-labels` at the parent's `actual_labels.jsonl`.
+
+`run_metadata.json` carries the `mlflow_run_id` <span class="src">qaai/eval/harness.py:262</span>, so a saved prediction set always points back at the run that produced it. Because `outputs_to_labels()` is the exact inverse of `synthesize_outputs()`, both sides flatten to the same shape — which is what makes predictions and the answer key comparable at all.
+
+The CLI prints a ready-made re-score command when it saves a set <span class="src">scripts/evaluate_with_mlflow.py:96-100</span>. Re-scoring is free and offline — useful after changing scoring rules, since it never re-invokes the LLM:
+
+```
+uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --actual-outputs eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/&lt;ts&gt;/predicted_outputs.jsonl \
+  --actual-outputs eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/predicted_outputs.jsonl \
   --actual-labels eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_labels.jsonl \
-  --mode score --run-name rescore-&lt;ts&gt;</code></pre>
+  --mode score --run-name rescore-<ts>
+```
 
 <h2 id="metrics">Metrics &amp; scoring</h2>
-<p>Scoring is pure and LLM-free. <code>build_records()</code> pairs each output row with its
-label row into <code>RecordResult</code>s, and <code>compute_metrics()</code> reduces them to a
-nested metrics dict <span class="src">qaai/eval/scoring.py:70-135</span>. A record only counts
-toward overall metrics if both verdicts exist <span class="src">qaai/eval/scoring.py:46-49</span>.</p>
+
+Scoring is pure and LLM-free. `build_records()` pairs each output row with its label row into `RecordResult`s, and `compute_metrics()` reduces them to a nested metrics dict <span class="src">qaai/eval/scoring.py:70-135</span>. A record only counts toward overall metrics if both verdicts exist <span class="src">qaai/eval/scoring.py:46-49</span>.
+
 <table>
 <thead><tr><th>Family</th><th>Metrics logged</th></tr></thead>
 <tbody>
@@ -365,11 +279,9 @@ toward overall metrics if both verdicts exist <span class="src">qaai/eval/scorin
 <tr><td><code>cost</code></td><td><code>total_input_tokens</code> / <code>total_output_tokens</code> / <code>estimated_cost_usd</code> (run mode)</td></tr>
 <tr><td><em>always</em></td><td><code>n_total</code>, <code>n_scored</code>, <code>skip_rate</code></td></tr>
 </tbody></table>
-<p>Families are toggled by the spec's <code>metrics_enabled</code> list; the nested result is
-flattened to scalar MLflow keys by <code>flatten_metrics()</code>
-<span class="src">qaai/eval/metrics.py:12</span>. Note <code>cohen_kappa</code> is omitted — for a
-cell or for the overall verdict — when there is no class variability to measure
-<span class="src">qaai/eval/metrics.py:34-36</span>.</p>
+
+Families are toggled by the spec's `metrics_enabled` list; the nested result is flattened to scalar MLflow keys by `flatten_metrics()` <span class="src">qaai/eval/metrics.py:12</span>. Note `cohen_kappa` is omitted — for a cell or for the overall verdict — when there is no class variability to measure <span class="src">qaai/eval/metrics.py:34-36</span>.
+
 <div class="note warn"><strong>Read accuracy next to kappa and prevalence, not alone.</strong>
 On a skewed set, accuracy flatters a model that always guesses the majority label
 <span class="src">qaai/eval/scoring.py:12</span>. <code>cohen_kappa</code> near 0 means the
@@ -378,26 +290,31 @@ guesser, not a working reviewer. <code>rubric_support.&lt;code&gt;.&lt;class&gt;
 sparse-cell warning sign: a cell whose classes are nearly all one value cannot support a
 meaningful F1.</div>
 
-<h3>The two QAAI-specific signals</h3>
+### The two QAAI-specific signals
+
 <div class="note"><strong>helper-invariant pass-rate.</strong> Does the model's predicted
 verdict equal the deterministic rule "positive iff every mandatory cell ∈ {positive, N-A}"?
 A value below 1.0 means the reviewer contradicted its own rubric on some records
 <span class="src">qaai/eval/scoring.py:125-133</span> — the same aggregation rule the reviewers
 apply, with advisory cells (R6 / R7) excluded.</div>
-<p><strong>skip rate</strong> is the fraction of records whose prediction could not be extracted
-(soft-failed node, incomplete output, or a run-mode exception). It shares the accuracy
-denominator, so a spike silently depresses accuracy — read the two together.</p>
+
+**skip rate** is the fraction of records whose prediction could not be extracted (soft-failed node, incomplete output, or a run-mode exception). It shares the accuracy denominator, so a spike silently depresses accuracy — read the two together.
+
 <div class="note warn"><strong>N-A handling.</strong> Rubric cells are scored as multiclass
 {Yes, No, N-A} by default; the overall verdict is scored binary with <code>pos_label="Yes"</code>.
 Set <code>scoring.rubric_class_mode: binary_collapse</code> to fold N-A into the positive class
 before scoring a cell <span class="src">qaai/eval/scoring.py:135-181</span>.</div>
 
 <h2 id="inspect">Inspecting runs</h2>
-<p>Run+score runs enable <code>mlflow.langchain.autolog()</code> so each graph invocation's LLM
-calls appear as per-node spans under the run's Traces tab
-<span class="src">qaai/eval/mlflow_run.py:102-113</span> (the Langfuse-like view). Open the UI:</p>
-<pre><code>uv run mlflow ui        # http://localhost:5000, backend file:./mlruns</code></pre>
-<p>Every run writes these artifacts <span class="src">qaai/eval/artifacts.py:110-125</span>:</p>
+
+Run+score runs enable `mlflow.langchain.autolog()` so each graph invocation's LLM calls appear as per-node spans under the run's Traces tab <span class="src">qaai/eval/mlflow_run.py:102-113</span> (the Langfuse-like view). Open the UI:
+
+```
+uv run mlflow ui        # http://localhost:5000, backend file:./mlruns
+```
+
+Every run writes these artifacts <span class="src">qaai/eval/artifacts.py:110-125</span>:
+
 <table>
 <thead><tr><th>Artifact</th><th>Purpose</th><th>Writer</th></tr></thead>
 <tbody>
@@ -408,28 +325,29 @@ calls appear as per-node spans under the run's Traces tab
 <tr><td><code>prompt_versions.json</code></td><td>Prompt-set provenance (role → version + sha256)</td><td><span class="src">artifacts.py:96</span></td></tr>
 <tr><td><code>fixture_metadata.json</code></td><td>Dataset identity + label distribution</td><td><span class="src">artifacts.py:102</span></td></tr>
 </tbody></table>
-<p>Prompt provenance is pulled from the versioned registry via <code>load_set()</code> — the
-manifest sha plus each role's version and template sha — not from hashing flat files
-<span class="src">qaai/eval/mlflow_run.py:31-52</span>. Reproducibility params (git sha, model,
-per-role prompt versions, fixture sha) are assembled in <code>build_params()</code>
-<span class="src">qaai/eval/mlflow_run.py:60-92</span>.</p>
 
-<h3>CI regression gate</h3>
-<p><code>scripts/check_eval_gate.py</code> reads the latest run for an experiment and exits
-non-zero if a threshold is violated:</p>
-<pre><code>uv run python scripts/check_eval_gate.py --experiment test_suite_reviewer \
-  --min-overall-accuracy 0.85 --min-rubric-macro-f1 0.80 --max-skip-rate 0.05</code></pre>
+Prompt provenance is pulled from the versioned registry via `load_set()` — the manifest sha plus each role's version and template sha — not from hashing flat files <span class="src">qaai/eval/mlflow_run.py:31-52</span>. Reproducibility params (git sha, model, per-role prompt versions, fixture sha) are assembled in `build_params()` <span class="src">qaai/eval/mlflow_run.py:60-92</span>.
+
+### CI regression gate
+
+`scripts/check_eval_gate.py` reads the latest run for an experiment and exits non-zero if a threshold is violated:
+
+```
+uv run python scripts/check_eval_gate.py --experiment test_suite_reviewer \
+  --min-overall-accuracy 0.85 --min-rubric-macro-f1 0.80 --max-skip-rate 0.05
+```
+
 <div class="note warn"><strong>Single-writer backend.</strong> The <code>file:./mlruns</code>
 store is single-writer and is deprecated as of Feb 2026; for a shared/CI setup migrate to
 <code>sqlite:///mlflow.db</code> (via <code>--tracking-uri</code>). <code>mlflow.db</code> is
 already gitignored <span class="src">.gitignore:36</span>.</div>
 
 <h2 id="samplesize">Sample size</h2>
-<p><code>scripts/sample_size.py</code> sizes the labelled set for a single-model accuracy
-confidence interval — the required N to estimate <code>overall_verdict</code> accuracy to a
-target margin, and the margin a fixed N buys. z-values come from stdlib
-<code>NormalDist().inv_cdf</code> <span class="src">qaai/eval/sample_size.py:21-26</span>.</p>
-<pre><code># required N for +/-0.05 at 95% confidence, expected accuracy 0.85
+
+`scripts/sample_size.py` sizes the labelled set for a single-model accuracy confidence interval — the required N to estimate `overall_verdict` accuracy to a target margin, and the margin a fixed N buys. z-values come from stdlib `NormalDist().inv_cdf` <span class="src">qaai/eval/sample_size.py:21-26</span>.
+
+```
+# required N for +/-0.05 at 95% confidence, expected accuracy 0.85
 uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.85
   z            = 1.9600
   n (normal)   = 196
@@ -438,23 +356,25 @@ uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.85
 # what margin does the 8-row gold set buy?
 uv run python scripts/sample_size.py achieved --n 8 --confidence 0.95 --p 0.85
   half-width (normal) = +/-0.2474
-  half-width (Wilson) = +/-0.2329</code></pre>
-<p>It computes both the normal (Wald) approximation <code>n = z²·p(1−p)/m²</code>
-<span class="src">qaai/eval/sample_size.py:35-42</span> and the Wilson score interval, solving
-for the smallest N whose half-width ≤ margin <span class="src">qaai/eval/sample_size.py:50-68</span>,
-with an optional finite-population correction (<code>--population</code>). Textbook anchors:
-95% / ±0.05 / p=0.5 → 385; p=0.85 → 196.</p>
+  half-width (Wilson) = +/-0.2329
+```
+
+It computes both the normal (Wald) approximation `n = z²·p(1−p)/m²` <span class="src">qaai/eval/sample_size.py:35-42</span> and the Wilson score interval, solving for the smallest N whose half-width ≤ margin <span class="src">qaai/eval/sample_size.py:50-68</span>, with an optional finite-population correction (`--population`). Textbook anchors: 95% / ±0.05 / p=0.5 → 385; p=0.85 → 196.
+
 <div class="note warn"><strong>Size off <code>n_scored</code>, not <code>n_records</code>.</strong>
 A record whose prediction could not be extracted is skipped, so it contributes nothing to the
 accuracy estimate. A 400-record run with a 0.10 <code>skip_rate</code> buys you the confidence
 interval of 360 records, not 400. Check <code>skip_rate</code> before trusting that you hit your
 target N.</div>
+
 <div class="note warn"><strong>Scope.</strong> This sizes a <em>single</em> accuracy estimate.
 Detecting a <em>difference</em> between two prompt sets (A/B power) needs more samples than
 either single-model CI and is out of scope for this calculator.</div>
 
 <h2 id="layout">Package layout</h2>
-<p>The harness library and its drivers:</p>
+
+The harness library and its drivers:
+
 <table>
 <thead><tr><th>Path</th><th>Role</th></tr></thead>
 <tbody>
@@ -476,21 +396,9 @@ either single-model CI and is out of scope for this calculator.</div>
 <tr><td><code>plugins/qaai-mlflow-eval/</code></td><td>The plugin + five skills over the above</td></tr>
 <tr><td><code>tests/unit/eval/</code></td><td>Unit tests (scoring, spec, converters, sample-size) — no LLM</td></tr>
 </tbody></table>
-<p>Unit tests run without <code>.env</code> and cover scoring, spec extraction, converters, and
-the sample-size math <span class="src">tests/unit/eval/</span>:</p>
-<pre><code>uv run pytest tests/unit/eval -v</code></pre>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-07-17. · <a href="index.html">Docs home</a></footer>
-</main>
-</div>
-<script>
-  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
-  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
-  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
-    links.forEach(l=>l.classList.remove('active'));
-    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
-    {rootMargin:'-10% 0px -80% 0px'});
-  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
-</script>
-</body>
-</html>
+Unit tests run without `.env` and cover scoring, spec extraction, converters, and the sample-size math <span class="src">tests/unit/eval/</span>:
+
+```
+uv run pytest tests/unit/eval -v
+```
