@@ -111,6 +111,7 @@ def evaluate(
     mode: str,
     run_name: Optional[str] = None,
     experiment: Optional[str] = None,
+    model: Optional[str] = None,
     prompt_set: Optional[str] = None,
     max_concurrent: int = 10,
     limit: Optional[int] = None,
@@ -138,6 +139,7 @@ def evaluate(
 
     run_dir = Path(tempfile.mkdtemp(prefix="qaai_eval_"))
     cost: Optional[Dict[str, float]] = None
+    model_override = model  # capture the caller's override before `model` is reused for the resolved value
     model = "unknown"
     gt_source = "actual_labels"
     pred_dir: Optional[Path] = None
@@ -152,7 +154,9 @@ def evaluate(
         # flat projection. --limit truncates inputs and ground truth together.
         labels, gt_source = _ground_truth(spec, dataset, len(inputs))
         tracker = TokenUsageTracker(file_path=str(run_dir / "token_usage.jsonl"))
-        client, model = runners.build_client(allow_prod=allow_prod, telemetry_tracker=tracker)
+        client, model = runners.build_client(
+            allow_prod=allow_prod, telemetry_tracker=tracker, model_override=model_override
+        )
         outputs, latencies, completes, errors = asyncio.run(
             runners.run_and_collect(
                 spec.component, inputs,

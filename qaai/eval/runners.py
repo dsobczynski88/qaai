@@ -83,8 +83,17 @@ COMPONENTS: Dict[str, Component] = {
 }
 
 
-def build_client(allow_prod: bool = False, telemetry_tracker: Any = None) -> Tuple[Any, str]:
-    """Construct the rate-limited client from settings; guard against prod URLs."""
+def build_client(
+    allow_prod: bool = False,
+    telemetry_tracker: Any = None,
+    model_override: Optional[str] = None,
+) -> Tuple[Any, str]:
+    """Construct the rate-limited client from settings; guard against prod URLs.
+
+    The client's ``base_url``/``api_key`` always come from ``settings`` (one endpoint
+    typically serves many models). ``model_override`` swaps only the returned model
+    string, which is what gets logged and stamped into the prediction set metadata.
+    """
     from qaai.core.config import settings
     from qaai.agents.clients import RateLimitOpenAIClient
 
@@ -101,7 +110,7 @@ def build_client(allow_prod: bool = False, telemetry_tracker: Any = None) -> Tup
         max_tokens_per_minute=settings.max_tokens_per_minute,
         telemetry_tracker=telemetry_tracker,
     )
-    return client, settings.model
+    return client, (model_override or settings.model)
 
 
 async def run_and_collect(

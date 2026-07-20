@@ -34,6 +34,7 @@ def main() -> None:
     ap.add_argument("--actual-outputs", type=Path, help="Override path to actual_outputs.jsonl")
     ap.add_argument("--actual-labels", type=Path, help="Override path to actual_labels.jsonl")
     ap.add_argument("--mode", choices=("score", "run"), default="score")
+    ap.add_argument("--model", help="Override the model (run mode; default settings.model / API_MODEL)")
     ap.add_argument("--prompt-set", help="Override the spec's prompt_set (run mode)")
     ap.add_argument("--run-name")
     ap.add_argument("--experiment", help="Override the spec's experiment name")
@@ -58,6 +59,9 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    if args.model and args.mode == "score":
+        print("[mlflow] WARNING: --model is ignored in --mode score (no LLM client is built).")
+
     spec = load_spec(args.spec)
     dataset = load_dataset(
         args.dataset_dir,
@@ -71,6 +75,7 @@ def main() -> None:
         mode=args.mode,
         run_name=args.run_name,
         experiment=args.experiment,
+        model=args.model,
         prompt_set=args.prompt_set,
         max_concurrent=args.max_concurrent,
         limit=args.limit,
