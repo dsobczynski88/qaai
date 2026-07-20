@@ -84,15 +84,21 @@ def _write_prediction_set(
     inputs: List[Any],
     outputs: List[Any],
     metadata: Dict[str, Any],
+    timestamped: bool = True,
 ) -> Path:
-    """Persist one run's predictions as a timestamped, self-contained dataset fragment.
+    """Persist one run's predictions as a self-contained dataset fragment.
 
-    The ``predicted_*`` filenames inside the timestamped directory mirror the parent's
-    ``actual_*`` answer key, so the result is re-scorable with ``--mode score`` (pointing the
-    ``--actual-*`` flags at these files) without any special-casing. The inputs this run
-    scored are copied in too, so the folder stands alone.
+    The ``predicted_*`` filenames inside the directory mirror the parent's ``actual_*`` answer
+    key, so the result is re-scorable with ``--mode score`` (pointing the ``--actual-*`` flags at
+    these files) without any special-casing. The inputs this run scored are copied in too, so the
+    folder stands alone. ``timestamped`` appends a ``<ts>/`` subdir (the default single-run
+    convention); the sweep sets it False because it already supplies a unique per-arm dir.
     """
-    pred_dir = new_predictions_dir(base_dir)
+    if timestamped:
+        pred_dir = new_predictions_dir(base_dir)
+    else:
+        pred_dir = Path(base_dir)
+        pred_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(pred_dir / PREDICTED_INPUTS_NAME, inputs)
     (pred_dir / PREDICTED_OUTPUTS_NAME).write_text(
         "\n".join(json.dumps(o, default=_json_default) if o is not None else "null" for o in outputs) + "\n",
@@ -120,6 +126,7 @@ def evaluate(
     tracking_uri: Optional[str] = None,
     predictions_dir: Optional[Path] = None,
     save_predictions: bool = True,
+    predictions_timestamped: bool = True,
 ) -> Dict[str, Any]:
     """Run one evaluation study and log it as a single MLflow run.
 
@@ -177,7 +184,8 @@ def evaluate(
             if base:
                 pred_dir = _write_prediction_set(
                     Path(base), spec, inputs, outputs,
-                    {
+                    timestamped=predictions_timestamped,
+                    metadata={
                         "component": spec.component,
                         "spec": spec.name,
                         "model": model,
@@ -235,6 +243,12 @@ def evaluate(
         and nested.get("n_scored", 0) > 0
     )
 
+    # Per-record hard failures (e.g. a model id the endpoint 404s) were previously invisible;
+    # count them so an all-failed arm is loud instead of a green all-`null` run.
+    n_errors = sum(1 for e in (errors or []) if e)
+    first_error = next((e for e in (errors or []) if e), None)
+    all_records_failed = mode == "run" and n_errors > 0 and n_errors == len(outputs)
+
     with mlflow.start_run(run_name=run_name) as run:
         params = mr.build_params(
             spec, dataset, mode=mode, model=model, prompt_set=prompt_set,
@@ -245,8 +259,12 @@ def evaluate(
         tags = mr.build_tags(spec)
         if oracle_selftest:
             tags["oracle_selftest"] = "true"
+        if mode == "run":
+            tags["all_records_failed"] = str(all_records_failed).lower()
         mlflow.set_tags(tags)
         mlflow.log_metrics(flat)
+        if mode == "run":
+            mlflow.log_metric("error_rate", n_errors / max(1, len(outputs)))
         fixture_meta = {
             "spec": spec.name,
             "component": spec.component,
@@ -273,6 +291,9 @@ def evaluate(
         "metrics": flat,
         "n_records": len(records),
         "n_scored": nested.get("n_scored"),
+        "n_errors": n_errors,
+        "first_error": first_error,
+        "all_records_failed": all_records_failed,
         "artifacts_dir": str(run_dir),
         "predictions_dir": str(pred_dir) if pred_dir else None,
         "ground_truth_source": gt_source,

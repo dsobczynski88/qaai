@@ -7,9 +7,12 @@ Maps ``spec.component`` to the compiled LangGraph runnable, an input-state build
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
 
 EVAL_CACHE_MODE = "off"  # eval always re-runs; never reuse cached interim results
 
@@ -147,6 +150,10 @@ async def run_and_collect(
                 out = await runnable.graph.ainvoke(state, {"configurable": {"thread_id": f"eval-{i:04d}"}})
                 return i, out, time.perf_counter() - t0, bool(is_complete(out)), None
             except Exception as e:  # soft-fail one record, keep the batch alive
+                # Surface it: this list was previously collected and never logged, so an
+                # arm where every record failed (e.g. a model id the endpoint 404s) looked
+                # identical to a healthy run. Log at WARNING so it lands in the arm's console.
+                logger.warning("record %d failed: %s", i, repr(e))
                 return i, None, time.perf_counter() - t0, False, repr(e)
 
     results = await asyncio.gather(*(run_one(i, row) for i, row in enumerate(inputs)))

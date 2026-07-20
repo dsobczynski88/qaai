@@ -59,22 +59,27 @@ uv run mlflow ui
 python -m qaai.eval.compare eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/   # writes compare.html
 
 # 7. sweep models x prompt sets concurrently, ranked at the end (one MLflow run per arm)
+#    all arms hit ONE endpoint; a preflight aborts on any model id it can't reach.
 uv run python scripts/sweep.py \
   --spec eval/specs/test_suite_reviewer.yaml \
   --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
-  --models gpt-5-mini,claude-sonnet-5 --prompt-sets test_suite_reviewer_v3,test_suite_reviewer_v4 \
-  --experiment rtm-sweep --limit 20 --max-parallel-arms 4    # add --dry-run to preview the plan
+  --models gpt-5.4-mini,gpt-5-mini --prompt-sets test_suite_reviewer_v3,test_suite_reviewer_v4 \
+  --experiment rtm-sweep --limit 20 --max-parallel-arms 4    # --dry-run previews; --skip-unavailable-models drops unreachable ids
 ```
 
 **Model override & sweeps.** `evaluate_with_mlflow.py --model <id>` (run mode only) overrides
-`settings.model` on the logged `params.model` — `base_url`/`api_key` stay from settings (one
-endpoint, many models). `scripts/sweep.py` spawns one `--mode run` process per `--models` ×
-`--prompt-sets` cell (arm `<model>__<prompt_set>`) into a pre-created experiment, giving each arm a
-unique `--predictions-dir predictions/<experiment>/<arm>` and a divided `MAX_REQUESTS_PER_MINUTE`
-(so concurrent arms don't overwrite predictions or exceed the endpoint's RPM ceiling), then prints a
-ranking via `mlflow.search_runs`. ⚠ At n=20 the CI on `overall_f1` is wider than any plausible arm
-gap — treat sweeps as **plumbing/smoke, not selection** — and a bad answer key makes the ranking
-reward agreement with bad labels; fix label quality first.
+`settings.model` on the logged `params.model` — `base_url`/`api_key` stay from settings. **There is
+one endpoint (`settings.url` / `API_BASE_URL`) and no per-model provider routing**, so every model id
+must be served by it (e.g. `claude-*` on an OpenAI endpoint 404s). `scripts/sweep.py` first
+**preflights** each unique model (one 1-token ping) and **aborts before launching** if any is unserved
+(`--skip-unavailable-models` drops them instead) — the guard against a bad id silently producing an
+all-`null` arm. It then spawns one `--mode run` process per `--models` × `--prompt-sets` cell (arm
+`<model>__<prompt_set>`) into a pre-created experiment, each with a `--predictions-dir
+predictions/<sweep_ts>/<arm>` (one fresh timestamped folder per sweep) and a divided
+`MAX_REQUESTS_PER_MINUTE`, then prints a `mlflow.search_runs` ranking that marks any all-failed arm
+**FAILED** (via the harness's `error_rate` metric / `all_records_failed` tag). ⚠ At n=20 the CI on
+`overall_f1` is wider than any plausible arm gap — treat sweeps as **plumbing/smoke, not selection** —
+and a bad answer key makes the ranking reward agreement with bad labels; fix label quality first.
 
 **Predicted vs actual.** The committed `actual_outputs.jsonl` is the *answer key* (ACTUAL).
 `--mode run` produces the *predictions* and writes them to

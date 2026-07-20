@@ -34,6 +34,7 @@ Caveats (this is plumbing, not a selection oracle):
     agreement with bad labels. Fix label quality before trusting a ranking.
 """
 import argparse
+import asyncio
 import math
 import os
 import re
@@ -41,8 +42,9 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EVAL_CLI = REPO_ROOT / "scripts" / "evaluate_with_mlflow.py"
@@ -80,6 +82,9 @@ def _child_command(args: argparse.Namespace, arm: Arm, predictions_dir: Path) ->
         "--run-name", arm.name,
         "--max-concurrent", str(args.max_concurrent),
         "--predictions-dir", str(predictions_dir),
+        # The per-arm dir is already unique (<sweep_ts>/<arm>); skip the CLI's own <ts>/ subdir
+        # so predictions land at predictions/<sweep_ts>/<arm>/ instead of a redundant double ts.
+        "--no-timestamp-subdir",
         "--tracking-uri", args.tracking_uri,
     ]
     if args.limit is not None:
@@ -115,6 +120,31 @@ def _resolve_rpm(n_concurrent: int) -> int:
     return max(1, math.floor(settings.max_requests_per_minute / max(1, n_concurrent)))
 
 
+def preflight_models(models: List[str], allow_prod: bool) -> Dict[str, Optional[str]]:
+    """Ping each unique model once against the configured endpoint.
+
+    Every arm targets the single settings-derived endpoint (base_url/api_key), so a model
+    id it doesn't serve (e.g. an Anthropic id on an OpenAI endpoint) 404s on every record and
+    silently yields all-null. Catch that in ~1 cheap call. Returns {model: None if served else
+    error-repr}. No token cap is sent — some models require max_completion_tokens vs max_tokens,
+    and a 404 for an unserved model raises before any token param matters.
+    """
+    from qaai.eval import runners
+
+    async def _check(client, model: str) -> Optional[str]:
+        try:
+            await client.chat_completion(model=model, messages=[{"role": "user", "content": "ping"}])
+            return None
+        except Exception as e:  # noqa: BLE001 — any failure means "don't spend a full arm on it"
+            return repr(e)
+
+    async def _run() -> Dict[str, Optional[str]]:
+        client, _ = runners.build_client(allow_prod=allow_prod)
+        return {m: await _check(client, m) for m in dict.fromkeys(models)}
+
+    return asyncio.run(_run())
+
+
 def _rank_and_report(experiment: str, tracking_uri: str) -> None:
     import mlflow
 
@@ -123,13 +153,24 @@ def _rank_and_report(experiment: str, tracking_uri: str) -> None:
     if df is None or df.empty:
         print(f"[sweep] no MLflow runs found under experiment {experiment!r}.")
         return
+    # Flag degenerate arms (every record failed / skipped) so they can't sit in the table
+    # looking comparable to a real result.
+    if "tags.all_records_failed" in df.columns:
+        df["status"] = df["tags.all_records_failed"].map(
+            lambda v: "FAILED" if str(v).lower() == "true" else "ok"
+        )
+    elif "metrics.skip_rate" in df.columns:
+        df["status"] = df["metrics.skip_rate"].map(lambda v: "FAILED" if v == 1.0 else "ok")
     cols = [
         ("tags.mlflow.runName", "run"),
+        ("status", "status"),
         ("params.model", "model"),
         ("params.prompt_set", "prompt_set"),
         ("metrics.overall_f1", "overall_f1"),
         ("metrics.rubric_macro_f1", "rubric_macro_f1"),
         ("metrics.exact_match_rate", "exact_match"),
+        ("metrics.error_rate", "error_rate"),
+        ("metrics.skip_rate", "skip_rate"),
         ("metrics.estimated_cost_usd", "cost_usd"),
     ]
     present = [(src, label) for src, label in cols if src in df.columns]
@@ -137,7 +178,7 @@ def _rank_and_report(experiment: str, tracking_uri: str) -> None:
     view.columns = [label for _, label in present]
     if "overall_f1" in view.columns:
         view = view.sort_values("overall_f1", ascending=False, na_position="last")
-    print("\n[sweep] ranking (by overall_f1 desc):")
+    print("\n[sweep] ranking (by overall_f1 desc; FAILED = every record errored/skipped):")
     print(view.to_string(index=False))
 
 
@@ -157,19 +198,49 @@ def main() -> int:
         default=os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
         help="MLflow tracking URI (default file:./mlruns)",
     )
+    ap.add_argument(
+        "--skip-unavailable-models",
+        action="store_true",
+        help="Drop models the preflight can't reach instead of aborting the whole sweep",
+    )
     ap.add_argument("--dry-run", action="store_true", help="Print the plan (command + env + dir) and exit")
     args = ap.parse_args()
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     prompt_sets = [p.strip() for p in args.prompt_sets.split(",") if p.strip()]
+
+    # Preflight (Part 3): fail fast on a model id the endpoint doesn't serve, before spending
+    # a full arm per (model x prompt_set) producing silent all-null output.
+    status = preflight_models(models, allow_prod=args.allow_prod)
+    served = [m for m in models if status[m] is None]
+    unserved = {m: status[m] for m in models if status[m] is not None}
+    print("[sweep] preflight:")
+    for m in models:
+        print(f"  {'OK  ' if status[m] is None else 'FAIL'} {m}"
+              + (f"  -> {status[m]}" if status[m] else ""))
+    if unserved:
+        if args.skip_unavailable_models:
+            print(f"[sweep] dropping unserved models: {', '.join(unserved)}")
+            models = served
+        else:
+            print(f"[sweep] ABORT: {len(unserved)} model(s) not served by this endpoint. "
+                  f"Pass --skip-unavailable-models to run the rest, or fix the model ids.")
+            return 2
+    if not models:
+        print("[sweep] no served models remain — nothing to do.")
+        return 2
+
     grid = build_grid(models, prompt_sets)
     if not grid:
         print("[sweep] empty grid — nothing to do.")
         return 1
 
+    from qaai.core.logging_config import US_CENTRAL
+    sweep_ts = datetime.now(tz=US_CENTRAL).strftime("%Y-%m-%d_%H-%M-%S")
     n_concurrent = min(args.max_parallel_arms, len(grid))
     per_arm_rpm = _resolve_rpm(n_concurrent)
-    preds_root = args.dataset_dir / "predictions" / _slug(args.experiment)
+    # One fresh timestamped predictions folder per sweep run; arms are collision-free subdirs.
+    preds_root = args.dataset_dir / "predictions" / sweep_ts
     log_root = REPO_ROOT / "logs" / f"sweep-{_slug(args.experiment)}"
 
     plan = []
