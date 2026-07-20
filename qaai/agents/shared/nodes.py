@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 # can be toggled from within methods.
 _json_mode = {"supported": True}
 
+# Process-cached timestamped run dir for failed-parse dumps when no logging
+# FileHandler is attached (eval/CLI/script processes). Created lazily by
+# BaseLLMNode._fallback_run_dir() on the first dump; None until then.
+_FALLBACK_RUN_DIR: Optional[Path] = None
+
 
 class CacheRequiredError(RuntimeError):
     """Raised in cache mode "test" when a node would have to call the LLM.
@@ -327,8 +332,11 @@ class BaseLLMNode(ABC):
         """Best-effort resolve the active run directory (logs/run-<ts>/).
 
         Derived from the 'qaai' logger's FileHandler (set per run by
-        setup_logging()); falls back to the parent of the configured log path,
-        then to ./logs. Never raises — diagnostics must not break parsing.
+        setup_logging(), as the API/UI do); when none is attached (eval/CLI/script
+        processes) falls back to a process-cached, lazily-created timestamped
+        logs/run-<ts>/ folder so dumps still co-locate like an API/UI run instead
+        of scattering into bare ./logs. Never raises — diagnostics must not break
+        parsing.
         """
         try:
             qlog = logging.getLogger("qaai")
@@ -339,10 +347,19 @@ class BaseLLMNode(ABC):
         except Exception:
             pass
         try:
-            from qaai.core.config import settings
-            return Path(settings.log_file_path).parent
+            return BaseLLMNode._fallback_run_dir()
         except Exception:
             return Path("./logs")
+
+    @staticmethod
+    def _fallback_run_dir() -> Path:
+        """A single timestamped logs/run-<ts>/ folder for this process, created on
+        first use (so a clean run that never dumps creates nothing)."""
+        global _FALLBACK_RUN_DIR
+        if _FALLBACK_RUN_DIR is None:
+            from qaai.core.logging_config import create_timestamped_run_directory
+            _FALLBACK_RUN_DIR = create_timestamped_run_directory()
+        return _FALLBACK_RUN_DIR
 
     @staticmethod
     def _dump_failed_parse(node_name: str, content: Optional[str]) -> Optional[str]:
