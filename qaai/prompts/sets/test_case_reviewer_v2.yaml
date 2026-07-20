@@ -13,4 +13,3 @@ prompts:
   single_test_prereqs: v3.0.0
 status: production
 authored: '2025-05-14'
-parent_set: test_case_reviewer_v1

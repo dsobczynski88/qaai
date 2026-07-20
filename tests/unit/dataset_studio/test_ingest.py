@@ -22,7 +22,12 @@ from qaai.dataset_studio.ingest import (
     write_ingested,
 )
 from qaai.dataset_studio.registry import dataset_type_for, load_type_spec
-from qaai.dataset_studio.scaffold import ANSWER_KEY_SUBDIR, DESCRIPTION_NAME, EDITS_LOG_NAME
+from qaai.dataset_studio.scaffold import (
+    ANSWER_KEY_SUBDIR,
+    DESCRIPTION_NAME,
+    EDITS_LOG_NAME,
+    new_dataset_dir,
+)
 from qaai.dataset_studio.validate import validate_dataset
 
 pytestmark = pytest.mark.unit
@@ -258,6 +263,93 @@ def test_ingest_never_touches_the_source_run(tmp_path, run_dir):
     before = {p.name: p.read_bytes() for p in run_dir.iterdir()}
     write_ingested(ingest_run(run_dir), base_dir=tmp_path)
     assert {p.name: p.read_bytes() for p in run_dir.iterdir()} == before
+
+
+# ── appending (accumulating runs into one growing set) ───────────────────────
+
+def _make_run(d, req_ids):
+    """A logs/run-<ts>/ folder holding one RTM state per req id."""
+    states = [_rtm_state(r) for r in req_ids]
+    _write(d / "outputs.jsonl", states)
+    _write(d / "inputs.jsonl",
+           [{"requirement": s["requirement"], "test_cases": s["test_cases"]} for s in states])
+    return d
+
+
+def _line_counts(dataset_dir):
+    return {
+        name: len((dataset_dir / name).read_text(encoding="utf-8").strip().splitlines())
+        for name in ("actual_inputs.jsonl", "actual_outputs.jsonl", "actual_labels.jsonl")
+    }
+
+
+def test_append_accumulates_rows_and_keeps_the_files_aligned(tmp_path, run_dir):
+    # Run A -> a fresh dataset; then run B appended onto it.
+    base = write_ingested(ingest_run(run_dir, reviewer="tester"), base_dir=tmp_path, reviewer="tester")
+    desc_before = (base / DESCRIPTION_NAME).read_bytes()
+
+    run_b = _make_run(tmp_path / "logs" / "run-b", ["REQ-4", "REQ-5"])
+    out = write_ingested(ingest_run(run_b, reviewer="tester"), append_to=base, reviewer="tester")
+    assert out == base
+
+    counts = _line_counts(base)
+    assert counts["actual_inputs.jsonl"] == 5          # 3 + 2, no V002
+    assert len(set(counts.values())) == 1              # all three files equal length
+
+    req_ids = [json.loads(l)["requirement"]["req_id"]
+               for l in (base / "actual_inputs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert req_ids == ["REQ-1", "REQ-2", "REQ-3", "REQ-4", "REQ-5"]
+
+    # The existing, human-reviewable description.md is preserved, not clobbered.
+    assert (base / DESCRIPTION_NAME).read_bytes() == desc_before
+    # A timestamped provenance sidecar records the append without overwriting source.json.
+    assert list(base.glob("source.*.json"))
+
+    records = read_edits(base)
+    assert [r.action for r in records] == ["ingest", "ingest"]
+    assert records[1].note.startswith("append rows=2 total=5")
+
+    report = validate_dataset(base, dataset_type="test_suite")
+    assert report.n_errors == 0, report.to_text()
+
+
+def test_append_onto_an_empty_scaffold_behaves_like_a_plain_write(tmp_path, run_dir):
+    empty = new_dataset_dir("test_suite", tmp_path)   # fresh dir, no actual_* files yet
+    result = ingest_run(run_dir)
+    out = write_ingested(result, append_to=empty)
+
+    assert out == empty
+    assert _line_counts(empty)["actual_inputs.jsonl"] == result.n_records == 3
+    assert validate_dataset(empty, dataset_type="test_suite").n_errors == 0
+
+
+def test_append_refuses_a_type_mismatch(tmp_path, run_dir):
+    # A target whose path resolves to a different reviewer type must be rejected.
+    hazard_dir = new_dataset_dir("hazard", tmp_path)
+    with pytest.raises(IngestError, match="cannot append test_suite rows onto a hazard"):
+        write_ingested(ingest_run(run_dir), append_to=hazard_dir)
+
+
+def test_write_ingested_refuses_append_and_out_together(tmp_path, run_dir):
+    with pytest.raises(IngestError, match="not both"):
+        write_ingested(ingest_run(run_dir), out_dir=tmp_path / "x", append_to=tmp_path / "y")
+
+
+def test_cli_append_accumulates_and_reports(tmp_path, run_dir, capsys):
+    base = write_ingested(ingest_run(run_dir), base_dir=tmp_path)
+    run_b = _make_run(tmp_path / "logs" / "run-b", ["REQ-9"])
+
+    code = main(["ingest", str(run_b), "--append", str(base)])
+    assert code == EXIT_OK
+    assert "appended 1 rows" in capsys.readouterr().out
+    assert _line_counts(base)["actual_inputs.jsonl"] == 4
+
+
+def test_cli_append_and_out_conflict(tmp_path, run_dir, capsys):
+    code = main(["ingest", str(run_dir), "--append", str(tmp_path / "a"),
+                 "--out", str(tmp_path / "b")])
+    assert code == EXIT_USAGE
+    assert "not both" in capsys.readouterr().err
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────

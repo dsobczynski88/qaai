@@ -155,6 +155,22 @@ def pytest_generate_tests(metafunc):
     metafunc.parametrize("row", rows, ids=ids)
 
 
+@pytest.fixture(autouse=True)
+def _redirect_failed_parse_dumps(tmp_path, monkeypatch):
+    """Keep failed-parse dumps out of the repo's ./logs during tests.
+
+    Tests that exercise the parse path with malformed payloads (e.g.
+    test_malformed_replay, test_batched_node_completeness) otherwise trigger
+    BaseLLMNode._dump_failed_parse, which writes real files. Point _run_dir() at a
+    per-test tmp dir so they land there instead. Assertions check the parse result,
+    not the dump location, so this is transparent.
+    """
+    monkeypatch.setattr(
+        "qaai.agents.shared.nodes.BaseLLMNode._run_dir",
+        staticmethod(lambda: tmp_path),
+    )
+
+
 @pytest.fixture(scope="session")
 def test_run_dir():
     """Single per-session run folder under logs/tests for integration artifacts.

@@ -33,11 +33,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from qaai.dataset_studio.editlog import EditRecord, append_edits, now_stamp
+from qaai.dataset_studio.editor import build_rows
 from qaai.dataset_studio.registry import (
     DATASET_TYPES,
     DatasetTypeInfo,
     assessment_key,
     dataset_type_for,
+    infer_dataset_type,
     load_type_spec,
 )
 from qaai.dataset_studio.scaffold import (
@@ -47,7 +49,13 @@ from qaai.dataset_studio.scaffold import (
     new_dataset_dir,
 )
 from qaai.dataset_studio.writer import write_dataset_atomic
-from qaai.eval.datasets import load_jsonl, outputs_to_labels
+from qaai.eval.datasets import (
+    ACTUAL_INPUTS_NAME,
+    ACTUAL_LABELS_NAME,
+    ACTUAL_OUTPUTS_NAME,
+    load_jsonl,
+    outputs_to_labels,
+)
 from qaai.eval.spec import EvalSpec, get_path
 
 __all__ = [
@@ -308,14 +316,98 @@ def _skipped_items(
 
 # ── write ───────────────────────────────────────────────────────────────────
 
+def _load_or_empty(path: Path) -> List[Dict[str, Any]]:
+    """Read a JSONL file, or return ``[]`` when it is absent (a fresh-scaffold dir)."""
+    return load_jsonl(path) if path.is_file() else []
+
+
+def _append_ingested(
+    result: IngestResult, target: Path, reviewer: Optional[str]
+) -> Path:
+    """Append ``result.rows`` onto an existing dataset, preserving its reviewed labels.
+
+    The existing rows and their (already human-corrected) labels are kept; the new rows
+    land after them and the whole set is re-indexed contiguously. Provenance and
+    ``description.md`` are *not* clobbered — a human-reviewed ``description.md`` survives
+    and each append drops its own timestamped ``source.<ts>.json`` sidecar — so the
+    accumulating set never loses the history of what it already was.
+    """
+    if not target.is_dir():
+        raise IngestError(f"--append target is not a directory: {target}")
+
+    existing_type = infer_dataset_type(target)
+    if existing_type is not None and existing_type != result.dataset_type:
+        raise IngestError(
+            f"cannot append {result.dataset_type} rows onto a {existing_type} dataset: {target}"
+        )
+
+    existing = build_rows(
+        _load_or_empty(target / ACTUAL_INPUTS_NAME),
+        _load_or_empty(target / ACTUAL_OUTPUTS_NAME),
+        _load_or_empty(target / ACTUAL_LABELS_NAME),
+    )
+    combined: List[Dict[str, Any]] = existing + [dict(r) for r in result.rows]
+    for i, row in enumerate(combined):
+        row["index"] = i
+
+    write_dataset_atomic(target, combined)
+
+    # Provenance sidecar, timestamped so repeated appends never collide or clobber.
+    # now_stamp() is ISO-8601 (colons, offset) — sanitize it for a cross-platform filename.
+    stamp = result.provenance.get("ingested_at") or now_stamp()
+    safe_stamp = "".join(c if (c.isalnum() or c in "-_") else "-" for c in stamp)
+    sidecar = {
+        **result.provenance,
+        "appended_to": str(target.resolve()),
+        "n_rows_appended": result.n_records,
+        "n_total_after_append": len(combined),
+    }
+    (target / f"source.{safe_stamp}.json").write_text(
+        json.dumps(sidecar, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    if not (target / DESCRIPTION_NAME).exists():
+        (target / DESCRIPTION_NAME).write_text(_description(result, target), encoding="utf-8")
+
+    log = target / EDITS_LOG_NAME
+    if not log.exists():
+        log.write_text(EDITS_LOG_HEADER, encoding="utf-8")
+    append_edits(
+        target,
+        [
+            EditRecord(
+                action="ingest",
+                by=reviewer or result.provenance.get("ingested_by") or "",
+                note=(
+                    f"append rows={result.n_records} total={len(combined)} "
+                    f"type={result.dataset_type} "
+                    f"from={result.provenance.get('source_outputs_path')}"
+                ),
+            )
+        ],
+    )
+    return target
+
+
 def write_ingested(
     result: IngestResult,
     *,
     out_dir: Optional[Union[str, Path]] = None,
+    append_to: Optional[Union[str, Path]] = None,
     base_dir: Union[str, Path] = "eval/datasets",
     reviewer: Optional[str] = None,
 ) -> Path:
-    """Write the ingested rows into a fresh timestamped dataset directory."""
+    """Write the ingested rows into a dataset directory.
+
+    ``append_to`` adds the rows onto an existing dataset (keeping its reviewed labels);
+    ``out_dir`` writes to that exact directory (overwriting all three files); with
+    neither, a fresh timestamped directory is created. ``append_to`` and ``out_dir``
+    are mutually exclusive.
+    """
+    if append_to is not None:
+        if out_dir is not None:
+            raise IngestError("pass either append_to or out_dir, not both")
+        return _append_ingested(result, Path(append_to), reviewer)
+
     if out_dir is not None:
         target = Path(out_dir)
         target.mkdir(parents=True, exist_ok=True)

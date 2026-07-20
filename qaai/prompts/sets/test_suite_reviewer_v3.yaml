@@ -14,4 +14,3 @@ prompts:
   design_summarizer: v1.0.0
 status: experimental
 authored: "2026-06-06"
-parent_set: test_suite_reviewer_v2

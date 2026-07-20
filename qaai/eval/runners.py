@@ -7,9 +7,12 @@ Maps ``spec.component`` to the compiled LangGraph runnable, an input-state build
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
 
 EVAL_CACHE_MODE = "off"  # eval always re-runs; never reuse cached interim results
 
@@ -83,8 +86,17 @@ COMPONENTS: Dict[str, Component] = {
 }
 
 
-def build_client(allow_prod: bool = False, telemetry_tracker: Any = None) -> Tuple[Any, str]:
-    """Construct the rate-limited client from settings; guard against prod URLs."""
+def build_client(
+    allow_prod: bool = False,
+    telemetry_tracker: Any = None,
+    model_override: Optional[str] = None,
+) -> Tuple[Any, str]:
+    """Construct the rate-limited client from settings; guard against prod URLs.
+
+    The client's ``base_url``/``api_key`` always come from ``settings`` (one endpoint
+    typically serves many models). ``model_override`` swaps only the returned model
+    string, which is what gets logged and stamped into the prediction set metadata.
+    """
     from qaai.core.config import settings
     from qaai.agents.clients import RateLimitOpenAIClient
 
@@ -101,7 +113,7 @@ def build_client(allow_prod: bool = False, telemetry_tracker: Any = None) -> Tup
         max_tokens_per_minute=settings.max_tokens_per_minute,
         telemetry_tracker=telemetry_tracker,
     )
-    return client, settings.model
+    return client, (model_override or settings.model)
 
 
 async def run_and_collect(
@@ -138,6 +150,10 @@ async def run_and_collect(
                 out = await runnable.graph.ainvoke(state, {"configurable": {"thread_id": f"eval-{i:04d}"}})
                 return i, out, time.perf_counter() - t0, bool(is_complete(out)), None
             except Exception as e:  # soft-fail one record, keep the batch alive
+                # Surface it: this list was previously collected and never logged, so an
+                # arm where every record failed (e.g. a model id the endpoint 404s) looked
+                # identical to a healthy run. Log at WARNING so it lands in the arm's console.
+                logger.warning("record %d failed: %s", i, repr(e))
                 return i, None, time.perf_counter() - t0, False, repr(e)
 
     results = await asyncio.gather(*(run_one(i, row) for i, row in enumerate(inputs)))

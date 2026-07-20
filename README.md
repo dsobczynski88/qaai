@@ -16,6 +16,139 @@ All three reviewers cite the artifact IDs that support each finding, return shor
 
 ---
 
+## Quick Commands
+
+A scannable lookup for the everyday workflows. Each block is copy-pasteable; deep links point to the
+full guide. See [Getting Started](#getting-started) and the [docs](docs/index.html) for detail.
+
+### Prerequisites & environment
+
+```bash
+uv sync --frozen                      # install deps (pyjama vendored at libs/pyjama, editable)
+# .env in the repo root:  API_KEY / API_BASE_URL / API_MODEL   (+ JAMA creds only for live baseline reviews)
+```
+
+Any OpenAI-compatible endpoint works (OpenAI / Ollama / vLLM / Bedrock). Full env-var reference →
+[Configuration Guide](docs/configuration.html).
+
+### Start the server
+
+```bash
+uv run uvicorn qaai.api.main:app --reload   # dev: auto-reload;  app at http://localhost:8000/ , docs at /docs
+uv run qaai-api                             # console script (no reload)
+pwsh scripts/startup.ps1                     # Windows helper
+bash scripts/startup.sh                      # JupyterHub-vs-local autodetect
+```
+
+The Vue SPA ships prebuilt in `qaai/web/dist`. To rebuild it: `cd qaai/web && npm run build`.
+
+### Run a review — web UI
+
+Start the server, open `http://localhost:8000/`, pick a reviewer, and submit. The page runs the
+`202 → poll → download` job flow for you and renders the HTML report inline.
+
+### Run a review — CLI (no browser)
+
+The three endpoints are asynchronous: `POST` returns `202 + {job_id}`, then you poll and download
+(full walk-through under [Asynchronous job flow](#asynchronous-job-flow)).
+
+```bash
+JOB=$(curl -s -X POST http://localhost:8000/api/v1/test-suite-review \
+  -H "Content-Type: application/json" \
+  -d '{"baseline_id": "BASE-84429", "use_cache": true}' | jq -r .job_id)
+curl -s http://localhost:8000/api/v1/jobs/$JOB                       # poll until "completed"
+curl -s http://localhost:8000/api/v1/jobs/$JOB/result -o report.html # download
+```
+
+The same submit→poll→download pattern applies to `test-case-review` (JSON body) and the multipart
+`hazard-risk-review`.
+
+### Run tests
+
+```bash
+uv run pytest -m "not integration"           # unit + API — no LLM calls
+uv run pytest -m integration -s              # real LLM calls; needs .env
+uv run pytest tests/unit -v                  # unit suite only
+uv run pytest --collect-only --test-catalog  # searchable HTML catalog of the suite; runs nothing
+```
+
+### View run results
+
+```bash
+# Each run writes logs/run-<ts>/ with qaai.log, graph png, inputs/outputs.jsonl, token_usage.jsonl,
+# and a self-contained viewer.html / viewer_tc.html / viewer_hz.html — open it in a browser.
+uv run python -m qaai.viewer logs/run-<ts>/outputs.jsonl --type rtm   # regenerate (rtm | tc | hz)
+```
+
+### Create a baseline WITHOUT JAMA
+
+**The reviewer graphs never call JAMA — JAMA is only the data source.** Each graph consumes a plain
+requirement + test-cases object, so a "baseline" is just a hand-authored inputs file and the whole
+pipeline (decompose → evaluate per spec → synthesize → viewer) runs with zero JAMA connectivity.
+
+**Recommended — drive the real graph via the eval harness (fully offline data path):**
+
+```bash
+# 1. Author a baseline: one JSON object per requirement, in graph-input shape. Copy the committed
+#    pilot as a template:  eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_inputs.jsonl
+#    Each line looks like:  {"requirement": {"req_id": "...", "text": "..."}, "test_cases": [ {...} ]}
+DIR=$(uv run python -m qaai.dataset_studio new --type test_suite --quiet)
+#    ...hand-write actual_inputs.jsonl in $DIR (one requirement per line).
+
+# 2. Run the reviewer graph over it (needs LLM creds only — no JAMA):
+uv run python scripts/evaluate_with_mlflow.py --spec eval/specs/test_suite_reviewer.yaml \
+  --dataset-dir "$DIR" --mode run --limit 20
+
+# 3. Render the same report the API produces, from the run's predictions:
+uv run python -m qaai.viewer "$DIR"/predictions/<ts>/predicted_outputs.jsonl --type rtm
+```
+
+Analogous shapes exist for `--type test_case` and `--type hazard`; use their specs under
+`eval/specs/`. To instead exercise the **API endpoint + `baseline_id`** offline, seed the pyjama disk
+cache under `shared/source/baselines/<baseline_id>/` and POST with `test_mode=true` (cache-only; a
+miss is a hard error). Those files are raw JAMA responses, so the practical route is to capture them
+once from a real fetch and replay — see [Caching](docs/design/caching.html) and the
+[API Guide](docs/api.html).
+
+### Build a labeled dataset from old runs
+
+Turn completed runs into one growing, human-labeled eval set — the answer key the harness scores.
+
+```bash
+uv run python -m qaai.dataset_studio ingest logs/run-<ts> --edit            # run -> reviewable set; patch labels in the browser
+uv run python -m qaai.dataset_studio ingest logs/run-<ts2> \
+  --append eval/datasets/test_suite/actual/<ts>                             # accumulate more runs into the SAME set
+uv run python -m qaai.dataset_studio validate eval/datasets/test_suite/actual/<ts>   # must exit 0
+```
+
+Ingested labels start as **the model's own answers (UNREVIEWED)** — correct them in the editor. One
+dataset row is emitted per *output* row; `--append` preserves the existing rows and their reviewed
+labels and drops a timestamped `source.<ts>.json` provenance sidecar. Details →
+[MLflow Evaluation](docs/mlflow.html).
+
+### Author a prompt → score it with an MLflow experiment
+
+```bash
+# 1. New prompt version — copy a sibling version dir, bump `version`, set `parent_version`, edit both files:
+#    qaai/prompts/<role>/<vX.Y.Z>/{template.jinja2, meta.yaml}
+# 2. New prompt set pinning it — `name:` = filename stem; optional `parent_set` must name a surviving set:
+#    qaai/prompts/sets/<new_set>.yaml
+# 3a. Score one arm:
+uv run python scripts/evaluate_with_mlflow.py --spec eval/specs/test_suite_reviewer.yaml \
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --mode run --prompt-set <new_set> --limit 20
+# 3b. …or sweep it against the baseline (one MLflow run per model x prompt-set cell, ranked):
+uv run python scripts/sweep.py --spec eval/specs/test_suite_reviewer.yaml \
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --models gpt-5-mini --prompt-sets <new_set>,test_suite_reviewer_v3 --experiment my-sweep --limit 20
+uv run mlflow ui                                                            # browse runs + per-template SHA provenance
+```
+
+Prompt registry, sets, and versioning → [Configuration Guide](docs/configuration.html) and
+[Prompt Design](docs/design/prompt_design.html).
+
+---
+
 ## Pipeline Architecture
 
 Every reviewer is a LangGraph `StateGraph` that fans out via the `Send` API for maximum parallelism, then fans back in via `operator.add` reducers before a synthesizer node aggregates findings against the rubric. Each run also writes a Mermaid graph PNG (`graph.png`, `tc_graph.png`, or `hazard_graph.png`) into the run's log folder alongside `qaai.log`. The per-reviewer graph topologies are documented in the [design docs](docs/index.html) under `docs/design/`.

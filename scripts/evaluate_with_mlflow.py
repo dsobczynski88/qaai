@@ -18,6 +18,7 @@ Examples:
         --prompt-set test_suite_reviewer_v4 --max-concurrent 5 --limit 20
 """
 import argparse
+import logging
 import os
 from pathlib import Path
 
@@ -34,6 +35,7 @@ def main() -> None:
     ap.add_argument("--actual-outputs", type=Path, help="Override path to actual_outputs.jsonl")
     ap.add_argument("--actual-labels", type=Path, help="Override path to actual_labels.jsonl")
     ap.add_argument("--mode", choices=("score", "run"), default="score")
+    ap.add_argument("--model", help="Override the model (run mode; default settings.model / API_MODEL)")
     ap.add_argument("--prompt-set", help="Override the spec's prompt_set (run mode)")
     ap.add_argument("--run-name")
     ap.add_argument("--experiment", help="Override the spec's experiment name")
@@ -52,11 +54,31 @@ def main() -> None:
         help="Do not persist a prediction set (run mode); outputs stay in MLflow artifacts only",
     )
     ap.add_argument(
+        "--no-timestamp-subdir",
+        action="store_true",
+        help="Write predictions directly into --predictions-dir (no <ts>/ subdir). Used by the sweep, "
+             "which already supplies a unique per-arm dir.",
+    )
+    ap.add_argument(
         "--tracking-uri",
         default=os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"),
         help="MLflow tracking URI (default file:./mlruns)",
     )
+    ap.add_argument(
+        "--log-level",
+        default="INFO",
+        help="Console log level for the qaai loggers (default INFO; DEBUG surfaces node skips)",
+    )
     args = ap.parse_args()
+
+    # Without this the eval process attaches no log handlers, so node warnings and
+    # per-record failures are invisible (the reason a bad-model arm looked like a black box).
+    from qaai.core.logging_config import bootstrap_console_logging
+    bootstrap_console_logging()
+    logging.getLogger("qaai").setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
+
+    if args.model and args.mode == "score":
+        print("[mlflow] WARNING: --model is ignored in --mode score (no LLM client is built).")
 
     spec = load_spec(args.spec)
     dataset = load_dataset(
@@ -71,6 +93,7 @@ def main() -> None:
         mode=args.mode,
         run_name=args.run_name,
         experiment=args.experiment,
+        model=args.model,
         prompt_set=args.prompt_set,
         max_concurrent=args.max_concurrent,
         limit=args.limit,
@@ -79,12 +102,21 @@ def main() -> None:
         tracking_uri=args.tracking_uri,
         predictions_dir=args.predictions_dir,
         save_predictions=not args.no_save_predictions,
+        predictions_timestamped=not args.no_timestamp_subdir,
     )
 
     m = summary["metrics"]
     print(f"[mlflow] experiment={summary['experiment']} run_id={summary['run_id']}")
     print(f"[mlflow] records={summary['n_records']} scored={summary['n_scored']} "
           f"skip_rate={m.get('skip_rate', 0):.3f}")
+    if args.mode == "run":
+        print(f"[mlflow] errors={summary.get('n_errors', 0)}/{summary['n_records']}")
+    if summary.get("all_records_failed"):
+        print(
+            f"[mlflow] WARNING: every record failed — no real predictions were produced. "
+            f"Check the model id ({args.model or 'settings.model'}) is served by this endpoint. "
+            f"first error: {summary.get('first_error')}"
+        )
     if "overall_accuracy" in m:
         print(f"[mlflow] overall_accuracy={m['overall_accuracy']:.3f} "
               f"overall_f1={m.get('overall_f1', float('nan')):.3f} "
