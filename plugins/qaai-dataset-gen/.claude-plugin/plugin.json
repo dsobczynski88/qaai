@@ -1,0 +1,10 @@
+{
+  "name": "qaai-dataset-gen",
+  "version": "0.2.0",
+  "description": "Generate, ingest, validate, and human-review labelled eval datasets for the QAAI reviewer pipelines: author grounded records for the RTM / test-case / hazard rubrics or convert a completed review run into a dataset, check every row against the live Pydantic models, and correct both inputs and outputs in a browser editor with an append-only audit log of every change and reviewer note.",
+  "author": {
+    "name": "Daniel Sobczynski",
+    "email": "dsobczynski88@gmail.com"
+  },
+  "keywords": ["dataset", "evaluation", "labelling", "langgraph", "llm-eval", "quality-assurance"]
+}

@@ -35,12 +35,21 @@ mlflow.db
 mlruns/
 eval/datasets/test_suite/*
 !eval/datasets/test_suite/.gitkeep
-# The committed RTM pilot (answer key); predictions/ stays ignored via the glob above.
-!eval/datasets/test_suite/actual_inputs.jsonl
-!eval/datasets/test_suite/actual_outputs.jsonl
-!eval/datasets/test_suite/actual_labels.jsonl
-!eval/datasets/test_suite/source_gold.jsonl
-!eval/datasets/test_suite/description.md
+# The committed RTM pilot (answer key), revision 1, at actual/<ts>/.
+# Git will not descend into an excluded directory, so each level has to be re-included
+# before its children can be allowlisted - hence the alternating !dir/ , dir/* pairs.
+# The timestamp is named explicitly rather than re-including actual/ wholesale: every
+# other revision under it is an unreviewed working set and must stay out of the repo.
+!eval/datasets/test_suite/actual/
+eval/datasets/test_suite/actual/*
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/
+eval/datasets/test_suite/actual/2026-07-17_12-01-00/*
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_inputs.jsonl
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_outputs.jsonl
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_labels.jsonl
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/source_gold.jsonl
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md
+!eval/datasets/test_suite/actual/2026-07-17_12-01-00/edits.log
 eval/datasets/test_case/*
 !eval/datasets/test_case/.gitkeep
 eval/datasets/hazard/*
@@ -110,6 +119,10 @@ cover/
 
 # Django stuff:
 *.log
+# ...but a dataset's edits.log is its audit trail, not a runtime log: it is the record of
+# who changed which label and why. This negation sits after *.log because the last
+# matching pattern wins, so re-including it earlier (with the pilot allowlist) would not.
+!eval/datasets/**/edits.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -258,5 +271,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-# Eval run outputs (regenerable; also logged as MLflow artifacts)
-eval/datasets/*/predictions/
+# Eval run outputs (regenerable; also logged as MLflow artifacts).
+# ** rather than *: predictions now hang off the revision they scored, at
+# <type>/actual/<ts>/predictions/, which a single-level glob would not match.
+eval/datasets/**/predictions/

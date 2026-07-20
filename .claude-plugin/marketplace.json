@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "qaai-mlflow-eval",
-  "description": "Local marketplace for the QAAI MLflow evaluation plugin.",
+  "description": "Local marketplace for the QAAI evaluation plugins (dataset generation + MLflow scoring).",
   "owner": {
     "name": "Daniel Sobczynski",
     "email": "dsobczynski88@gmail.com"
@@ -12,6 +12,12 @@
       "description": "Spec-driven MLflow evaluation harness + skills for the QAAI reviewer pipelines.",
       "category": "quality-assurance",
       "source": "./plugins/qaai-mlflow-eval"
+    },
+    {
+      "name": "qaai-dataset-gen",
+      "description": "Generate, validate, and human-review labelled eval datasets for the QAAI reviewer pipelines.",
+      "category": "quality-assurance",
+      "source": "./plugins/qaai-dataset-gen"
     }
   ]
 }

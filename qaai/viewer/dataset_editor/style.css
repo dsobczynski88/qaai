@@ -1,0 +1,126 @@
+/* Dataset Studio editor — layered on common/base.css. */
+
+/* The right pane holds the rubric table, so it needs more room than the
+   reviewer viewers' 340px feedback rail. */
+main { grid-template-columns: 1fr 480px; }
+
+.save-status { font-size: 12px; color: var(--mute); }
+.save-status.unsaved { color: var(--chip-warn); font-weight: 600; }
+.save-status.saved { color: var(--chip-yes); font-weight: 600; }
+
+/* ── generated form controls ── */
+.field { margin: 0 0 12px; }
+.field > label {
+  display: block; margin: 0 0 4px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mute);
+}
+.field input[type="text"],
+.field input[type="number"],
+.field select,
+.field textarea {
+  width: 100%; padding: 7px 8px;
+  border: 1px solid var(--line); border-radius: 4px;
+  font: inherit; background: #fff; color: var(--ink);
+}
+.field textarea { min-height: 0; resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(43,98,194,0.12);
+}
+.field-bool { margin: 6px 0 12px; }
+.inline-check {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--mute); text-transform: none; letter-spacing: 0;
+  margin: 0; cursor: pointer;
+}
+.inline-check input { width: auto; }
+
+fieldset.group {
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 12px 14px; margin: 0 0 14px; min-width: 0;
+}
+fieldset.group > legend {
+  padding: 0 6px; font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--mute);
+}
+fieldset.group > legend .count { font-weight: 400; text-transform: none; }
+fieldset.array { background: #fbfcfe; }
+
+.array-item {
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; margin: 0 0 10px; background: var(--panel);
+}
+.array-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.array-index {
+  display: inline-block; min-width: 20px; padding: 1px 7px; border-radius: 999px;
+  background: #eef2ff; color: #2b3a8b; font-size: 11px; font-weight: 700; text-align: center;
+}
+.array-item-head .mini { margin-left: auto; }
+/* An array of scalars renders one unlabelled field; hide its redundant index label. */
+.array-item > .field > label { display: none; }
+.array-item > fieldset.group { margin-bottom: 0; border: none; padding: 0; }
+.array-item > fieldset.group > legend { display: none; }
+
+button.mini { padding: 3px 10px; font-size: 12px; }
+button.mini.danger { color: var(--chip-no); border-color: #f0c9c9; }
+button.mini.danger:hover { background: #fdf1f1; }
+
+.empty, .muted { color: var(--mute); font-size: 12px; }
+.empty { margin: 4px 0 10px; }
+
+/* ── output pane ── */
+#output-form table.findings { margin-top: 6px; }
+#output-form table.findings td { vertical-align: middle; }
+#output-form table.findings td:first-child { white-space: nowrap; }
+#output-form table.findings textarea,
+#output-form table.findings select { width: 100%; padding: 5px 6px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 4px; font-family: inherit; }
+#output-form tr.absent td { color: var(--mute); }
+.verdict-select { font-weight: 600; }
+
+.derived {
+  margin: 14px 0 4px; padding: 9px 11px; border-radius: 5px;
+  font-size: 12px; line-height: 1.4;
+}
+.derived:empty { display: none; }
+.derived.agree { background: var(--ok); color: #1b5e20; }
+.derived.disagree { background: var(--bad); color: #a1390a; }
+
+.right .nav { margin-top: 14px; }
+.right #reviewer-note { min-height: 90px; }
+.progress strong { color: var(--ink); }
+
+#readonly-banner code {
+  background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+}
+
+.modal { width: min(900px, 92vw); max-height: 82vh; }
+
+/* ── string lists (citations, clarification questions) ── */
+.strlist { margin: 6px 0 2px; }
+.strlist-label {
+  display: block; margin-bottom: 3px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mute);
+}
+.strlist ul { list-style: none; margin: 0 0 4px; padding: 0; }
+.strlist li { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; }
+.strlist li.muted { font-size: 12px; padding: 1px 0; }
+.strlist input[type="text"] {
+  flex: 1 1 auto; min-width: 0; padding: 3px 6px; font-size: 12px;
+  border: 1px solid var(--line); border-radius: 4px; font-family: inherit;
+  background: #fff; color: var(--ink);
+}
+.strlist .mini { flex: 0 0 auto; padding: 2px 7px; line-height: 1.2; }
+
+/* ── assessment fields (comments, clarification_questions, ...) ── */
+details.extras { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+details.extras > summary {
+  cursor: pointer; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--mute);
+  margin-bottom: 10px;
+}
+details.extras pre.ro {
+  margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto;
+  background: rgba(0,0,0,0.03); border: 1px solid var(--line); border-radius: 4px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 11px; white-space: pre-wrap;
+}

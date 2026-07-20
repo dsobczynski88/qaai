@@ -149,6 +149,16 @@ describes the same item <span class="src">qaai/eval/datasets.py:9</span>:</p>
 <tr><td><code>actual_outputs.jsonl</code></td><td>Graph output-state subset (<code>synthesized_assessment</code>, …)</td><td>score mode</td></tr>
 <tr><td><code>actual_labels.jsonl</code></td><td>Flat answer key (<code>{Overall_Verdict, M1..M5[, R6]}</code>)</td><td>always</td></tr>
 </tbody></table>
+<p>Each dataset lives in its own timestamped folder,
+<code>eval/datasets/&lt;type&gt;/actual/&lt;YYYY-MM-DD_HH-MM-SS&gt;/</code>, alongside an append-only
+<code>edits.log</code> recording who reviewed each row and why. <strong>A revision is never edited
+in place</strong> — corrections are saved as a new timestamped sibling, so a scored run always
+still has the exact answer key it was scored against. <code>predictions/&lt;ts&gt;/</code> hangs off
+the revision it scored <span class="src">qaai/dataset_studio/scaffold.py</span>. Folders are
+produced by Dataset Studio: <code>dataset_studio new</code> to author one, or
+<code>dataset_studio ingest &lt;run&gt;</code> to convert a completed run into one pre-filled with
+the model's own answers for a human to correct.</p>
+
 <p><code>load_dataset()</code> resolves a <code>--dataset-dir</code> (or explicit per-file paths)
 and enforces the mode's requirements — score mode needs outputs; run mode needs inputs
 <span class="src">qaai/eval/datasets.py:85-118</span>. Rows are aligned <strong>positionally</strong>
@@ -156,14 +166,14 @@ across all three files; that alignment is the dataset's core invariant.</p>
 
 <h3>The committed dataset (pilot)</h3>
 <p>There is <strong>one</strong> committed dataset — the grounded RTM <em>pilot</em> at
-<code>eval/datasets/test_suite/</code>. Its answer key is the three <code>actual_*</code> files
+<code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code>. Its answer key is the three <code>actual_*</code> files
 above, alongside <code>source_gold.jsonl</code> (the hand-authored source of truth the converter
 renders them from) and a <code>description.md</code>
-<span class="src">eval/datasets/test_suite/description.md</span>:</p>
+<span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>:</p>
 <table>
 <thead><tr><th>Dataset</th><th>Rows</th><th>Use it?</th></tr></thead>
 <tbody>
-<tr><td><code>eval/datasets/test_suite/</code></td><td>20</td><td><strong>Yes</strong> — hand-authored, labels grounded in the row's own text, 10 known-good / 10 known-bad, with a documented failure-mode distribution <span class="src">eval/datasets/test_suite/description.md</span></td></tr>
+<tr><td><code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code></td><td>20</td><td><strong>Yes</strong> — hand-authored, labels grounded in the row's own text, 10 known-good / 10 known-bad, with a documented failure-mode distribution <span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span></td></tr>
 </tbody></table>
 <div class="note warn"><strong>Labels must be grounded in content.</strong> An earlier 800-row set
 that once lived here was <em>replaced</em> by this pilot because its labels were not grounded: its
@@ -174,7 +184,7 @@ correctly reported <em>"M4 = No: automatic import of heart rate, blood pressure,
 covered"</em> on a row labelled <code>Yes</code>. You cannot measure accuracy against labels that
 are wrong. The committed pilot holds to the rule that <strong>a row earns <code>Yes</code> only if
 a competent reviewer reading it would agree</strong>
-<span class="src">eval/datasets/test_suite/description.md</span>.</div>
+<span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>.</div>
 <div class="note"><strong>20 rows is a pilot, not the study.</strong> At n=20 the 95% accuracy CI
 is ±0.154 (Wilson) even assuming p=0.85, and ±0.20 at p=0.5 — so a 20-row result cannot
 distinguish a 0.75 reviewer from a 0.95 one. Per-cell counts of 2–4 are likewise far below the
@@ -189,7 +199,7 @@ turns <code>gold_dataset_labeled.jsonl</code> into <code>actual_inputs.jsonl</co
 <span class="src">qaai/eval/datasets.py:125-138</span>:</p>
 <pre><code>uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
-  --out eval/datasets/test_suite \
+  --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs</code></pre>
 <p><code>--synthesize-outputs</code> also writes an <strong>oracle</strong>
 <code>actual_outputs.jsonl</code> (predictions == labels) so score-only mode runs offline for a
@@ -248,7 +258,7 @@ paths from <strong>both</strong> plain dicts (score mode) and Pydantic models (r
 <tbody>
 <tr><td><code>test_suite_reviewer</code></td><td><code>synthesized_assessment.overall_verdict</code></td><td><code>mandatory_findings</code> / <code>code</code></td><td>R6</td></tr>
 <tr><td><code>hazard_risk_reviewer</code></td><td><code>hazard_assessment.overall_verdict</code></td><td><code>mandatory_findings</code> / <code>code</code></td><td>R7</td></tr>
-<tr><td><code>test_case_reviewer</code></td><td><code>aggregated_assessment.overall_verdict</code></td><td><code>evaluated_checklist</code> / <code>id</code></td><td>—</td></tr>
+<tr><td><code>test_case_reviewer</code></td><td><code>aggregated_assessment.overall_verdict</code></td><td><code>evaluated_checklist</code> / <code>id</code></td><td><code>test_case_setup_clarity</code></td></tr>
 </tbody></table>
 
 <h2 id="run">Running a study</h2>
@@ -261,7 +271,7 @@ real use is <a href="#predictions">re-scoring a saved prediction set</a> for fre
 committed dataset it is only a plumbing check (see the oracle warning above):</p>
 <pre><code>uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite \
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --mode score --run-name plumbing-smoke</code></pre>
 
 <h3>Run+score <span class="pill post">live LLM</span></h3>
@@ -272,7 +282,7 @@ committed dataset it is only a plumbing check (see the oracle warning above):</p
 <code>off</code> so every node re-runs fresh <span class="src">qaai/eval/runners.py:14</span>:</p>
 <pre><code>uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite \
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --mode run --prompt-set test_suite_reviewer_v4 \
   --max-concurrent 5 --limit 20 --run-name v4-edge-case</code></pre>
 <p>The client is built from <code>settings</code> (<code>API_KEY</code> /
@@ -307,7 +317,7 @@ a base URL containing <code>"prod"</code> is refused unless <code>--allow-prod</
 prompt-set manifest sha and per-role versions as params, so the diff in the UI is exact:</p>
 <pre><code>for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
   uv run python scripts/evaluate_with_mlflow.py \
-    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite \
+    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
     --mode run --prompt-set $ps --run-name $ps
 done</code></pre>
 
@@ -315,7 +325,7 @@ done</code></pre>
 <p><strong>Predictions only ever come from <code>--mode run</code>.</strong> Unless
 <code>--no-save-predictions</code> is passed, each run writes a timestamped set next to the
 dataset <span class="src">qaai/eval/datasets.py:47-48,173</span>:</p>
-<pre class="diagram"><code>eval/datasets/&lt;name&gt;/predictions/&lt;YYYY-MM-DD_HH-MM-SS&gt;/
+<pre class="diagram"><code>eval/datasets/&lt;type&gt;/actual/&lt;ts&gt;/predictions/&lt;YYYY-MM-DD_HH-MM-SS&gt;/
   ├─ predicted_inputs.jsonl      the inputs this run scored (a self-contained copy)
   ├─ predicted_outputs.jsonl     the predicted graph output-state rows
   ├─ predicted_labels.jsonl      their flat projection (outputs_to_labels)
@@ -335,8 +345,8 @@ predictions and the answer key comparable at all.</p>
 useful after changing scoring rules, since it never re-invokes the LLM:</p>
 <pre><code>uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --actual-outputs eval/datasets/test_suite/predictions/&lt;ts&gt;/predicted_outputs.jsonl \
-  --actual-labels eval/datasets/test_suite/actual_labels.jsonl \
+  --actual-outputs eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/&lt;ts&gt;/predicted_outputs.jsonl \
+  --actual-labels eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_labels.jsonl \
   --mode score --run-name rescore-&lt;ts&gt;</code></pre>
 
 <h2 id="metrics">Metrics &amp; scoring</h2>
@@ -457,8 +467,8 @@ either single-model CI and is out of scope for this calculator.</div>
 <tr><td><code>qaai/eval/artifacts.py</code></td><td>Writes predictions / failures / per-rubric CSV / confusion matrix / provenance / fixture metadata</td></tr>
 <tr><td><code>qaai/eval/harness.py</code></td><td><code>evaluate()</code> — load → (run|read) → score → log to MLflow</td></tr>
 <tr><td><code>eval/specs/*.yaml</code></td><td>One spec per reviewer (RTM / hazard / test-case)</td></tr>
-<tr><td><code>eval/datasets/test_suite/</code></td><td>The one committed dataset — the grounded 20-row RTM pilot (<code>actual_*</code> answer key + <code>source_gold.jsonl</code>)</td></tr>
-<tr><td><code>eval/datasets/&lt;name&gt;/predictions/&lt;ts&gt;/</code></td><td>Saved prediction sets from <code>--mode run</code> (<code>predicted_*</code>), each with its <code>run_metadata.json</code></td></tr>
+<tr><td><code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code></td><td>The one committed dataset — the grounded 20-row RTM pilot (<code>actual_*</code> answer key + <code>source_gold.jsonl</code>)</td></tr>
+<tr><td><code>eval/datasets/&lt;type&gt;/actual/&lt;ts&gt;/predictions/&lt;ts2&gt;/</code></td><td>Saved prediction sets from <code>--mode run</code> (<code>predicted_*</code>), each with its <code>run_metadata.json</code></td></tr>
 <tr><td><code>scripts/evaluate_with_mlflow.py</code></td><td>Run a study (score / run)</td></tr>
 <tr><td><code>scripts/convert_to_eval.py</code></td><td>Build the three-file dataset from gold or a run's outputs</td></tr>
 <tr><td><code>scripts/sample_size.py</code></td><td>Accuracy-CI sample-size calculator (<code>ci</code> / <code>achieved</code>)</td></tr>

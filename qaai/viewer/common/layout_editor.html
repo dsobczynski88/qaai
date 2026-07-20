@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{TITLE}}</title>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+<header>
+  <strong>{{HEADER_TITLE}}</strong>
+  <span class="src">{{SOURCE}}</span>
+  <span id="save-status" class="save-status"></span>
+  <div class="header-actions">
+    <button id="validate-btn">Validate</button>
+    <button id="save-as-btn">Save As&hellip;</button>
+    <button id="save-btn" class="primary">Save</button>
+  </div>
+</header>
+<div id="readonly-banner" class="missing-warning" hidden>
+  <span>Read-only session &mdash; the server was started with <code>--read-only</code>, so edits cannot be saved.</span>
+</div>
+<main>
+  <section class="panel left" id="left">
+    <h2>Generated input</h2>
+    <div id="input-form"></div>
+  </section>
+  <section class="panel right" id="right">
+    <h2>Generated output</h2>
+    <div id="output-form"></div>
+    <div class="derived" id="derived-verdict"></div>
+    <label for="reviewer-note">Reviewer note</label>
+    <textarea id="reviewer-note"
+      placeholder="Why do you agree with (or why did you correct) these labels? Cite the test case or requirement text that decided it."></textarea>
+    <div class="nav">
+      <button id="prev-btn">Prev</button>
+      <button id="accept-btn">Accept</button>
+      <button id="next-btn" class="primary">Next</button>
+    </div>
+    <div class="progress" id="progress"></div>
+  </section>
+</main>
+
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <button class="close" onclick="closeModal()">Close</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script id="DATA" type="application/json">{{DATA}}</script>
+<script id="CONFIG" type="application/json">{{CONFIG}}</script>
+<script id="INPUT_SCHEMA" type="application/json">{{INPUT_SCHEMA}}</script>
+<script>
+{{JS}}
+</script>
+</body>
+</html>

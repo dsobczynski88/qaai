@@ -34,7 +34,7 @@ skills if copied to `.claude/skills/` — they auto-load with no marketplace ste
 # 1. dataset from gold (answer key rendered into graph-output shape)
 uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
-  --out eval/datasets/test_suite \
+  --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 
 # 2. size the labelled set  (95% / +/-0.05 -> 385 at p=0.5, 196 at p=0.85)
@@ -44,24 +44,24 @@ uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.85
 #    answer key matching itself, tagged oracle_selftest=true. Not a measurement.
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite --mode score --run-name plumbing-smoke
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 --mode score --run-name plumbing-smoke
 
 # 4. THE actual study: run the graph, save predictions/<ts>/, score them vs the answer key
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite \
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --mode run --limit 40 --max-concurrent 5 --run-name pilot-40
 
 # 5. inspect
 uv run mlflow ui
 
 # 6. eyeball the diff: side-by-side actual vs predicted for that run
-python -m qaai.eval.compare eval/datasets/test_suite/predictions/<ts>/   # writes compare.html
+python -m qaai.eval.compare eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/   # writes compare.html
 ```
 
 **Predicted vs actual.** The committed `actual_outputs.jsonl` is the *answer key* (ACTUAL).
 `--mode run` produces the *predictions* and writes them to
-`eval/datasets/<name>/predictions/<ts>/predicted_labels.jsonl` (PREDICTED). Accuracy
+`eval/datasets/<type>/actual/<ts>/predictions/<ts2>/predicted_labels.jsonl` (PREDICTED). Accuracy
 compares the two. Step 3 skips the graph entirely, which is why it always reports 1.000.
 
 The harness, specs, datasets, CLIs, and tests live in the main repo (`qaai/eval/`,

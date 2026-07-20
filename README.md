@@ -163,7 +163,7 @@ Entries are auto-derived from docstrings, markers, fixtures, and parametrize par
 ```bash
 # Run the graph live, then score (needs .env)
 uv run python scripts/evaluate_with_mlflow.py --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite --mode run --limit 20
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 --mode run --limit 20
 
 # How many labelled records do I need? (95% confidence, ±0.05 → 385 at p=0.5, 196 at p=0.85)
 uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.5

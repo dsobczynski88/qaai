@@ -1,4 +1,5 @@
-# Eval spec — Single Test Case Reviewer. 5 review objectives (all mandatory, Yes/No).
+# Eval spec — Single Test Case Reviewer. 5 review objectives (Yes/No): the first four
+# mandatory, test_case_setup_clarity advisory.
 # Objective ids are stable and embedded in the aggregator prompt.
 name: test_case_reviewer
 component: test_case_reviewer
@@ -35,11 +36,20 @@ scoring:
   positive_label: "Yes"
   negative_label: "No"
   na_label: "N-A"                              # TC objectives are Yes/No; N-A unused
-  advisory_codes: []                           # all objectives are mandatory
+  # test_case_setup_clarity is recommended-only, mirroring R6 / R7 in the other two
+  # reviewers. This is not a policy choice made here: every shipping aggregator prompt
+  # (single_test_aggregator v6/v8/v9) fixes its `mandatory` flag to false and rolls up
+  # overall_verdict across mandatory objectives only. v8+ embed the objective list, so
+  # the flag is not even configurable at run time. Leaving this empty made the scorer
+  # derive "No" on rows where the pipeline emits "Yes" — a silent, systematic accuracy
+  # loss on exactly the rows where setup_clarity is the sole failing objective.
+  advisory_codes: [test_case_setup_clarity]
   rubric_class_mode: multiclass
 
 mlflow:
   experiment: test_case_reviewer
-  params: {}
+  # scoring_rev pins the metric semantics: 2 marks setup_clarity becoming advisory, so
+  # runs scored under the old all-mandatory rule stay distinguishable in the UI.
+  params: {scoring_rev: 2}
   tags: {}
   metrics_enabled: [overall, per_rubric, latency, cost, helper_invariant]
