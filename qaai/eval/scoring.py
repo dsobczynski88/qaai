@@ -25,6 +25,7 @@ All computation is pure and LLM-free, so it is unit-testable in isolation.
 """
 from __future__ import annotations
 
+import warnings
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
@@ -149,6 +150,25 @@ def _safe_kappa(y_true: Sequence[Any], y_pred: Sequence[Any]) -> Optional[float]
     return None if math.isnan(k) else k
 
 
+def _balanced_accuracy(y_true: Sequence[Any], y_pred: Sequence[Any]) -> float:
+    """Balanced accuracy, without sklearn's spurious 1x1-confusion-matrix warning.
+
+    ``balanced_accuracy_score`` builds a confusion matrix and emits a UserWarning
+    ("A single label was found in 'y_true' and 'y_pred'") whenever a cell has only one
+    class present (e.g. an M-cell whose gt and pred are all "Yes") — noise that reads like
+    an error in the logs. In that degenerate case balanced accuracy reduces to plain
+    accuracy, so compute it directly and skip the warning. Mirrors ``_safe_kappa``'s guard.
+    """
+    if len(set(y_true)) < 2 and len(set(y_pred)) < 2:
+        return float(accuracy_score(y_true, y_pred))
+    with warnings.catch_warnings():
+        # balanced_accuracy_score has no labels= param; it warns "y_pred contains classes
+        # not in y_true" when a prediction class is absent from ground truth (a valid
+        # multiclass case — the score is still correct). Silence just this one call.
+        warnings.simplefilter("ignore", category=UserWarning)
+        return float(balanced_accuracy_score(y_true, y_pred))
+
+
 def _derive_overall(spec: EvalSpec, rubric: Dict[str, Optional[str]]) -> Optional[str]:
     """Deterministic rule: positive iff every mandatory cell ∈ {positive, N-A}."""
     mandatory = spec.mandatory_codes
@@ -176,8 +196,11 @@ def compute_metrics(spec: EvalSpec, records: List[RecordResult]) -> Dict[str, An
         y_pred = [r.pred_overall for r in scored]
         pos = spec.scoring.positive_label
         yt, yp = _binary(y_true, pos), _binary(y_pred, pos)
+        # labels=[0, 1] pins the label set to the binary domain so sklearn doesn't warn
+        # "y_pred contains classes not in y_true" when a batch predicts only one class;
+        # average="binary"/pos_label=1 still reports the positive-class value unchanged.
         prec, rec, f1, _ = precision_recall_fscore_support(
-            yt, yp, average="binary", pos_label=1, zero_division=0
+            yt, yp, average="binary", pos_label=1, zero_division=0, labels=[0, 1]
         )
         n = len(yt)
         overall: Dict[str, Any] = {
@@ -187,8 +210,11 @@ def compute_metrics(spec: EvalSpec, records: List[RecordResult]) -> Dict[str, An
             # Positive-class F1 (kept for continuity) alongside macro-F1, which
             # weights Yes and No equally and is the honest headline under imbalance.
             "f1": float(f1),
-            "f1_macro": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
-            "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
+            "f1_macro": float(f1_score(
+                y_true, y_pred, average="macro", zero_division=0,
+                labels=sorted(set(y_true) | set(y_pred)),
+            )),
+            "balanced_accuracy": _balanced_accuracy(y_true, y_pred),
             "support_positive": int(sum(yt)),
             "support_negative": int(n - sum(yt)),
             "prevalence_gt_positive": float(sum(yt) / n),
@@ -219,11 +245,14 @@ def compute_metrics(spec: EvalSpec, records: List[RecordResult]) -> Dict[str, An
                 pos = spec.scoring.positive_label
                 gt = [pos if v == spec.scoring.na_label else v for v in gt]
                 pd = [pos if v == spec.scoring.na_label else v for v in pd]
-            cell_f1 = float(f1_score(gt, pd, average="macro", zero_division=0))
+            cell_f1 = float(f1_score(
+                gt, pd, average="macro", zero_division=0,
+                labels=sorted(set(gt) | set(pd)),
+            ))
             cell: Dict[str, Any] = {
                 "accuracy": float(accuracy_score(gt, pd)),
                 "f1_macro": cell_f1,
-                "balanced_accuracy": float(balanced_accuracy_score(gt, pd)),
+                "balanced_accuracy": _balanced_accuracy(gt, pd),
                 "support": len(pairs),
                 # Per-class ground-truth counts: a cell whose minority class has a
                 # handful of rows has a wide CI no matter how good its accuracy looks.
