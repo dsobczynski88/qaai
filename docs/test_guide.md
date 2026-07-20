@@ -1,73 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QAAI · Test Guide</title>
-<style>
-  :root{--bg:#fff;--ink:#1a1a1a;--mute:#5a6472;--line:#e3e6ea;--accent:#2b62c2;
-    --code-bg:#f6f8fa;--sidebar:#fafbfc;--ok:#1b7f3b;--warn:#9a6700;--maxw:860px}
-  @media(prefers-color-scheme:dark){:root{--bg:#0f1419;--ink:#e6e8eb;--mute:#9aa4b2;
-    --line:#222a33;--accent:#6ea8ff;--code-bg:#161b22;--sidebar:#11161c;--ok:#5bd07e;--warn:#e3b341}}
-  *{box-sizing:border-box}html{scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  .layout{display:grid;grid-template-columns:266px 1fr;min-height:100vh}
-  nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:24px 18px;background:var(--sidebar);border-right:1px solid var(--line);font-size:14px}
-  nav.toc strong{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 8px}
-  nav.toc a{display:block;color:var(--mute);text-decoration:none;padding:3px 0}
-  nav.toc a:hover,nav.toc a.active{color:var(--accent)}
-  main{max-width:var(--maxw);padding:32px 30px 90px;margin:0 auto;width:100%}
-  header.doc{border-bottom:1px solid var(--line);margin-bottom:8px;padding-bottom:12px}
-  header.doc .meta{color:var(--mute);font-size:13px}
-  h1,h2,h3{line-height:1.25;scroll-margin-top:14px}
-  h2{margin-top:40px;border-bottom:1px solid var(--line);padding-bottom:6px}
-  h3{margin-top:26px}
-  a{color:var(--accent)}
-  code{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:1px 5px;border-radius:4px}
-  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto}
-  pre code{background:none;padding:0}
-  table{border-collapse:collapse;width:100%;font-size:14px;margin:12px 0}
-  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
-  th{background:var(--code-bg)}
-  .src{color:var(--mute);font:12px ui-monospace,monospace}
-  .note{border-left:3px solid var(--accent);background:var(--code-bg);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0}
-  .warn{border-left-color:var(--warn)}
-  .pill{display:inline-block;font:11px/1.4 ui-monospace,monospace;background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:0 8px;color:var(--mute)}
-  footer.doc{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--mute);font-size:13px}
-  @media(max-width:760px){.layout{grid-template-columns:1fr}nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}th,td{overflow-wrap:anywhere}}
-  @media print{nav.toc{display:none}.layout{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
-<div class="layout">
-<nav class="toc" aria-label="Table of contents">
-  <strong>Test Guide</strong>
-  <a href="#catalog">Interactive test catalog</a>
-  <a href="#setup">Setup &amp; install</a>
-  <a href="#layout">Suite layout</a>
-  <a href="#running">Running the suites</a>
-  <a href="#unit">tests/unit</a>
-  <a href="#api">tests/api</a>
-  <a href="#integration">tests/integration</a>
-  <a href="#fixtures">Default fixtures</a>
-  <a href="#custom">Custom files</a>
-  <a href="#artifacts">Run artifacts</a>
-  <strong style="margin-top:16px">More docs</strong>
-  <a href="index.html">← Docs home</a>
-  <a href="api.html">API guide</a>
-  <a href="configuration.html">Configuration</a>
-  <a href="test_catalog.html">Test catalog</a>
-  <a href="design/agents.html">Agent design</a>
-</nav>
-<main>
-<header class="doc">
-  <h1>Test Guide</h1>
-  <div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
-</header>
+# Test Guide
 
-<p>This guide covers how to set up, install, and run the test suites under
-<code>tests/unit</code>, <code>tests/api</code>, and <code>tests/integration</code>, the default
-fixture files each test uses, and how to run the tests against your own custom input files.</p>
+<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
+
+This guide covers how to set up, install, and run the test suites under `tests/unit`, `tests/api`, and `tests/integration`, the default fixture files each test uses, and how to run the tests against your own custom input files.
 
 <div class="note"><strong>Recently restructured.</strong> The pytest architecture was reorganized
 into three layers — a new <code>tests/unit/</code> suite (fast, no live LLM), the
@@ -79,78 +14,68 @@ API review endpoints became <strong>asynchronous background jobs</strong> (submi
 result). The sections below reflect that layout.</div>
 
 <h2 id="catalog">Interactive test catalog</h2>
-<p>Before working through the suites below, the fastest way to <em>see</em> what the test suite
-covers is the <strong>test catalog</strong> — a searchable, single-file HTML "book" of every test
-pytest collects. It is a pytest plugin registered via the <code>pytest11</code> entry point
-<span class="src">pyproject.toml:69-70</span>, so the <code>--test-catalog</code> flag is always
-available under <code>uv run pytest</code> with no <code>-p</code> needed
-<span class="src">plugins/qaai_testcatalog/plugin.py</span>. Because it is built from the tests
-pytest <em>actually collects</em>, it can never drift from the real suite.</p>
 
-<p>Generate it with a <strong>collection-only</strong> run — no tests execute and no LLM calls are
-made <span class="src">plugins/qaai_testcatalog/README.md:14-25</span>:</p>
-<pre><code>uv run pytest --collect-only --test-catalog
-#   -&gt; logs/test-catalog/test_catalog.html   (open in a browser)
-#   -&gt; logs/test-catalog/test_catalog.json   (the underlying data)
+Before working through the suites below, the fastest way to *see* what the test suite covers is the **test catalog** — a searchable, single-file HTML "book" of every test pytest collects. It is a pytest plugin registered via the `pytest11` entry point <span class="src">pyproject.toml:69-70</span>, so the `--test-catalog` flag is always available under `uv run pytest` with no `-p` needed <span class="src">plugins/qaai_testcatalog/plugin.py</span>. Because it is built from the tests pytest *actually collects*, it can never drift from the real suite.
+
+Generate it with a **collection-only** run — no tests execute and no LLM calls are made <span class="src">plugins/qaai_testcatalog/README.md:14-25</span>:
+
+```
+uv run pytest --collect-only --test-catalog
+#   -> logs/test-catalog/test_catalog.html   (open in a browser)
+#   -> logs/test-catalog/test_catalog.json   (the underlying data)
 
 # Scope it like any pytest run — the catalog tracks the selection:
 uv run pytest -m unit --collect-only --test-catalog
 uv run pytest tests/unit/eval --collect-only --test-catalog
 
 # Change the output directory:
-uv run pytest --collect-only --test-catalog --test-catalog-out docs/test-catalog</code></pre>
+uv run pytest --collect-only --test-catalog --test-catalog-out docs/test-catalog
+```
 
-<p>The page opens with a text search box (name / summary / fixtures / file), filter chips for
-<strong>type</strong> (unit / integration / api) and <strong>component</strong>
-(rtm / tc / hazard / eval / shared / api), sortable columns, a per-row <strong>I/O</strong> modal
-(each fixture, where it is defined, and an example input/output), a light/dark toggle, and
-<strong>Copy as Markdown</strong> / <strong>Export JSON</strong> buttons that respect the current
-filter <span class="src">plugins/qaai_testcatalog/README.md:28-31</span>. Each row's summary, type,
-component, fixtures, and example input are auto-derived from docstrings, markers,
-<code>item.fixturenames</code>, and parametrize params; the optional
-<code>@pytest.mark.catalog(summary=…, example_input=…, example_output=…)</code> marker curates any
-field (marker wins) <span class="src">plugins/qaai_testcatalog/README.md:40-69</span>.</p>
+The page opens with a text search box (name / summary / fixtures / file), filter chips for **type** (unit / integration / api) and **component** (rtm / tc / hazard / eval / shared / api), sortable columns, a per-row **I/O** modal (each fixture, where it is defined, and an example input/output), a light/dark toggle, and **Copy as Markdown** / **Export JSON** buttons that respect the current filter <span class="src">plugins/qaai_testcatalog/README.md:28-31</span>. Each row's summary, type, component, fixtures, and example input are auto-derived from docstrings, markers, `item.fixturenames`, and parametrize params; the optional `@pytest.mark.catalog(summary=…, example_input=…, example_output=…)` marker curates any field (marker wins) <span class="src">plugins/qaai_testcatalog/README.md:40-69</span>.
 
-<p>Re-render offline from the saved JSON without re-collecting
-<span class="src">plugins/qaai_testcatalog/README.md:35-37</span>:</p>
-<pre><code>python -m qaai_testcatalog logs/test-catalog/test_catalog.json</code></pre>
+Re-render offline from the saved JSON without re-collecting <span class="src">plugins/qaai_testcatalog/README.md:35-37</span>:
+
+```
+python -m qaai_testcatalog logs/test-catalog/test_catalog.json
+```
 
 <div class="note"><strong>Full reference.</strong> See the
 <a href="test_catalog.html">Test catalog</a> page for the auto-derivation rules, every
 <code>@pytest.mark.catalog</code> field, and the packaging details.</div>
 
 <h2 id="setup">Setup &amp; install</h2>
-<p>QAAI uses <strong>uv</strong> and requires <strong>Python ≥ 3.12</strong>
-<span class="src">pyproject.toml:9</span>.</p>
-<pre><code>uv sync --frozen        # install locked dependencies (incl. pyjama, vendored locally at libs/pyjama)</code></pre>
-<p>pytest configuration <span class="src">pyproject.toml:48-55</span>:
-<code>asyncio_mode = "auto"</code>, test path <code>tests/</code>, and <strong>two markers</strong> —
-<code>integration</code> (<em>"marks tests that make real LLM API calls"</em>) and
-<code>unit</code> (<em>"marks fast unit tests with no live LLM calls"</em>).</p>
 
-<h3>Environment variables for tests</h3>
-<p><code>conftest.py</code> calls <code>load_dotenv()</code> at import time
-<span class="src">tests/conftest.py:10</span>. Integration tests read their <strong>own</strong>
-live-LLM credentials from <code>PYTEST_*</code> variables in a repo-root <code>.env</code>
-<span class="src">tests/conftest.py:201-222</span>:</p>
-<pre><code>PYTEST_API_KEY=&lt;your-key&gt;
-PYTEST_BASE_URL=&lt;your-api-url&gt;
-PYTEST_MODEL=gpt-4o-mini</code></pre>
+QAAI uses **uv** and requires **Python ≥ 3.12** <span class="src">pyproject.toml:9</span>.
+
+```
+uv sync --frozen        # install locked dependencies (incl. pyjama, vendored locally at libs/pyjama)
+```
+
+pytest configuration <span class="src">pyproject.toml:48-55</span>: `asyncio_mode = "auto"`, test path `tests/`, and **two markers** — `integration` (*"marks tests that make real LLM API calls"*) and `unit` (*"marks fast unit tests with no live LLM calls"*).
+
+### Environment variables for tests
+
+`conftest.py` calls `load_dotenv()` at import time <span class="src">tests/conftest.py:10</span>. Integration tests read their **own** live-LLM credentials from `PYTEST_*` variables in a repo-root `.env` <span class="src">tests/conftest.py:201-222</span>:
+
+```
+PYTEST_API_KEY=<your-key>
+PYTEST_BASE_URL=<your-api-url>
+PYTEST_MODEL=gpt-4o-mini
+```
+
 <div class="note warn"><strong>Production guard.</strong> The <code>real_client</code> fixture
 fails the test if <code>PYTEST_BASE_URL</code> contains the string <code>"prod"</code>, to prevent
 accidental production charges <span class="src">tests/conftest.py:206-211</span>. If
 <code>PYTEST_API_KEY</code> is unset, integration tests <em>skip</em> rather than fail
 <span class="src">tests/conftest.py:203-204</span>.</div>
-<p>Test runs are isolated from server runs: all artifacts are written under
-<code>logs/tests/</code> (set via <code>settings.log_base_dir</code> <strong>before</strong>
-<code>qaai.api.main</code> is imported) <span class="src">tests/conftest.py:21</span>.</p>
-<p>The unit suite needs no <code>.env</code> — it uses a call-counting stub client and mocks
-(boto3, the LLM client). <code>tests/unit/test_env_retriever.py</code> exercises the
-<code>APP_ENV</code>-driven secret hydration (DEV dotenv / PROD prefixed-mimic / AWS Secrets
-Manager) entirely with <code>monkeypatch</code> + a mocked boto3 client
-<span class="src">tests/unit/test_env_retriever.py:1-9</span>.</p>
+
+Test runs are isolated from server runs: all artifacts are written under `logs/tests/` (set via `settings.log_base_dir` **before** `qaai.api.main` is imported) <span class="src">tests/conftest.py:21</span>.
+
+The unit suite needs no `.env` — it uses a call-counting stub client and mocks (boto3, the LLM client). `tests/unit/test_env_retriever.py` exercises the `APP_ENV`-driven secret hydration (DEV dotenv / PROD prefixed-mimic / AWS Secrets Manager) entirely with `monkeypatch` + a mocked boto3 client <span class="src">tests/unit/test_env_retriever.py:1-9</span>.
 
 <h2 id="layout">Suite layout</h2>
+
 <table>
 <thead><tr><th>Path</th><th>Layer</th><th>Live LLM?</th></tr></thead>
 <tbody>
@@ -162,6 +87,7 @@ Manager) entirely with <code>monkeypatch</code> + a mocked boto3 client
 </tbody></table>
 
 <h2 id="running">Running the suites</h2>
+
 <table>
 <thead><tr><th>Command</th><th>What runs</th></tr></thead>
 <tbody>
@@ -173,6 +99,7 @@ Manager) entirely with <code>monkeypatch</code> + a mocked boto3 client
 <tr><td><code>uv run pytest tests/integration -v</code></td><td>End-to-end pipeline + wiring tests only</td></tr>
 <tr><td><code>uv run pytest path::test_name</code></td><td>A single test</td></tr>
 </tbody></table>
+
 <div class="note warn"><strong><code>-m unit</code> ≠ the whole <code>tests/unit</code> tree.</strong> Only four
 files carry <code>pytestmark = pytest.mark.unit</code> (the three <code>test_input_gating.py</code>
 files and <code>test_case_reviewer/test_no_decomposition.py</code>). The cache, transform,
@@ -181,21 +108,13 @@ viewer-log, and secrets tests are unmarked, so they are <em>not</em> selected by
 <code>tests/unit</code>. Use <code>tests/unit</code> (a path) to run the full fast suite.</div>
 
 <h2 id="unit">tests/unit — fast tests, no live LLM</h2>
-<p>These make <strong>no network calls</strong>. LLM clients are replaced by a call-counting
-stub (<code>stub_llm_client</code> / <code>_StubLLMClient</code> in conftest
-<span class="src">tests/conftest.py:482-510</span>) or by per-test mocks, so a test can assert
-exactly how many times inference would have run (e.g. <code>stub_llm_client.call_count == 0</code>
-proves a graph short-circuited before any LLM call). Reviewer-graph knobs come from the
-<code>review_settings</code> fixture (a <code>SimpleNamespace</code> of <code>cache_mode</code> /
-<code>test_mode</code> / <code>include_edge_case_analysis</code>, defaulted from CLI options)
-<span class="src">tests/conftest.py:462-479</span>.</p>
 
-<h3>Input-gate &amp; topology tests <span class="pill">@pytest.mark.unit</span></h3>
-<p>Each reviewer graph short-circuits on bad input — performing <strong>zero inference
-calls</strong> and returning <code>review_status == "skipped"</code> with the offending
-<code>missing_fields</code> listed — so the viewer can render an empty rubric with a warning
-instead of crashing. Bad-input data fixtures live in conftest
-<span class="src">tests/conftest.py:591-674</span>.</p>
+These make **no network calls**. LLM clients are replaced by a call-counting stub (`stub_llm_client` / `_StubLLMClient` in conftest <span class="src">tests/conftest.py:482-510</span>) or by per-test mocks, so a test can assert exactly how many times inference would have run (e.g. `stub_llm_client.call_count == 0` proves a graph short-circuited before any LLM call). Reviewer-graph knobs come from the `review_settings` fixture (a `SimpleNamespace` of `cache_mode` / `test_mode` / `include_edge_case_analysis`, defaulted from CLI options) <span class="src">tests/conftest.py:462-479</span>.
+
+### Input-gate &amp; topology tests <span class="pill">@pytest.mark.unit</span>
+
+Each reviewer graph short-circuits on bad input — performing **zero inference calls** and returning `review_status == "skipped"` with the offending `missing_fields` listed — so the viewer can render an empty rubric with a warning instead of crashing. Bad-input data fixtures live in conftest <span class="src">tests/conftest.py:591-674</span>.
+
 <table>
 <thead><tr><th>File</th><th>What it asserts</th></tr></thead>
 <tbody>
@@ -209,37 +128,18 @@ instead of crashing. Bad-input data fixtures live in conftest
 <td>"Include decomposition analysis" OFF drops the <code>decomposer</code> node and fans coverage out <em>per requirement</em> (cache key suffixed <code>_REQ-1</code>, no <code>decomposed_spec</code> in the payload); the aggregator stays None-safe when <code>decomposed_requirements</code> is absent <span class="src">tests/unit/test_case_reviewer/test_no_decomposition.py:38-113</span></td></tr>
 </tbody></table>
 
-<h3>Cache &amp; <code>cache_mode</code> gating</h3>
-<p><code>test_review_cache.py</code> is the largest unit file. A counting mock client lets each
-test assert hit/miss by inspecting <code>chat_completion.call_count</code>
-<span class="src">tests/unit/test_review_cache.py:34-46</span>. It covers, in five groups:</p>
-<ul>
-<li><strong>ReviewCacheManager</strong> — one-folder-per-entity, append-only disk layout
-(<code>{cache_dir}/{entity_id}/{node}_{version}_{timestamp}.json</code>, newest wins),
-version-bump-is-a-miss,
-prompt-set namespacing (per-set subfolders that never alias), scoped/whole-entity
-<code>purge_entity</code>, entity/node-name sanitization, Redis-absent disk-only mode, a
-relative <code>CACHE_DIR</code> anchored to <code>PROJECT_ROOT</code> (the phantom-MISS regression
-guard), legacy meta-less files still reading as a HIT, and
-<code>extract_prompt_version</code> <span class="src">tests/unit/test_review_cache.py:93-257</span></li>
-<li><strong>Base-node gating</strong> — <code>on</code> caches interim nodes but always
-re-runs a <code>is_final_output</code> node; <code>test</code> reads the final node too and
-raises <code>CacheRequiredError</code> on a miss; <code>off</code> <strong>writes a new
-timestamped file but never reads</strong> (so it re-runs); missing <code>cache_mode</code>
-defaults to <code>on</code>; <code>cache_manager=None</code> disables caching
-<span class="src">tests/unit/test_review_cache.py:311-388</span></li>
-<li><strong>Per-spec evaluators</strong> — RTM/TC single-spec nodes write distinct files per
-<code>spec_id</code>, hit cache on rerun, and the RTM payload carries
-<code>summarized_designs</code> (or null) <span class="src">tests/unit/test_review_cache.py:354-436</span></li>
-<li><strong>Send-dispatcher propagation</strong> — <code>dispatch_coverage</code> copies
-<code>cache_mode</code> (and <code>summarized_designs</code>) into every fan-out payload
-<span class="src">tests/unit/test_review_cache.py:444-511</span></li>
-<li><strong>Pipeline wiring</strong> — the hazard reviewer shares the cache for its own nodes
-but its embedded RTM subgraph is <code>cache_manager is None</code> (cached instead as one
-blob per requirement) <span class="src">tests/unit/test_review_cache.py:519-537</span></li>
-</ul>
+### Cache &amp; `cache_mode` gating
 
-<h3>Data transforms, viewer, secrets</h3>
+`test_review_cache.py` is the largest unit file. A counting mock client lets each test assert hit/miss by inspecting `chat_completion.call_count` <span class="src">tests/unit/test_review_cache.py:34-46</span>. It covers, in five groups:
+
+- **ReviewCacheManager** — one-folder-per-entity, append-only disk layout (`{cache_dir}/{entity_id}/{node}_{version}_{timestamp}.json`, newest wins), version-bump-is-a-miss, prompt-set namespacing (per-set subfolders that never alias), scoped/whole-entity `purge_entity`, entity/node-name sanitization, Redis-absent disk-only mode, a relative `CACHE_DIR` anchored to `PROJECT_ROOT` (the phantom-MISS regression guard), legacy meta-less files still reading as a HIT, and `extract_prompt_version` <span class="src">tests/unit/test_review_cache.py:93-257</span>
+- **Base-node gating** — `on` caches interim nodes but always re-runs a `is_final_output` node; `test` reads the final node too and raises `CacheRequiredError` on a miss; `off` **writes a new timestamped file but never reads** (so it re-runs); missing `cache_mode` defaults to `on`; `cache_manager=None` disables caching <span class="src">tests/unit/test_review_cache.py:311-388</span>
+- **Per-spec evaluators** — RTM/TC single-spec nodes write distinct files per `spec_id`, hit cache on rerun, and the RTM payload carries `summarized_designs` (or null) <span class="src">tests/unit/test_review_cache.py:354-436</span>
+- **Send-dispatcher propagation** — `dispatch_coverage` copies `cache_mode` (and `summarized_designs`) into every fan-out payload <span class="src">tests/unit/test_review_cache.py:444-511</span>
+- **Pipeline wiring** — the hazard reviewer shares the cache for its own nodes but its embedded RTM subgraph is `cache_manager is None` (cached instead as one blob per requirement) <span class="src">tests/unit/test_review_cache.py:519-537</span>
+
+### Data transforms, viewer, secrets
+
 <table>
 <thead><tr><th>File</th><th>What it covers</th></tr></thead>
 <tbody>
@@ -254,8 +154,9 @@ blob per requirement) <span class="src">tests/unit/test_review_cache.py:519-537<
 </tbody></table>
 
 <h2 id="api">tests/api — FastAPI contract &amp; happy-path tests</h2>
-<p>These spin up the FastAPI app via an in-process <code>AsyncClient</code> (wrapped in the
-app's <code>lifespan</code> so services initialize) <span class="src">tests/conftest.py:226-236</span>.</p>
+
+These spin up the FastAPI app via an in-process `AsyncClient` (wrapped in the app's `lifespan` so services initialize) <span class="src">tests/conftest.py:226-236</span>.
+
 <div class="note"><strong>Reviews are asynchronous background jobs.</strong> A review
 <code>POST</code> now returns <code>202</code> with a <code>job_id</code>; the result is fetched after
 the job finishes. The <code>submit_and_wait</code> fixture drives
@@ -263,7 +164,9 @@ the job finishes. The <code>submit_and_wait</code> fixture drives
 returning the result response (or the original 4xx if submission was rejected)
 <span class="src">tests/conftest.py:240-265</span>. So the "200 / <code>text/html</code>" assertion
 describes the <em>result download</em>, not the initial <code>POST</code>.</div>
-<p>Files live under <code>tests/api/v1/</code>:</p>
+
+Files live under `tests/api/v1/`:
+
 <table>
 <thead><tr><th>File</th><th>Tests</th><th>Checks</th></tr></thead>
 <tbody>
@@ -275,18 +178,20 @@ describes the <em>result download</em>, not the initial <code>POST</code>.</div>
 <tr><td><code>test_cache_toggle.py</code></td><td><code>use_cache</code> / explicit <code>cache_mode</code> / <code>test_mode</code> / <code>include_edge_case_analysis</code> mapping (services stubbed)</td><td><code>use_cache=false</code>→<code>off</code>, default→<code>on</code>; explicit <code>cache_mode</code> forwarded verbatim (legacy <code>partial</code>/<code>full</code>→<code>on</code>/<code>test</code>) and wins over <code>use_cache</code>; edge-case toggle → <code>v4</code> else <code>v3</code>; <code>_select()</code> falls back to baseline for unknown sets</td></tr>
 <tr><td><code>test_batch_review_gating.py</code></td><td>success-gating &amp; live-progress in <code>_run_batch_review</code> (stub graph + fake cache)</td><td>clean item kept; errored / incomplete entities purged (scoped to the run's prompt set); one bad item no longer aborts the batch (all-failing → <code>ValueError</code>); <code>Job</code> progress counters + problems-only run log shared with the viewer</td></tr>
 </tbody></table>
-<pre><code>uv run pytest tests/api/v1/test_cache_toggle.py -v
-uv run pytest -m integration tests/api/v1/test_test_suite_reviewer.py::test_test_suite_review_happy_path</code></pre>
+
+```
+uv run pytest tests/api/v1/test_cache_toggle.py -v
+uv run pytest -m integration tests/api/v1/test_test_suite_reviewer.py::test_test_suite_review_happy_path
+```
 
 <h2 id="integration">tests/integration — pipeline &amp; wiring tests</h2>
-<p>This suite mixes <strong>live-LLM pipeline runs</strong> (marked <code>@integration</code>,
-need <code>.env</code>) with <strong>stub/assertion wiring tests</strong> that run offline.</p>
 
-<h3>End-to-end pipeline runs <span class="pill">@integration</span></h3>
-<p>These run the full compiled LangGraph pipeline against fixture files. For the RTM and
-test-case reviewers, every row of the selected JSONL fixture is expanded into its own
-parametrized item (id = <code>req_id</code> / <code>test_id</code>) by the
-<code>pytest_generate_tests</code> hook <span class="src">tests/conftest.py:140-154</span>.</p>
+This suite mixes **live-LLM pipeline runs** (marked `@integration`, need `.env`) with **stub/assertion wiring tests** that run offline.
+
+### End-to-end pipeline runs <span class="pill">@integration</span>
+
+These run the full compiled LangGraph pipeline against fixture files. For the RTM and test-case reviewers, every row of the selected JSONL fixture is expanded into its own parametrized item (id = `req_id` / `test_id`) by the `pytest_generate_tests` hook <span class="src">tests/conftest.py:140-154</span>.
+
 <table>
 <thead><tr><th>Test</th><th>Validates</th><th>Outputs</th></tr></thead>
 <tbody>
@@ -304,9 +209,10 @@ parametrized item (id = <code>req_id</code> / <code>test_id</code>) by the
 <td>—</td></tr>
 </tbody></table>
 
-<h3>Wiring &amp; system tests <span class="pill">offline</span></h3>
-<p>These are tagged <code>@integration</code> (or unmarked) but make no live LLM call — they use
-the stub client or plain assertions, so they run without <code>.env</code>.</p>
+### Wiring &amp; system tests <span class="pill">offline</span>
+
+These are tagged `@integration` (or unmarked) but make no live LLM call — they use the stub client or plain assertions, so they run without `.env`.
+
 <table>
 <thead><tr><th>Test</th><th>What it asserts</th></tr></thead>
 <tbody>
@@ -315,17 +221,18 @@ the stub client or plain assertions, so they run without <code>.env</code>.</p>
 <tr><td><code>test_integration_verification.py</code></td>
 <td>Hazard <code>DataIntegrationNode</code> wiring: <code>HazardReviewState</code> exposes <code>pyjama_request</code>/<code>jama_data</code>/<code>jama_metadata</code>; the graph includes a <code>data_integration</code> node; local mode (no <code>pyjama_request</code>) returns an empty dict; <code>transform_hazard_record_to_state</code> signature; and the Excel/pyjama fixture files exist and parse <span class="src">tests/integration/test_integration_verification.py:19-198</span></td></tr>
 </tbody></table>
-<pre><code>uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer
-uv run pytest tests/integration/test_integration_verification.py -v   # offline wiring checks</code></pre>
+
+```
+uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer
+uv run pytest tests/integration/test_integration_verification.py -v   # offline wiring checks
+```
 
 <h2 id="fixtures">Default fixtures</h2>
-<p>Fixtures are resolved by <code>resolve_fixture_path</code> / <code>load_jsonl</code>
-<span class="src">tests/helpers.py:7-67</span> using the search order
-<code>mock/ → gold/ → local/ → external/ → root</code>, so a test's
-<code>--input-file</code> takes a <strong>bare filename</strong> and finds it wherever it
-lives under <code>tests/fixtures/</code>.</p>
-<p><strong>Default fixture each parametrized integration test falls back to</strong> when
-<code>--input-file</code> is omitted <span class="src">tests/conftest.py:53-56, 394-410</span>:</p>
+
+Fixtures are resolved by `resolve_fixture_path` / `load_jsonl` <span class="src">tests/helpers.py:7-67</span> using the search order `mock/ → gold/ → local/ → external/ → root`, so a test's `--input-file` takes a **bare filename** and finds it wherever it lives under `tests/fixtures/`.
+
+**Default fixture each parametrized integration test falls back to** when `--input-file` is omitted <span class="src">tests/conftest.py:53-56, 394-410</span>:
+
 <table>
 <thead><tr><th>Reviewer</th><th>Default fixture(s)</th></tr></thead>
 <tbody>
@@ -333,7 +240,9 @@ lives under <code>tests/fixtures/</code>.</p>
 <tr><td>Test Case</td><td><code>test_case_review_all_fields.jsonl</code></td></tr>
 <tr><td>Hazard Risk</td><td><code>software_hazard_analysis.xlsx</code> + <code>pyjama_response_unified.jsonl</code> (<code>--pyjama-file</code>)</td></tr>
 </tbody></table>
-<p>Files currently present under <code>tests/fixtures/</code>:</p>
+
+Files currently present under `tests/fixtures/`:
+
 <table>
 <thead><tr><th>Directory</th><th>Files</th></tr></thead>
 <tbody>
@@ -342,14 +251,13 @@ lives under <code>tests/fixtures/</code>.</p>
 <tr><td><code>local/</code></td><td><code>locating_device.jsonl</code></td></tr>
 <tr><td><code>external/</code></td><td><code>test_suite_review_all_fields.jsonl</code>, <code>test_suite_review_min_fields.jsonl</code>, <code>test_case_review_all_fields.jsonl</code>, <code>test_case_review_min_fields.jsonl</code>, <code>software_hazard_analysis.xlsx</code>, <code>pyjama_response_unified.jsonl</code></td></tr>
 </tbody></table>
-<p>JSONL fixtures are newline-delimited; each line is a self-contained graph-input object.
-The hazard test assembles its <code>HazardRowWithTraceMatrix</code> input
-<strong>programmatically</strong> from the Excel + PyJama fixtures (there is no single
-<code>hazard_full_traceability.jsonl</code>) <span class="src">tests/conftest.py:341-410</span>.</p>
+
+JSONL fixtures are newline-delimited; each line is a self-contained graph-input object. The hazard test assembles its `HazardRowWithTraceMatrix` input **programmatically** from the Excel + PyJama fixtures (there is no single `hazard_full_traceability.jsonl`) <span class="src">tests/conftest.py:341-410</span>.
 
 <h2 id="custom">Running with custom files</h2>
-<p>The reviewer tests accept these CLI options, all registered in
-<code>pytest_addoption</code> <span class="src">tests/conftest.py:59-113</span>:</p>
+
+The reviewer tests accept these CLI options, all registered in `pytest_addoption` <span class="src">tests/conftest.py:59-113</span>:
+
 <table>
 <thead><tr><th>Option</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
@@ -359,7 +267,9 @@ The hazard test assembles its <code>HazardRowWithTraceMatrix</code> input
 <tr><td><code>--test-mode</code></td><td><code>true</code></td><td>When true, tests use the call-counting stub client instead of a real LLM client</td></tr>
 <tr><td><code>--include-edge-case-analysis</code></td><td><code>false</code></td><td>Selects the edge-case prompt set for the test-suite / hazard reviewers</td></tr>
 </tbody></table>
-<pre><code># RTM / test-case: --input-file is the JSONL of input rows
+
+```
+# RTM / test-case: --input-file is the JSONL of input rows
 uv run pytest tests/integration/test_suite_reviewer/pipeline.py::test_test_suite_reviewer \
   --input-file=locating_device.jsonl
 
@@ -376,47 +286,24 @@ uv run pytest tests/integration/hazard_risk_reviewer/pipeline.py::test_hazard_ri
   --input-file=software_hazard_analysis.xlsx --pyjama-file=pyjama_response_unified.jsonl
 
 # Override the graph knobs (e.g. run the unit input-gates with interim caching on)
-uv run pytest -m unit --cache-mode on</code></pre>
-<h3>Adding your own fixture</h3>
-<ol>
-<li>Drop the file into a fixtures subdir — <code>tests/fixtures/local/</code> is recommended
-for project-specific data, e.g. <code>tests/fixtures/local/my_requirements.jsonl</code>.</li>
-<li>Match the reviewer's graph-input schema per row:
-<ul>
-<li>RTM: <code>{"requirement": {...}, "test_cases": [...], "design_docs": [...]}</code></li>
-<li>TC: <code>{"test_case": {...}, "requirements": [...]}</code> (<code>design_docs</code> is accepted by the schema but unused by this reviewer &mdash; safe to omit)</li>
-</ul></li>
-<li>Run by <strong>bare filename</strong>: <code>--input-file=my_requirements.jsonl</code>
-(found via the search order above, unless shadowed by a same-named file in
-<code>mock/</code> or <code>gold/</code>).</li>
-</ol>
+uv run pytest -m unit --cache-mode on
+```
+
+### Adding your own fixture
+
+1. Drop the file into a fixtures subdir — `tests/fixtures/local/` is recommended for project-specific data, e.g. `tests/fixtures/local/my_requirements.jsonl`.
+2. Match the reviewer's graph-input schema per row:
+  - RTM: `{"requirement": {...}, "test_cases": [...], "design_docs": [...]}`
+  - TC: `{"test_case": {...}, "requirements": [...]}` (`design_docs` is accepted by the schema but unused by this reviewer — safe to omit)
+3. Run by **bare filename**: `--input-file=my_requirements.jsonl` (found via the search order above, unless shadowed by a same-named file in `mock/` or `gold/`).
 
 <h2 id="artifacts">Run artifacts</h2>
-<p>Session-scoped recorder fixtures (<code>jsonl_recorders</code> / <code>_tc</code> /
-<code>_hz</code>) clear and append each input/output, then generate the HTML viewer from
-<code>outputs.jsonl</code> at session teardown <span class="src">tests/conftest.py:413-454</span>.
-Per session, under <code>logs/tests/run-&lt;timestamp&gt;/</code>
-<span class="src">tests/conftest.py:157-170</span>:</p>
-<ul>
-<li><code>inputs.jsonl</code> / <code>outputs.jsonl</code> — recorded records</li>
-<li><code>viewer.html</code> / <code>viewer_tc.html</code> / <code>viewer_hz.html</code> — generated viewer</li>
-<li><code>token_usage.jsonl</code> — per-call token/cost records + a session summary (<code>token_tracker</code> teardown) <span class="src">tests/conftest.py:173-191</span></li>
-<li><code>qaai.log</code> — node/app logs for the run</li>
-<li><code>graph.png</code> — graph diagram (RTM pipeline test writes it via <code>write_graph_png</code>) <span class="src">tests/integration/test_suite_reviewer/pipeline.py:89</span></li>
-<li><code>hazard_pipeline_state.json</code> — full hazard graph state (hazard test only)</li>
-</ul>
 
-<footer class="doc">Generated from the QAAI codebase on 2026-07-06. · <a href="index.html">Docs home</a></footer>
-</main>
-</div>
-<script>
-  const links=[...document.querySelectorAll('nav.toc a[href^="#"]')];
-  const byId=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
-  const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){
-    links.forEach(l=>l.classList.remove('active'));
-    const a=byId.get(e.target.id); if(a)a.classList.add('active');}});},
-    {rootMargin:'-10% 0px -80% 0px'});
-  document.querySelectorAll('main [id]').forEach(s=>obs.observe(s));
-</script>
-</body>
-</html>
+Session-scoped recorder fixtures (`jsonl_recorders` / `_tc` / `_hz`) clear and append each input/output, then generate the HTML viewer from `outputs.jsonl` at session teardown <span class="src">tests/conftest.py:413-454</span>. Per session, under `logs/tests/run-<timestamp>/` <span class="src">tests/conftest.py:157-170</span>:
+
+- `inputs.jsonl` / `outputs.jsonl` — recorded records
+- `viewer.html` / `viewer_tc.html` / `viewer_hz.html` — generated viewer
+- `token_usage.jsonl` — per-call token/cost records + a session summary (`token_tracker` teardown) <span class="src">tests/conftest.py:173-191</span>
+- `qaai.log` — node/app logs for the run
+- `graph.png` — graph diagram (RTM pipeline test writes it via `write_graph_png`) <span class="src">tests/integration/test_suite_reviewer/pipeline.py:89</span>
+- `hazard_pipeline_state.json` — full hazard graph state (hazard test only)
