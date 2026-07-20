@@ -18,7 +18,7 @@ from qaai.eval.spec import load_spec
 pytestmark = pytest.mark.unit
 
 RTM_SPEC = "eval/specs/test_suite_reviewer.yaml"
-COMMITTED_DATASET = Path("eval/datasets/test_suite")
+COMMITTED_DATASET = Path("eval/datasets/test_suite/actual/2026-07-17_12-01-00")
 
 
 def test_gold_to_eval_roundtrip(tmp_path):

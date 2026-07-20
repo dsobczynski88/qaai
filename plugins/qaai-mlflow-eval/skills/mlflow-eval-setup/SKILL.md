@@ -22,7 +22,7 @@ schema, then produce the labelled three-file dataset the harness scores against.
 ## Mission
 
 1. Pick / author the **eval spec** for the reviewer under `eval/specs/<name>.yaml`.
-2. Produce the **three-file dataset** under `eval/datasets/<name>/`.
+2. Produce the **three-file dataset** under `eval/datasets/<type>/actual/<ts>/`.
 3. Verify a score-only smoke run works before any live evaluation.
 
 ## The eval spec (the "different eval models" abstraction)
@@ -46,10 +46,23 @@ Three ready specs ship in `eval/specs/`: `test_suite_reviewer.yaml`,
 
 The canonical dataset is row-aligned — row *i* of every file describes the same item:
 
-    eval/datasets/<name>/actual_inputs.jsonl        # graph input          (run mode)
-                        /actual_outputs.jsonl        # ANSWER KEY, output shape
-                        /actual_labels.jsonl         # ANSWER KEY, flat projection
-                        /predictions/<ts>/...        # one live run's PREDICTIONS (predicted_*)
+    eval/datasets/<type>/actual/<ts>/actual_inputs.jsonl   # graph input          (run mode)
+                                    /actual_outputs.jsonl  # ANSWER KEY, output shape
+                                    /actual_labels.jsonl   # ANSWER KEY, flat projection
+                                    /edits.log             # who reviewed what, and why
+                                    /predictions/<ts2>/...  # one live run's PREDICTIONS
+
+`<type>` is `test_suite` / `test_case` / `hazard`; `<ts>` is `%Y-%m-%d_%H-%M-%S`. Every
+answer-key revision is its own timestamped folder under `actual/`, so a dataset is never
+edited in place and `predictions/` always hangs off the exact revision it scored against.
+
+Two things produce one of these folders, both from Dataset Studio
+(`plugins/qaai-dataset-gen`): `dataset_studio new` scaffolds an empty set for authoring,
+and `dataset_studio ingest` converts a completed run into one pre-filled with the model's
+own answers for a human to correct. Point `--dataset-dir` at the folder either way.
+
+> The committed RTM pilot is revision 1 of this layout, at
+> `eval/datasets/test_suite/actual/2026-07-17_12-01-00/`.
 
 All three committed files describe the **actual** (labelled) truth: inputs, and the expected
 answer in two shapes. Nothing in the dataset is a prediction. Predictions are produced by
@@ -62,7 +75,7 @@ From the existing gold fixtures (gives working data immediately):
 ```bash
 uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
-  --out eval/datasets/test_suite \
+  --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 ```
 
@@ -74,7 +87,7 @@ smoke/CI and measures nothing about the reviewer. To harvest outputs from a prio
 
 ```bash
 uv run python scripts/convert_to_eval.py outputs \
-  --input logs/run-<ts>/outputs.jsonl --out eval/datasets/test_suite
+  --input logs/run-<ts>/outputs.jsonl --out eval/datasets/test_suite/actual/2026-07-17_12-01-00
 ```
 
 You can also skip committing data and point the harness at your own files with
@@ -91,7 +104,7 @@ You can also skip committing data and point the harness at your own files with
 ```bash
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite --mode score --run-name setup-smoke
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 --mode score --run-name setup-smoke
 ```
 Expect a run with `overall_accuracy`, per-rubric metrics, and artifacts. Oracle data
 scores 1.0 and tags itself `oracle_selftest=true` — that only proves the plumbing; real
@@ -105,7 +118,7 @@ uv run python -c "
 from qaai.eval.spec import load_spec
 from qaai.eval.datasets import load_jsonl, outputs_to_labels
 s = load_spec('eval/specs/test_suite_reviewer.yaml')
-d = 'eval/datasets/test_suite'
+d = 'eval/datasets/test_suite/actual/2026-07-17_12-01-00'
 assert outputs_to_labels(s, load_jsonl(f'{d}/actual_outputs.jsonl')) == load_jsonl(f'{d}/actual_labels.jsonl')
 print('answer key is self-consistent')"
 ```

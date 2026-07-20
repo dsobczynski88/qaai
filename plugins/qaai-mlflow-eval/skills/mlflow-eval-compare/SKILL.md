@@ -21,10 +21,10 @@ Turn one run's predictions into a browsable, offline actual-vs-predicted diff.
 ## One command
 
 ```bash
-python -m qaai.eval.compare eval/datasets/test_suite/predictions/<ts>/
+python -m qaai.eval.compare eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/
 # or the script wrapper:
-uv run python scripts/compare_eval.py eval/datasets/test_suite/predictions/<ts>/ --open
-# -> wrote eval/datasets/test_suite/predictions/<ts>/compare.html  (N records, K verdict mismatches)
+uv run python scripts/compare_eval.py eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/ --open
+# -> wrote eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/compare.html  (N records, K verdict mismatches)
 ```
 
 Open `compare.html` in a browser (or pass `--open`). It is fully self-contained — inline
@@ -75,8 +75,8 @@ what deviated and why.
 ## Pitfalls
 
 - Needs a real `predictions/<ts>/` folder — i.e. a `--mode run` study (mlflow-eval-run). A
-  score-only run makes no predictions; there is nothing to diff. The committed dataset has no
-  predictions folder until you run one.
+  score-only run makes no predictions; there is nothing to diff. A freshly ingested or
+  scaffolded dataset has no predictions folder until you run one.
 - `R6` / `R7` appear as rubric rows but the answer key usually omits them, so they render `— vs —`
   (no diff) — expected, they are advisory.
 - If the predictions folder was moved away from its dataset, pass `--dataset-dir` (the answer key

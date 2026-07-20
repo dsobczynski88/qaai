@@ -1,12 +1,8 @@
-// Shared viewer utilities, concatenated ahead of each reviewer's script.js.
-// Relies on RECORDS / idx / feedback / STORAGE_KEY declared in that script, and
-// on each reviewer defining feedbackKey(rec, idx) to extract its record's id.
-
-function escapeHTML(s) {
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
-}
+// Shared reviewer-feedback viewer utilities, concatenated after common/dom.js and
+// ahead of each reviewer's script.js. Relies on RECORDS / idx / feedback /
+// STORAGE_KEY declared in that script, on each reviewer defining
+// feedbackKey(rec, idx) to extract its record's id, and on escapeHTML / openModal /
+// closeModal / readData from dom.js.
 
 function renderRatings() {
   const box = document.getElementById("rating");
@@ -50,12 +46,6 @@ function renderRight() {
 
 function render() { renderLeft(); renderRight(); }
 
-function openModal(bodyHTML) {
-  document.getElementById("modal-body").innerHTML = bodyHTML;
-  document.getElementById("modal").classList.add("open");
-}
-function closeModal() { document.getElementById("modal").classList.remove("open"); }
-
 // Wire the nav/export/modal controls and paint the first record. Each
 // reviewer's script.js calls this once, at the end, after defining renderLeft.
 function initViewer() {
@@ -85,13 +75,8 @@ function initViewer() {
 // ── Run log ("View log") ──
 // The run's problem notes (errored / incomplete / missing-input items) are
 // embedded as a JSON array in <script id="LOG">; the button echoes exactly the
-// messages the user saw live in the app during the run. Relies on openModal()
-// (defined in each reviewer's script.js, hoisted into this same script block).
-function readLog() {
-  const el = document.getElementById("LOG");
-  if (!el) return [];
-  try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; }
-}
+// messages the user saw live in the app during the run.
+function readLog() { return readJSONScript("LOG") || []; }
 
 function openLog() {
   const log = readLog();
@@ -133,14 +118,8 @@ function openLog() {
 // and the graph short-circuited (no review produced). When any record in this
 // batch was skipped for that reason, reveal the warning banner near the top and
 // wire its "Details" button to a modal listing which fields were missing per
-// record. Reads the embedded <script id="DATA"> directly so it does not depend
-// on the per-reviewer script.js load order.
-function readData() {
-  const el = document.getElementById("DATA");
-  if (!el) return [];
-  try { return JSON.parse(el.textContent || "[]"); } catch (_) { return []; }
-}
-
+// record. Reads the embedded <script id="DATA"> directly (via readData() from
+// dom.js) so it does not depend on the per-reviewer script.js load order.
 function recordLabel(rec, i) {
   const r = rec || {};
   const id = (r.requirement && r.requirement.req_id)
