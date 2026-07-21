@@ -1,6 +1,6 @@
 # Test Guide
 
-<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
+<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-20</div>
 
 This guide covers how to set up, install, and run the test suites under `tests/unit`, `tests/api`, and `tests/integration`, the default fixture files each test uses, and how to run the tests against your own custom input files.
 
@@ -56,7 +56,7 @@ pytest configuration <span class="src">pyproject.toml:48-55</span>: `asyncio_mod
 
 ### Environment variables for tests
 
-`conftest.py` calls `load_dotenv()` at import time <span class="src">tests/conftest.py:10</span>. Integration tests read their **own** live-LLM credentials from `PYTEST_*` variables in a repo-root `.env` <span class="src">tests/conftest.py:201-222</span>:
+`conftest.py` calls `load_dotenv()` at import time <span class="src">tests/conftest.py:10</span>. Integration tests read their **own** live-LLM credentials from `PYTEST_*` variables in a repo-root `.env` <span class="src">tests/conftest.py:211-234</span>:
 
 ```
 PYTEST_API_KEY=<your-key>
@@ -66,11 +66,11 @@ PYTEST_MODEL=gpt-4o-mini
 
 <div class="note warn"><strong>Production guard.</strong> The <code>real_client</code> fixture
 fails the test if <code>PYTEST_BASE_URL</code> contains the string <code>"prod"</code>, to prevent
-accidental production charges <span class="src">tests/conftest.py:206-211</span>. If
+accidental production charges <span class="src">tests/conftest.py:224-228</span>. If
 <code>PYTEST_API_KEY</code> is unset, integration tests <em>skip</em> rather than fail
-<span class="src">tests/conftest.py:203-204</span>.</div>
+<span class="src">tests/conftest.py:220-221</span>.</div>
 
-Test runs are isolated from server runs: all artifacts are written under `logs/tests/` (set via `settings.log_base_dir` **before** `qaai.api.main` is imported) <span class="src">tests/conftest.py:21</span>.
+Test runs are isolated from server runs: all artifacts are written under `logs/tests/` (set via `settings.log_base_dir` **before** `qaai.api.main` is imported) <span class="src">tests/conftest.py:22</span>.
 
 The unit suite needs no `.env` — it uses a call-counting stub client and mocks (boto3, the LLM client). `tests/unit/test_env_retriever.py` exercises the `APP_ENV`-driven secret hydration (DEV dotenv / PROD prefixed-mimic / AWS Secrets Manager) entirely with `monkeypatch` + a mocked boto3 client <span class="src">tests/unit/test_env_retriever.py:1-9</span>.
 
@@ -109,7 +109,7 @@ viewer-log, and secrets tests are unmarked, so they are <em>not</em> selected by
 
 <h2 id="unit">tests/unit — fast tests, no live LLM</h2>
 
-These make **no network calls**. LLM clients are replaced by a call-counting stub (`stub_llm_client` / `_StubLLMClient` in conftest <span class="src">tests/conftest.py:482-510</span>) or by per-test mocks, so a test can assert exactly how many times inference would have run (e.g. `stub_llm_client.call_count == 0` proves a graph short-circuited before any LLM call). Reviewer-graph knobs come from the `review_settings` fixture (a `SimpleNamespace` of `cache_mode` / `test_mode` / `include_edge_case_analysis`, defaulted from CLI options) <span class="src">tests/conftest.py:462-479</span>.
+These make **no network calls**. LLM clients are replaced by a call-counting stub (`stub_llm_client` / `_StubLLMClient` in conftest <span class="src">tests/conftest.py:499-520</span>) or by per-test mocks, so a test can assert exactly how many times inference would have run (e.g. `stub_llm_client.call_count == 0` proves a graph short-circuited before any LLM call). Reviewer-graph knobs come from the `review_settings` fixture (a `SimpleNamespace` of `cache_mode` / `test_mode` / `include_edge_case_analysis`, defaulted from CLI options) <span class="src">tests/conftest.py:479-496</span>.
 
 ### Input-gate &amp; topology tests <span class="pill">@pytest.mark.unit</span>
 

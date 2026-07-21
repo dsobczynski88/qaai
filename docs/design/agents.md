@@ -1,6 +1,6 @@
 # Reviewer Agent Design
 
-<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
+<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-20</div>
 
 ## Overview
 
@@ -37,33 +37,39 @@ State: `RTMReviewState` with fan-in field `coverage_analysis: Annotated[List[Eva
   -&gt; data_integration            (JAMA fetch, or no-op when data already in state)
   -&gt; transform                   (JAMA rows -&gt; graph state)
   -&gt; validation_gate             (skip the graph -&gt; END when required inputs are missing)
-  -&gt; [ decomposer | summarizer | design_summarizer ]   (parallel)
+  -&gt; [ decomposer | summarizer | design_summarizer? ]   (parallel; design_summarizer only when include_design_summaries)
   -&gt; coverage_router             (join)
   -&gt; dispatch_coverage  --Send xN--&gt;  spec_evaluator    (parallel, one per decomposed spec)
   -&gt; synthesizer                 (reduces coverage_analysis via operator.add)
   -&gt; END</code></pre>
 
-Nodes: `SummaryNode` / `DesignSummarizerNode` (`BatchedLLMNode`), `SingleSpecEvaluatorNode`, and the `SynthesizerNode` (marked `is_final_output=True`) plus the shared `DecomposerNode`. `dispatch_coverage` fans out one `Send` per decomposed spec and copies `cache_mode` into each payload <span class="src">test_suite_reviewer/nodes.py:164-190</span>.
+`route_after_gate_rtm` — the conditional edge out of `validation_gate` — always fans out to `decomposer` and `summarizer`, and fans out to `design_summarizer` only when `state["include_design_summaries"]` is set; all three (or two) still join at `coverage_router` before the spec fan-out <span class="src">test_suite_reviewer/pipeline.py:158-172</span>.
+
+Nodes: `SummaryNode` / `DesignSummarizerNode` (`BatchedLLMNode`), `SingleSpecEvaluatorNode`, and the `SynthesizerNode` (marked `is_final_output=True`) plus the shared `DecomposerNode`. `dispatch_coverage` fans out one `Send` per decomposed spec and copies `cache_mode` into each payload <span class="src">test_suite_reviewer/nodes.py:189-219</span>. `DesignSummarizerNode` sets `PER_ITEM_CACHE = True` and caches each design doc's summary under its own `doc_id` rather than the requirement, shared across every requirement/prompt-set that cites the doc — see [Caching → Per-item design-doc summaries](caching.html#peritem).
 
 <h2 id="tc">Test Case Reviewer</h2>
 
-State: `TCReviewState`; in decomposition mode the requirement axis fans out per requirement to a fused decompose→coverage node, with both `decomposed_requirements` and `coverage_analysis` as `Annotated[List[...], operator.add]` channels, while the logical and prereqs axes are single test-case-level nodes <span class="src">test_case_reviewer/core.py</span>. Built by `TCReviewerRunnable.build()` <span class="src">test_case_reviewer/pipeline.py</span>:
+State: `TCReviewState`; in decomposition mode the requirement axis fans out per requirement to a fused decompose→coverage node, with both `decomposed_requirements` and `coverage_analysis` as `Annotated[List[...], operator.add]` channels, while the logical and prereqs axes are single test-case-level nodes <span class="src">test_case_reviewer/core.py</span>. Built by `TCReviewerRunnable.build()` <span class="src">test_case_reviewer/pipeline.py:100-180</span>. The requirement axis is one of **two mutually exclusive branches**, chosen once at graph-build time by `self.include_decomposition` (driven by the `include_decomposition_analysis` request field — it is not a per-request runtime branch):
 
 <pre class="diagram"><code>START
   -&gt; data_integration -&gt; transform -&gt; validation_gate
   -&gt; coverage_router
-       |-- dispatch_requirement_pipeline --Send xN--&gt; requirement_pipeline
-       |        (decompose one requirement, then cover its specs concurrently)
-       |-- (direct edge) ---------------------------&gt;  logical_evaluator
-       |-- (direct edge) ---------------------------&gt;  prereqs_evaluator
+       |-- decomposition mode (include_decomposition_analysis=True, default):
+       |     dispatch_requirement_pipeline --Send xN--&gt; requirement_pipeline
+       |     (decompose one requirement, then cover its specs concurrently)
+       |-- no-decomposition mode (include_decomposition_analysis=False):
+       |     dispatch_coverage_by_requirement --Send xN--&gt; coverage_evaluator
+       |     (judge the original requirement text directly, no decomposer call)
+       |-- (direct edge, both modes) ---------------------------&gt;  logical_evaluator
+       |-- (direct edge, both modes) ---------------------------&gt;  prereqs_evaluator
   -&gt; aggregator                   (5-row evaluated_checklist)
   -&gt; END</code></pre>
 
-The five review objectives are embedded directly in the `single_test_aggregator` prompt (v8/v9).
+The five review objectives are embedded directly in the `single_test_aggregator` prompt (v8 for decomposition mode, v9 for no-decomposition mode).
 
 <h2 id="hazard">Hazard Risk Reviewer</h2>
 
-State: `HazardReviewState` with two fan-in fields — `requirement_reviews` and `hazard_findings` (both `operator.add`) <span class="src">hazard_risk_reviewer/core.py:408,411</span>. The graph is staged by data dependency <span class="src">hazard_risk_reviewer/pipeline.py:144-315</span>:
+State: `HazardReviewState` with two fan-in fields — `requirement_reviews` and `hazard_findings` (both `operator.add`) <span class="src">hazard_risk_reviewer/core.py:416,419</span>. The graph is staged by data dependency <span class="src">hazard_risk_reviewer/pipeline.py:144-315</span>:
 
 <pre class="diagram"><code>START -&gt; data_integration -&gt; transform -&gt; validation_gate
   validation_gate            (skip the graph -&gt; END when required SHA fields are missing)
@@ -79,11 +85,11 @@ State: `HazardReviewState` with two fan-in fields — `requirement_reviews` and 
   -&gt; final_assessment         (deterministic; waits on h1,h2,h6,r7)
   -&gt; END</code></pre>
 
-The `final_assessment` node computes `overall_verdict` **deterministically** from the seven Yes/No/N-A findings (never by the LLM). `RequirementReviewerNode` wraps a shared `RTMReviewerRunnable` and invokes `await self.rtm.graph.ainvoke(rtm_input)` for one requirement, caching the whole-subgraph result as one `req_id`-keyed blob <span class="src">hazard_risk_reviewer/nodes.py:313-446</span>.
+The `final_assessment` node computes `overall_verdict` **deterministically** from the seven Yes/No/N-A findings (never by the LLM). `RequirementReviewerNode` wraps a shared `RTMReviewerRunnable` and invokes `await self.rtm.graph.ainvoke(rtm_input)` for one requirement, caching the whole-subgraph result as one `req_id`-keyed blob <span class="src">hazard_risk_reviewer/nodes.py:317-460</span>. A blob cache hit returns the cached `RequirementReview` directly — the RTM subgraph (and its own node-level caching, including the per-item design-doc cache) is skipped entirely for that requirement on that run. See [Caching → The hazard reviewer's per-requirement blob cache](caching.html#reqblob).
 
 <h2 id="nodes">Shared node engine</h2>
 
-All nodes derive from base classes in `qaai/agents/shared/nodes.py`. `StandardLLMNode` is a **Template Method**: its `__call__` runs a fixed pipeline and subclasses fill in only the hooks <span class="src">shared/nodes.py:547-613</span>:
+All nodes derive from base classes in `qaai/agents/shared/nodes.py`. `StandardLLMNode` is a **Template Method**: its `__call__` runs a fixed pipeline and subclasses fill in only the hooks <span class="src">shared/nodes.py:571-641</span>:
 
 <pre class="diagram"><code>__call__(state):
   _validate_state(state)         -&gt; False ? return _get_skip_response()  (soft-fail)
@@ -100,7 +106,7 @@ All nodes derive from base classes in `qaai/agents/shared/nodes.py`. `StandardLL
 
 `ReviewCacheManager` is a write-through cache on disk, shared by all reviewers <span class="src">qaai/core/cache.py</span>: each per-node result is persisted as an append-only, timestamped JSON file at `{cache_dir}/{entity_id}/[{prompt_set}/]{node}_{prompt_version}_{timestamp}.json` (reads select the newest), keyed `review:{entity_id}:[{prompt_set}:]{node}:{prompt_version}`. See the [Caching design doc](caching.html) for the full layout and payload schema.
 
-Caching is governed per node by `cache_mode` threaded through state <span class="src">shared/nodes.py:169-192</span>: `off` never reads but re-runs every node and still writes a new timestamped result; `on` (default) reuses cached interim nodes but always re-runs nodes flagged `is_final_output=True`; `test` reads all nodes (incl. final) and makes no LLM calls (a miss raises `CacheRequiredError`). Because `Send` creates fresh payloads, every dispatcher copies `cache_mode` into each fan-out payload so children inherit the policy. Bumping a prompt version changes the key — the invalidation mechanism. See [Configuration → Caching](../configuration.html#caching).
+Caching is governed per node by `cache_mode` threaded through state <span class="src">shared/nodes.py:181-215</span>: `off` never reads but re-runs every node and still writes a new timestamped result; `on` (default) reuses cached interim nodes but always re-runs nodes flagged `is_final_output=True`; `test` reads all nodes (incl. final) and makes no LLM calls (a miss raises `CacheRequiredError`). Because `Send` creates fresh payloads, every dispatcher copies `cache_mode` into each fan-out payload so children inherit the policy. Bumping a prompt version changes the key — the invalidation mechanism. A node marked `design_sensitive=True` also carries a `ds0`/`ds1` discriminator sourced from `include_design_summaries` so the toggle never reads back a result computed under the other setting <span class="src">shared/nodes.py:150,165-194</span>. `BatchedLLMNode` subclasses can additionally opt into `PER_ITEM_CACHE`, caching each batch item under its own entity id rather than the node's usual entity — the design summarizers use this to dedupe design-doc summaries across every requirement/hazard that cites the same doc <span class="src">shared/nodes.py:674-680</span>. See [Configuration → Caching](../configuration.html#caching) and the full [Caching design doc](caching.html).
 
 <h2 id="logging">Logging &amp; telemetry</h2>
 
@@ -119,9 +125,9 @@ Prompts are a versioned registry, not flat files. Each node role maps (via `Prom
 <table>
 <thead><tr><th>Pattern</th><th>Where</th><th>Why</th></tr></thead>
 <tbody>
-<tr><td>Template Method</td><td><code>StandardLLMNode.__call__</code> <span class="src">shared/nodes.py:547-613</span></td><td>One orchestration; nodes implement only payload/format hooks.</td></tr>
+<tr><td>Template Method</td><td><code>StandardLLMNode.__call__</code> <span class="src">shared/nodes.py:571-641</span></td><td>One orchestration; nodes implement only payload/format hooks.</td></tr>
 <tr><td>Send fan-out + <code>operator.add</code> reduce</td><td><code>dispatch_*</code> + <code>Annotated[List, operator.add]</code></td><td>Maximize parallelism; results concatenate deterministically.</td></tr>
-<tr><td>Subgraph embedding</td><td><code>RequirementReviewerNode</code> <span class="src">hazard_risk_reviewer/nodes.py:313-446</span></td><td>Reuse the entire RTM pipeline per traced requirement.</td></tr>
+<tr><td>Subgraph embedding</td><td><code>RequirementReviewerNode</code> <span class="src">hazard_risk_reviewer/nodes.py:317-460</span></td><td>Reuse the entire RTM pipeline per traced requirement.</td></tr>
 <tr><td>Soft-fail nodes</td><td><code>_validate_state</code> / dispatchers returning <code>[]</code></td><td>Missing upstream data degrades to a skip, not a crash.</td></tr>
 <tr><td>Factory functions</td><td><code>make_*_node(...)</code></td><td>Inject client/model/prompt + cache wiring consistently.</td></tr>
 <tr><td>Write-through cache</td><td><code>ReviewCacheManager</code> <span class="src">core/cache.py</span></td><td>Durable disk JSON as regulatory evidence; prompt-version-keyed invalidation.</td></tr>

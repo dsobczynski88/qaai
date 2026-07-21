@@ -115,7 +115,13 @@ def _cache_write_allowed(self, state):
 <code>true</code> → <code>on</code> / <code>false</code> → <code>off</code>,
 and the legacy radio values <code>partial</code> → <code>on</code> /
 <code>full</code> → <code>test</code> are still accepted. The hazard reviewer's
-embedded RTM subgraph is driven internally with <code>test</code> when regenerating.</div>
+embedded RTM subgraph inherits the parent run's <code>cache_mode</code> unchanged
+(see <a href="#reqblob">the per-requirement blob cache</a>) — it is never forced
+into a different mode internally.</div>
+
+<h2 id="concurrency">Concurrency</h2>
+
+Within one review job, items are <strong>not</strong> processed strictly one at a time. `_run_batch_review` <span class="src">qaai/api/services.py:233-298</span> fans every item out with `asyncio.gather` under an `asyncio.Semaphore(settings.max_concurrent_reviews)` (`MAX_CONCURRENT_REVIEWS`, default 8) — a soft cap that sits above the client's hard RPM/TPM limiter. Each item still fans out internally via `Send`, so peak concurrent LLM calls are roughly the semaphore width times the per-graph fan-out. `return_exceptions=True` means one item's exception never cancels its siblings; a raised or incomplete item has only its own run purged (see <a href="#invalidation">Invalidation</a>) rather than aborting the batch, while a `test`-mode cache miss on <em>any</em> item is still a hard, whole-job failure. Outputs are written back to `outputs.jsonl` in original input order regardless of completion order.
 
 <h2 id="threading">Threading &amp; fan-out</h2>
 
@@ -142,6 +148,29 @@ A run may resolve its prompts from a named **prompt set** (e.g. the "Include Edg
 </tbody></table>
 
 The set name flows `PromptConfig.set_name` → node constructor (`prompt_set`) → `ReviewCacheManager.get/set` <span class="src">qaai/core/config.py, qaai/core/cache.py</span>. It is optional and defaults to `None`, so default-config runs (e.g. the test-case reviewer) keep the legacy un-namespaced layout unchanged. This is exactly why `test_suite_reviewer_v3` and `_v4` never alias even though they share every node version except the decomposer.
+
+<h2 id="peritem">Per-item design-doc summaries</h2>
+
+Design-doc summarization is cached **per document, not per requirement/hazard**. `BatchedLLMNode` exposes an opt-in `PER_ITEM_CACHE` flag <span class="src">qaai/agents/shared/nodes.py:674-680</span>: when a subclass sets it, each item in the batch is looked up and written under its **own** cache entity — `_get_item_cache_id(item)` — instead of the requirement/hazard entity the node was invoked for. `__call__` then only LLM-processes the cache misses and merges hits back in original item order.
+
+Both design summarizers opt in — the RTM `DesignSummarizerNode` <span class="src">qaai/agents/test_suite_reviewer/nodes.py:133-147</span> and the hazard `HazardDesignSummarizerNode` <span class="src">qaai/agents/hazard_risk_reviewer/nodes.py:85-105</span> — keyed by `doc_id` (typically a `DD-*` id). Each also overrides `_item_cache_prompt_set()` to return `None`, so a summary is written **un-namespaced** and reused across every prompt set, not just the one that first produced it — a design doc's content doesn't change with the decomposer version.
+
+<div class="note">Because the hazard reviewer's embedded RTM subgraph shares the parent's
+<code>cache_manager</code> (see below), a design doc cited by both a standalone RTM run and
+a hazard's per-requirement subgraph run is summarized <strong>once</strong> and reused by
+both — the per-item cache lives one level below the entity-scoped cache described above.</div>
+
+<h2 id="dsdiscriminator">Design-summary discriminator (ds0/ds1)</h2>
+
+A node whose output *depends on whether design summaries were included at all* (not just what they say) is marked `design_sensitive=True` at construction <span class="src">qaai/agents/shared/nodes.py:150,165-194</span>. Such a node's cache key/disk filename carries an extra `ds0`/`ds1` segment sourced from the per-request `include_design_summaries` toggle, so a run with the toggle on never accidentally reads a cached result produced with it off (or vice versa). This is separate from the prompt-set namespacing above and applies independently of it.
+
+The hazard reviewer's `RequirementReviewerNode` blob cache (below) is design-sensitive for the same reason: the blob wraps the *entire* embedded RTM result, and that result's shape changes when `include_design_summaries` flips.
+
+<h2 id="reqblob">The hazard reviewer's per-requirement blob cache</h2>
+
+`RequirementReviewerNode` — the hazard graph's wrapper around the embedded RTM subgraph — caches the **whole RTM result** for a requirement under `req_id`, node name `requirementreviewernode` <span class="src">qaai/agents/hazard_risk_reviewer/nodes.py:317-405</span>. On a hit it returns the cached `RequirementReview` directly and **never invokes the RTM subgraph at all** for that requirement — the subgraph's own node-level caching (including the design-doc per-item cache above) only comes into play on a miss. The same requirement is frequently traced from multiple hazard rows, so this blob cache also means the RTM review for a shared requirement runs at most once per run, not once per hazard.
+
+The embedded RTM subgraph is invoked with the **same `cache_mode` the parent hazard run received** — it is not forced into `test` mode internally <span class="src">qaai/agents/hazard_risk_reviewer/nodes.py:354,402</span>; a hazard run in `on` mode drives an embedded RTM run also in `on` mode, reusing the RTM subgraph's interim nodes and only re-running its final synthesizer.
 
 ## Invalidation
 

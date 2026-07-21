@@ -1,6 +1,6 @@
 # API Server & Frontend Guide
 
-<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-17</div>
+<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-20</div>
 
 QAAI exposes three LangGraph reviewers behind a FastAPI app (`qaai.api.main:app`). Every review runs as an **asynchronous background job** and returns a self-contained HTML viewer once complete.
 
@@ -94,6 +94,18 @@ A review can take several minutes. If the report were returned synchronously, an
 uvicorn worker — see <a href="#prod">Production</a>. The frontend performs submit → poll →
 download automatically (polling every ~4 s, showing elapsed time and per-item progress).</div>
 
+<div class="note"><strong>Items within one job run concurrently.</strong> "One job at a time"
+is a job-level lock, not an item-level one: <code>_run_batch_review</code>
+<span class="src">qaai/api/services.py:233-298</span> fans a job's items out with
+<code>asyncio.gather</code> under <code>asyncio.Semaphore(settings.max_concurrent_reviews)</code>
+(<code>MAX_CONCURRENT_REVIEWS</code>, default 8) rather than awaiting them one at a time. A single
+item's exception (<code>return_exceptions=True</code>) never cancels its siblings — the item is
+skipped, its run-scoped cache entries are purged via <code>purge_run</code> so the failed attempt is
+never reused (see <a href="configuration.html#caching">Configuration &amp; Caching</a>), and the job
+only fails outright if <em>nothing</em> produced output or if a <code>test</code>-mode cache miss
+occurs on any item. Regardless of completion order, <code>outputs.jsonl</code> is written back in
+the original input order.</div>
+
 <h2 id="hazard">Testing the hazard upload endpoint</h2>
 
 The hazard endpoint takes an uploaded SHA Excel workbook instead of a `baseline_id`. The example below runs offline against **cached JAMA results** by passing `test_mode=true`:
@@ -183,7 +195,18 @@ Both endpoints accept a `BaselineRequest` body <span class="src">qaai/api/schema
 <tr><td><code>include_edge_case_analysis</code></td><td>bool</td><td><code>false</code></td><td><code>true</code> → prompt set <code>test_suite_reviewer_v4</code> (edge-case decomposer v6); <code>false</code> → <code>test_suite_reviewer_v3</code> (baseline v5). Applies to the test-suite review only. <span class="src">routes.py:102</span></td></tr>
 <tr><td><code>include_decomposition_analysis</code></td><td>bool</td><td><code>true</code></td><td>Test-case review only: <code>true</code> → <code>test_case_reviewer_v2</code> (decomposition); <code>false</code> → <code>test_case_reviewer_v3</code> (no-decomposition) <span class="src">routes.py:134</span></td></tr>
 <tr><td><code>include_design_summaries</code></td><td>bool</td><td><code>false</code></td><td>Test-suite review only: <code>true</code> → run the <code>design_summarizer</code> so design context feeds per-spec coverage and the R6 criterion; <code>false</code> skips that branch <span class="src">qaai/api/schemas.py:55-64</span></td></tr>
+<tr><td><code>baseline_review_type</code></td><td><code>"requirements"|"tests"</code></td><td><code>"tests"</code></td><td>Test-suite review only: <code>tests</code> fetches baseline items as test cases traced up to their requirements (<code>request_type=test_suite_review</code>, the original behavior); <code>requirements</code> fetches requirement ids directly (<code>request_type=requirement_review</code>). Both produce the same per-requirement output shape <span class="src">qaai/api/schemas.py:65-75</span></td></tr>
 </tbody></table>
+
+<div class="note"><strong>Reviewing a queue of baselines without the API/job layer.</strong>
+<code>scripts/run_baselines.py</code> drives the RTM graph directly over one or more
+baseline ids, sequentially, wiring the client/model/cache_manager the same way
+<code>qaai.api.main:lifespan</code> does so behavior matches a real
+<code>/api/v1/test-suite-review</code> request — useful for a scripted queue without going
+through jobs/polling. Runs land under <code>logs/tests/</code> by default (kept separate
+from API-server runs under <code>logs/</code>); one bad baseline doesn't stop the queue.
+<pre><code>uv run python scripts/run_baselines.py BASE-1 BASE-2 BASE-3
+uv run python scripts/run_baselines.py --file baselines.txt --cache-mode off --edge-case</code></pre></div>
 
 <div class="note"><strong>Every run option is documented in one place.</strong> The cache-mode radio
 (<code>off</code> / <code>on</code> / <code>test</code>) and the three analysis toggles

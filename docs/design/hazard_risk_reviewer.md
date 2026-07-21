@@ -1,6 +1,6 @@
 # Hazard Risk Reviewer
 
-<div class="meta">QAAI (qaai) · qaai.agents.hazard_risk_reviewer · endpoint POST /api/v1/hazard-risk-review · generated from the codebase 2026-07-06</div>
+<div class="meta">QAAI (qaai) · qaai.agents.hazard_risk_reviewer · endpoint POST /api/v1/hazard-risk-review · generated from the codebase 2026-07-20</div>
 
 <h2 id="purpose">What it checks &amp; how</h2>
 
@@ -21,7 +21,7 @@ The graph state is `HazardReviewState` <span class="src">hazard_risk_reviewer/co
 <tr><td><code>pyjama_request</code></td><td><code>PyJamaRequest</code></td><td>Optional</td><td>When present, a JAMA <code>bidirectional_trace</code> fetch merges traceability onto the row; absent → Excel-only.</td></tr>
 </tbody></table>
 
-API form fields: `project_name`, the `.xlsx` file, `sheet_name` (default `SHA Table`), `identifier_pattern` (default `GID-\d+`; passed to the loader as `extract_gids_format`), `cache_mode`, `use_cache`, `test_mode`, and `include_edge_case_analysis`.
+API form fields: `project_name`, the `.xlsx` file, `sheet_name` (default `SHA Table`), `identifier_pattern` (default `GID-\d+`; passed to the loader as `extract_gids_format`), `cache_mode`, `use_cache`, `test_mode`, `include_edge_case_analysis`, and `include_design_summaries` (gates the embedded RTM's `design_summarizer` branch; see [Configuration → Caching](../configuration.html#caching)). See the full field table in the [API Guide](../api.html#hazard).
 
 <h2 id="graph">Graph topology</h2>
 
@@ -56,7 +56,7 @@ Findings accumulate into `hazard_findings` via an `Annotated[List[HazardFinding]
 
 <h2 id="subgraph">Embedded RTM subgraph</h2>
 
-`RequirementReviewerNode` wraps a compiled `RTMReviewerRunnable` and invokes it once per traced requirement (fanned out via `Send`). The whole RTM result is cached as one blob keyed on `req_id` — so a requirement appearing in several hazard rows is reviewed at most once per prompt version. The embedded RTM is itself uncached internally; only the blob is cached.
+`RequirementReviewerNode` wraps a compiled `RTMReviewerRunnable` and invokes it once per traced requirement (fanned out via `Send`). The whole RTM result is cached as one blob keyed on `req_id` — so a requirement appearing in several hazard rows is reviewed at most once per prompt version. On a blob-cache hit the RTM subgraph is **skipped entirely**; on a miss the subgraph runs and its own node-level caching applies too, because the embedded RTM shares the hazard reviewer's `cache_manager` — it is not a separate, uncached instance <span class="src">hazard_risk_reviewer/nodes.py:330-405</span>. That includes the RTM `design_summarizer`'s per-item, `doc_id`-keyed cache (see [Caching → Per-item design-doc summaries](caching.html#peritem)), so a design doc cited by both a standalone RTM run and a hazard row's embedded subgraph is summarized once and reused by both. The embedded subgraph is invoked with the parent hazard run's `cache_mode` unchanged — it is never forced into a different mode.
 
 <div class="note">The embedded RTM uses the hazard reviewer's prompt set, so the
 "Include Edge Case Analysis" toggle flows through to the per-requirement coverage

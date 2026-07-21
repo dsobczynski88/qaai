@@ -1,6 +1,6 @@
 # Test Suite Reviewer (RTM)
 
-<div class="meta">QAAI (qaai) · qaai.agents.test_suite_reviewer · endpoint POST /api/v1/test-suite-review · generated from the codebase 2026-07-06</div>
+<div class="meta">QAAI (qaai) · qaai.agents.test_suite_reviewer · endpoint POST /api/v1/test-suite-review · generated from the codebase 2026-07-20</div>
 
 <h2 id="purpose">What it checks &amp; how</h2>
 
@@ -21,7 +21,7 @@ The graph state is `RTMReviewState` <span class="src">test_suite_reviewer/core.p
 <tbody>
 <tr><td><code>requirement</code></td><td><code>Requirement</code> (<code>req_id</code> + <code>text</code>)</td><td>Yes</td><td>The single requirement under review; <code>req_id</code> is the cache partition.</td></tr>
 <tr><td><code>test_cases</code></td><td><code>List[TestCase]</code></td><td>Yes</td><td>Test cases traced to the requirement (id, description, setup, steps, expected results).</td></tr>
-<tr><td><code>design_docs</code></td><td><code>List[DesignDocument]</code></td><td>Optional</td><td>Design docs implementing the requirement; enables the R6 design-alignment lens.</td></tr>
+<tr><td><code>design_docs</code></td><td><code>List[DesignDocument]</code></td><td>Optional</td><td>Design docs implementing the requirement; feeds R6 design-alignment, but only when the run's <code>include_design_summaries</code> flag is also set — see below.</td></tr>
 <tr><td><code>cache_mode</code></td><td><code>"off" | "on" | "test"</code></td><td>Optional</td><td>Per-run cache behaviour; defaults to <code>on</code> (legacy <code>partial</code>→<code>on</code>, <code>full</code>→<code>test</code> still accepted).</td></tr>
 </tbody></table>
 
@@ -38,13 +38,13 @@ Via the API, these arrive from a JAMA baseline: the `data_integration` node fetc
   -&gt; data_integration            (JAMA fetch, or no-op when data already in state)
   -&gt; transform                   (JAMA rows -&gt; graph state)
   -&gt; validation_gate             (skip the graph -&gt; END when required inputs are missing)
-  -&gt; [ decomposer | summarizer | design_summarizer ]   (parallel)
+  -&gt; [ decomposer | summarizer | design_summarizer? ]   (parallel; design_summarizer only when include_design_summaries)
   -&gt; coverage_router             (join barrier)
   -&gt; dispatch_coverage  --Send xN--&gt;  spec_evaluator    (parallel, one per spec)
   -&gt; synthesizer                 (reduces coverage_analysis via operator.add)
   -&gt; END</code></pre>
 
-Decomposer, summarizer and design_summarizer run concurrently; all three land on `coverage_router` (a no-op join) before `dispatch_coverage` fans out one `Send` per decomposed spec. The per-spec verdicts accumulate into `coverage_analysis` via an `Annotated[List[EvaluatedSpec], operator.add]` reducer, which the synthesizer then reduces. <span class="src">test_suite_reviewer/pipeline.py</span>
+Decomposer and summarizer always run; `design_summarizer` is a **conditional** third branch, dispatched by `route_after_gate_rtm` only when `state["include_design_summaries"]` is set <span class="src">test_suite_reviewer/pipeline.py:158-172</span>. Whichever branches run land on `coverage_router` (a no-op join) before `dispatch_coverage` fans out one `Send` per decomposed spec. The per-spec verdicts accumulate into `coverage_analysis` via an `Annotated[List[EvaluatedSpec], operator.add]` reducer, which the synthesizer then reduces. <span class="src">test_suite_reviewer/pipeline.py</span>
 
 <h2 id="nodes">Nodes &amp; prompts</h2>
 
@@ -81,6 +81,8 @@ The synthesizer returns exactly six `MandatoryFinding` items (M1–M5 + R6). `ov
 <h2 id="cache">Caching &amp; prompt sets</h2>
 
 Every interim node opts into the shared write-through `ReviewCacheManager` (on disk), partitioned by `req_id`. Under `on` (the default), interim nodes are reused from cache but the final synthesizer always re-runs for a fresh assessment.
+
+`design_summarizer` is the exception: it caches each design doc's summary under its own `doc_id` (`PER_ITEM_CACHE = True`), not under `req_id`, and shares that cache across every prompt set — see [Caching → Per-item design-doc summaries](caching.html#peritem). A doc cited by multiple requirements is summarized once and reused by all of them.
 
 <div class="note"><strong>Prompt sets &amp; the edge-case toggle.</strong> The API
 field <code>include_edge_case_analysis</code> selects the prompt set:

@@ -1,11 +1,11 @@
 # MLflow Evaluation
 
-<div class="meta">QAAI (qaai) · qaai.eval + scripts/ + plugins/qaai-mlflow-eval · generated from the codebase 2026-07-17</div>
+<div class="meta">QAAI (qaai) · qaai.eval + scripts/ + plugins/qaai-mlflow-eval · generated from the codebase 2026-07-20</div>
 
 This guide covers the spec-driven MLflow evaluation harness for the three QAAI reviewer pipelines: how it scores each reviewer as a classifier, the three-file dataset format, the YAML spec that makes the schema swappable per project, the CLIs under `scripts/`, and the `qaai-mlflow-eval` plugin that wraps it in skills.
 
 <div class="note"><strong>New subsystem.</strong> The <code>qaai/eval/</code> package, the
-<code>eval/</code> spec + dataset tree, the four <code>scripts/</code> CLIs, and the
+<code>eval/</code> spec + dataset tree, the five <code>scripts/</code> CLIs, and the
 <code>plugins/qaai-mlflow-eval</code> plugin are all new. The harness reuses the existing
 reviewer runnables, prompt registry, client, and telemetry rather than duplicating them —
 it does not modify the pipelines or the pytest suites.</div>
@@ -225,6 +225,9 @@ The full flag surface <span class="src">scripts/evaluate_with_mlflow.py:31-58</s
 <tr><td><code>--predictions-dir</code></td><td><code>&lt;dataset-dir&gt;/predictions</code></td><td>Where run mode saves its timestamped prediction set</td></tr>
 <tr><td><code>--no-save-predictions</code></td><td>off</td><td>Do not persist a prediction set (run mode); outputs stay in MLflow artifacts only</td></tr>
 <tr><td><code>--tracking-uri</code></td><td><code>file:./mlruns</code></td><td>MLflow tracking URI (or <code>$MLFLOW_TRACKING_URI</code>)</td></tr>
+<tr><td><code>--model</code></td><td>spec's model / <code>settings.model</code></td><td>Run mode only. Overrides only the <em>logged</em> <code>params.model</code> string on the returned client <span class="src">qaai/eval/runners.py:89-116</span> — <code>base_url</code>/<code>api_key</code> still come from settings (one endpoint, many models), so this changes which model id is requested, not where the request goes.</td></tr>
+<tr><td><code>--no-timestamp-subdir</code></td><td>off</td><td>Write predictions directly to <code>--predictions-dir</code> instead of a fresh timestamped subfolder under it</td></tr>
+<tr><td><code>--log-level</code></td><td><code>INFO</code></td><td>Console log level for the run (the harness calls <code>bootstrap_console_logging()</code> so per-record failures are visible, not silent)</td></tr>
 </tbody></table>
 
 ### A/B comparing prompt sets
@@ -238,6 +241,38 @@ for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
     --mode run --prompt-set $ps --run-name $ps
 done
 ```
+
+<h2 id="sweep">Hyperparameter sweeps</h2>
+
+`scripts/sweep.py` fans out one `--mode run` child process per grid cell of `--models` × `--prompt-sets` (an "arm"), then ranks all arms in the experiment by their logged MLflow metrics <span class="src">scripts/sweep.py:1-35</span>:
+
+```
+uv run python scripts/sweep.py \
+  --spec eval/specs/test_suite_reviewer.yaml \
+  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --models gpt-5.4-mini,gpt-5-mini --prompt-sets test_suite_reviewer_v3,test_suite_reviewer_v4 \
+  --experiment rtm-sweep --limit 20 --max-parallel-arms 4 [--dry-run] [--skip-unavailable-models]
+```
+
+Every arm hits the **one** endpoint derived from `settings` (`API_BASE_URL`/`API_KEY`) — there is no per-model provider routing, so a model id that endpoint doesn't serve (e.g. an Anthropic id against an OpenAI-compatible endpoint) 404s on every record and would otherwise silently produce an all-null arm. `preflight_models()` pings each unique model once up front and **aborts before launching any arm** if one is unserved, unless `--skip-unavailable-models` is passed to drop it from the grid instead <span class="src">scripts/sweep.py:123-145</span>.
+
+The sweep owns three concurrency hazards a hand-run set of parallel arms would hit <span class="src">scripts/sweep.py:1-13</span>:
+
+- **Per-arm predictions dir** — `<dataset-dir>/predictions/<experiment>/<arm>` under one fresh timestamped sweep folder, dodging `new_predictions_dir`'s second-resolution `exist_ok=True` collision (arm name = `<model>__<prompt_set>`, filesystem/MLflow-safe slugged) <span class="src">scripts/sweep.py:53-65</span>.
+- **Rate-limit division** — each child's `MAX_REQUESTS_PER_MINUTE` env is `floor(settings.max_requests_per_minute / max_parallel_arms)`, so N simultaneous arms don't N× the endpoint's ceiling <span class="src">scripts/sweep.py:97-120</span>. `API_MODEL` is also set per child so telemetry cost-rate lookups match the arm.
+- **Serial experiment create** — the parent calls `set_experiment` once before any child launches, so the `file:./mlruns` store never races on experiment creation.
+
+`_rank_and_report()` flags any arm whose every record errored/skipped as **FAILED** in the printed table, via the `tags.all_records_failed` tag (or a `metrics.skip_rate == 1.0` fallback), so a degenerate arm can't sit next to a real result looking comparable <span class="src">scripts/sweep.py:148-163</span>. `--dry-run` prints the plan (command, env, predictions dir per arm) without launching anything. Drill into one arm afterward the same way as any other saved prediction set:
+
+```
+uv run python -m qaai.eval.compare <dataset-dir>/predictions/<experiment>/<arm>/
+```
+
+<div class="note warn"><strong>Same science caveats as any sweep over the 20-row pilot.</strong>
+At n=20 the CI on <code>overall_f1</code> (~±0.20) is wider than any plausible arm gap — treat
+sweeps as plumbing/smoke tests, not a selection oracle, until the dataset grows past the
+sample-size targets above. And sweeping against an answer key whose labels don't match content
+optimizes for agreement with bad labels, not review quality — fix label quality first.</div>
 
 <h2 id="predictions">Where predictions go</h2>
 
@@ -280,7 +315,7 @@ Scoring is pure and LLM-free. `build_records()` pairs each output row with its l
 <tr><td><em>always</em></td><td><code>n_total</code>, <code>n_scored</code>, <code>skip_rate</code></td></tr>
 </tbody></table>
 
-Families are toggled by the spec's `metrics_enabled` list; the nested result is flattened to scalar MLflow keys by `flatten_metrics()` <span class="src">qaai/eval/metrics.py:12</span>. Note `cohen_kappa` is omitted — for a cell or for the overall verdict — when there is no class variability to measure <span class="src">qaai/eval/metrics.py:34-36</span>.
+Most families are toggled by the spec's `metrics_enabled` list — `compute_metrics()` checks it for `overall`, `per_rubric`, `exact_match`, `helper_invariant`, and `latency` <span class="src">qaai/eval/scoring.py:194,229,272,290,301</span>. `cost` is the exception: it is computed unconditionally in run mode by the harness and merged into the flat dict regardless of `metrics_enabled` <span class="src">qaai/eval/harness.py:204-209, qaai/eval/metrics.py:53-55</span> — there is no way to suppress it from the spec. The nested result is flattened to scalar MLflow keys by `flatten_metrics()` <span class="src">qaai/eval/metrics.py:12</span>. Note `cohen_kappa` is omitted — for a cell or for the overall verdict — when there is no class variability to measure <span class="src">qaai/eval/metrics.py:34-36</span>.
 
 <div class="note warn"><strong>Read accuracy next to kappa and prevalence, not alone.</strong>
 On a skewed set, accuracy flatters a model that always guesses the majority label
@@ -390,6 +425,7 @@ The harness library and its drivers:
 <tr><td><code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code></td><td>The one committed dataset — the grounded 20-row RTM pilot (<code>actual_*</code> answer key + <code>source_gold.jsonl</code>)</td></tr>
 <tr><td><code>eval/datasets/&lt;type&gt;/actual/&lt;ts&gt;/predictions/&lt;ts2&gt;/</code></td><td>Saved prediction sets from <code>--mode run</code> (<code>predicted_*</code>), each with its <code>run_metadata.json</code></td></tr>
 <tr><td><code>scripts/evaluate_with_mlflow.py</code></td><td>Run a study (score / run)</td></tr>
+<tr><td><code>scripts/sweep.py</code></td><td>Fan out one <code>--mode run</code> arm per model × prompt-set cell, then rank them</td></tr>
 <tr><td><code>scripts/convert_to_eval.py</code></td><td>Build the three-file dataset from gold or a run's outputs</td></tr>
 <tr><td><code>scripts/sample_size.py</code></td><td>Accuracy-CI sample-size calculator (<code>ci</code> / <code>achieved</code>)</td></tr>
 <tr><td><code>scripts/check_eval_gate.py</code></td><td>CI gate on the latest run's metrics</td></tr>

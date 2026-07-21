@@ -85,6 +85,18 @@ Embedded directly in the `single_test_aggregator` prompt (v8 for the decompositi
 
 The aggregator returns an `evaluated_checklist` of five `EvaluatedReviewObjective` items. `overall_verdict` is **Yes** iff every *mandatory* objective is "Yes"; the advisory `test_case_setup_clarity` never flips it. The assessment also carries `comments` and targeted `clarification_questions`. <span class="src">test_case_reviewer/core.py</span>
 
+<div class="note warn"><strong>Unlike its sibling reviewers, this rule is checked but not
+enforced.</strong> RTM's <code>SynthesizedAssessment._derive_overall_verdict</code>
+<span class="src">test_suite_reviewer/core.py:239-271</span> and the hazard reviewer's
+<code>_FinalAssessorNode._aggregate_verdict</code> <span class="src">hazard_risk_reviewer/nodes.py:804-815</span>
+both <em>compute</em> <code>overall_verdict</code> deterministically in code — the LLM's opinion
+never reaches the output. Here, <code>TestCaseAssessment._validate_overall_verdict</code>
+<span class="src">test_case_reviewer/core.py:192-202</span> only checks the LLM-supplied
+<code>overall_verdict</code> against the mandatory objectives and silently <code>pass</code>es
+on a mismatch (the code comment reads "don't fail validation - LLM might have made an error...
+In production, you might want to auto-correct this"). A disagreeing LLM verdict is not
+currently auto-corrected for the test case reviewer.</div>
+
 <h2 id="cache">Caching</h2>
 
 Interim nodes use the shared `ReviewCacheManager`, partitioned by `test_id` (`TEST-*` folders). Under `on` (the default), interim nodes are reused from cache and the aggregator always re-runs for a fresh result. The Test Case Reviewer is **not** affected by the "Include Edge Case Analysis" toggle.

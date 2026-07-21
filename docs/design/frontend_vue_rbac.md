@@ -1,6 +1,6 @@
 # Frontend (Vue 3) & Role-Based Access
 
-<div class="meta">QAAI (qaai) · Vue 3 frontend &amp; RBAC · generated from the codebase 2026-07-17</div>
+<div class="meta">QAAI (qaai) · Vue 3 frontend &amp; RBAC · generated from the codebase 2026-07-20</div>
 
 ## Overview
 
@@ -78,7 +78,7 @@ Reviews run as background jobs so every HTTP request stays sub-second and the up
 
 <pre class="diagram"><code>POST /api/v1/{test-suite|test-case|hazard-risk}-review   → 202 { job_id }
       │
-      ▼   every POLL_INTERVAL_MS (4000 ms), until MAX_POLL_MS (30 min)
+      ▼   every POLL_INTERVAL_MS (4000 ms), until MAX_POLL_MS (4 hr)
 GET  /api/v1/jobs/{job_id}          → { status, total, done, succeeded, failed,
       │                                  eta_seconds, messages[] }
       │  status == "completed"
@@ -87,7 +87,7 @@ GET  /api/v1/jobs/{job_id}/result   → HTML report (Blob)  → Download Report
       ▲
       └── POST /api/v1/jobs/{job_id}/cancel                (Stop Run)</code></pre>
 
-<span class="src">qaai/web/src/constants.ts:7-8</span> defines `POLL_INTERVAL_MS = 4000` and `MAX_POLL_MS = 30 * 60 * 1000`. The store exposes reactive `phase` (`idle | loading | done | error`), progress counts, the result object URL, and the error string; the status components bind to these instead of mutating the DOM.
+<span class="src">qaai/web/src/constants.ts:7-8</span> defines `POLL_INTERVAL_MS = 4000` and `MAX_POLL_MS = 4 * 60 * 60 * 1000` (4 hours — long enough for a large baseline batch). The store exposes reactive `phase` (`idle | loading | done | error`), progress counts, the result object URL, and the error string; the status components bind to these instead of mutating the DOM.
 
 The old global `pollToken` is replaced by a monotonic **generation counter plus an `AbortController`**: `bumpGeneration()` increments the token and aborts the in-flight fetch, so a superseded poll loop returns quietly. Switching reviewers calls `cancelSilently()`; **Stop Run** calls `stop()`, which cancels the job server-side. <span class="src">qaai/web/src/stores/job.ts:86</span> <span class="src">qaai/web/src/stores/job.ts:95</span> <span class="src">qaai/web/src/stores/job.ts:166</span>
 
@@ -102,6 +102,7 @@ Each reviewer form is a thin Vue component that binds a few reusable controls to
 <tr><td><code>CacheModeRadio</code></td><td>The three-way <code>on</code>/<code>test</code>/<code>off</code> cache-mode radio</td><td><span class="src">qaai/web/src/components/controls/CacheModeRadio.vue:8-12</span></td></tr>
 <tr><td><code>LabeledCheckbox</code></td><td>A checkbox + label for each boolean toggle</td><td><span class="src">qaai/web/src/components/controls/LabeledCheckbox.vue</span></td></tr>
 <tr><td><code>FileDropzone</code></td><td>The SHA Excel upload (hazard only)</td><td><span class="src">qaai/web/src/components/controls/FileDropzone.vue</span></td></tr>
+<tr><td><code>BaselineReviewTypeRadio</code></td><td>The <code>requirements</code>/<code>tests</code> radio backing <code>baseline_review_type</code> (test-suite only)</td><td><span class="src">qaai/web/src/components/controls/BaselineReviewTypeRadio.vue</span></td></tr>
 <tr><td><code>InfoTooltip</code></td><td>The per-option help copy (from <code>TOOLTIPS</code>)</td><td><span class="src">qaai/web/src/constants.ts:23-42</span></td></tr>
 <tr><td><code>SubmitButton</code></td><td>The role-gated <strong>Run</strong> button (see <a href="#rbac">RBAC</a>)</td><td><span class="src">qaai/web/src/components/controls/SubmitButton.vue</span></td></tr>
 </tbody></table>
@@ -141,7 +142,7 @@ portable across proxy prefixes.</div>
 
 <h2 id="rbac">RBAC model</h2>
 
-Three roles gate UI actions. The role → action map lives in the SPA and is mirrored on the backend so both sides agree on the role vocabulary. <span class="src">qaai/web/src/constants.ts:14</span> <span class="src">qaai/core/config.py:22</span>
+Three roles gate UI actions. The role → action map lives in the SPA and is mirrored on the backend so both sides agree on the role vocabulary. <span class="src">qaai/web/src/constants.ts:14</span> <span class="src">qaai/core/config.py:23</span>
 
 <table>
 <thead><tr><th>Role</th><th><code>run_review</code></th><th><code>upload_feedback</code></th><th><code>manage</code></th></tr></thead>
@@ -195,7 +196,7 @@ Group→role mapping uses an explicit configured map, with a name-substring fall
 <tr><td><code>APP_ENV</code></td><td><code>DEV</code> enables the dev fallback; <code>TEST</code>/<code>PROD</code> require the edge header</td><td><span class="src">qaai/core/config.py:130</span></td></tr>
 </tbody></table>
 
-The parsed helpers `settings.dev_roles_list` and `settings.oidc_role_map` validate values against `VALID_ROLES`. <span class="src">qaai/core/config.py:233</span> <span class="src">qaai/core/config.py:242</span>
+The parsed helpers `settings.dev_roles_list` and `settings.oidc_role_map` validate values against `VALID_ROLES`. <span class="src">qaai/core/config.py:239</span> <span class="src">qaai/core/config.py:248</span>
 
 To exercise gating locally, set `QAAI_DEV_ROLES=viewer` (run buttons disable) or `reviewer` / `admin`.
 

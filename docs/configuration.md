@@ -1,6 +1,6 @@
 # Configuration Guide
 
-<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-06</div>
+<div class="meta">QAAI (qaai) · generated from the codebase 2026-07-20</div>
 
 All runtime configuration is centralized in the `Settings` singleton <span class="src">qaai/core/config.py:115-272</span>, loaded from a repo-root `.env` and the process environment. Import it via `from qaai.core.config import settings`.
 
@@ -15,6 +15,7 @@ All runtime configuration is centralized in the `Settings` singleton <span class
 <tr><td><code>MAX_REQUESTS_PER_MINUTE</code></td><td><code>max_requests_per_minute</code></td><td><code>5000</code></td><td>Client RPM ceiling</td></tr>
 <tr><td><code>MAX_TOKENS_PER_MINUTE</code></td><td><code>max_tokens_per_minute</code></td><td><code>5000000</code></td><td>Client TPM ceiling</td></tr>
 <tr><td><code>MAX_OUTPUT_TOKENS</code></td><td><code>max_output_tokens</code></td><td><code>16000</code></td><td>Max output tokens per request</td></tr>
+<tr><td><code>MAX_CONCURRENT_REVIEWS</code></td><td><code>max_concurrent_reviews</code></td><td><code>8</code></td><td>Per-job item concurrency: <code>_run_batch_review</code> fans items out with <code>asyncio.gather</code> under this <code>Semaphore</code> width, a soft cap above the RPM/TPM limiter <span class="src">qaai/core/config.py:148-150, qaai/api/services.py:237</span></td></tr>
 <tr><td><code>TOKEN_COST_INPUT_PER_M</code></td><td><code>token_cost_input_per_m</code></td><td><code>1.00</code></td><td>USD / million input tokens (telemetry)</td></tr>
 <tr><td><code>TOKEN_COST_OUTPUT_PER_M</code></td><td><code>token_cost_output_per_m</code></td><td><code>5.00</code></td><td>USD / million output tokens (telemetry)</td></tr>
 <tr><td><code>JAMA_HOST_ADDRESS</code></td><td><code>jama_host_address</code></td><td><code>None</code></td><td>JAMA host URL</td></tr>
@@ -77,7 +78,7 @@ CACHE_DIR=./shared/runs
 <div class="note">Models listed in <code>models_using_max_completion_tokens</code> (default
 <code>{"gpt-5.4-mini", "gpt-5-mini"}</code>) receive the output cap as
 <code>max_completion_tokens</code> instead of <code>max_tokens</code>
-<span class="src">qaai/core/config.py:149, qaai/api/main.py:95-98</span>.</div>
+<span class="src">qaai/core/config.py:155, qaai/api/main.py:95-98</span>.</div>
 
 <h2 id="jama">JAMA credentials</h2>
 
@@ -87,7 +88,9 @@ The three `JAMA_*` variables enable live baseline fetching for the RTM and test-
 
 The review cache is a write-through store on disk, shared by all three reviewers <span class="src">qaai/core/cache.py</span>. Each per-node LLM result is persisted as an append-only, timestamped JSON file at `{CACHE_DIR}/{entity_id}/[{prompt_set}/]{node}_{prompt_version}_{timestamp}.json` (reads select the newest) — one folder per `REQ-*` (test suite), `TEST-*` (test case), or `HAZ-*` (hazard) entity — keyed `review:{entity_id}:{node_name}:{prompt_version}`. Invalidation is version-driven: bump a prompt's version and its key changes, leaving old entries on disk as evidence. Set `ENABLE_CACHE=false` to disable the cache entirely (no manager is created) <span class="src">qaai/api/main.py</span>.
 
-Each run threads a `cache_mode` — `off`, `on` (default; caches interim nodes but always re-runs the final node), or `test` (reuses the final node too; used internally for the hazard reviewer's embedded RTM subgraph). Legacy aliases `partial`/`full` are still accepted and map to `on`/`test`. The API's **"Use cached results"** checkbox (`use_cache`) maps only to `on` (checked) or `off` (unchecked) <span class="src">qaai/api/routes.py</span>.
+Each run threads a `cache_mode` — `off`, `on` (default; caches interim nodes but always re-runs the final node), or `test` (reuses the final node too, no LLM calls). Legacy aliases `partial`/`full` are still accepted and map to `on`/`test`. The API's **"Use cached results"** checkbox (`use_cache`) maps only to `on` (checked) or `off` (unchecked) <span class="src">qaai/api/routes.py</span>. The hazard reviewer's embedded RTM subgraph inherits the parent hazard run's `cache_mode` unchanged — it is never forced into a different mode internally.
+
+Within one review job, items also run **concurrently**, not strictly one at a time: `_run_batch_review` fans them out with `asyncio.gather` under a `Semaphore(MAX_CONCURRENT_REVIEWS)` (default 8). An item that errors or produces an incomplete result has only its own run's cache entries purged (`purge_run`) so a failed attempt is never reused, without aborting the rest of the batch.
 
 <div class="note">For the full design — disk layout and payload schema, cache keys, the cache
 modes in detail, prompt-set namespacing, and version-driven invalidation — see the
