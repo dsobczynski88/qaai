@@ -1,0 +1,14 @@
+role: hazard_h1
+version: v6.0.0
+component: hazard_risk_reviewer
+authored: '2026-07-20'
+status: draft
+parent_version: v5.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: H1Finding
+target_models:
+- gpt-4o-mini
+- gpt-4o
+- claude-haiku-4.5
+changelog: Further reduced No-verdict sensitivity. Trimmed the Verdict=No list to five core failure modes (dropped the concept-collapse, sequence-jump, and generic-function bullets), simplified Sequence Clarity to a single No-condition, cut the Required Reasoning Approach down to rationale-specificity only (dropped the field-completeness/semantic-role/function-relevance internal checklists), and removed Examples C, D, and E, keeping only A (Yes) and B (No).
