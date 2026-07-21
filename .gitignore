@@ -52,8 +52,29 @@ eval/datasets/test_suite/actual/2026-07-17_12-01-00/*
 !eval/datasets/test_suite/actual/2026-07-17_12-01-00/edits.log
 eval/datasets/test_case/*
 !eval/datasets/test_case/.gitkeep
+# The committed test_case pilot (answer key, human-grounded 20-row seed), at actual/<ts>/.
+# Same alternating !dir/ , dir/* re-inclusion pattern as the RTM pilot above. The timestamp
+# is named explicitly so the 400-row calibration set and any other revision stay out of the repo.
+!eval/datasets/test_case/actual/
+eval/datasets/test_case/actual/*
+!eval/datasets/test_case/actual/2026-07-21_08-29-19/
+eval/datasets/test_case/actual/2026-07-21_08-29-19/*
+!eval/datasets/test_case/actual/2026-07-21_08-29-19/actual_inputs.jsonl
+!eval/datasets/test_case/actual/2026-07-21_08-29-19/actual_outputs.jsonl
+!eval/datasets/test_case/actual/2026-07-21_08-29-19/actual_labels.jsonl
+!eval/datasets/test_case/actual/2026-07-21_08-29-19/description.md
+!eval/datasets/test_case/actual/2026-07-21_08-29-19/edits.log
 eval/datasets/hazard/*
 !eval/datasets/hazard/.gitkeep
+!eval/datasets/hazard/actual/
+eval/datasets/hazard/actual/*
+!eval/datasets/hazard/actual/2026-07-21_08-11-24/
+eval/datasets/hazard/actual/2026-07-21_08-11-24/*
+!eval/datasets/hazard/actual/2026-07-21_08-11-24/actual_inputs.jsonl
+!eval/datasets/hazard/actual/2026-07-21_08-11-24/actual_outputs.jsonl
+!eval/datasets/hazard/actual/2026-07-21_08-11-24/actual_labels.jsonl
+!eval/datasets/hazard/actual/2026-07-21_08-11-24/description.md
+!eval/datasets/hazard/actual/2026-07-21_08-11-24/edits.log
 
 
 # logs

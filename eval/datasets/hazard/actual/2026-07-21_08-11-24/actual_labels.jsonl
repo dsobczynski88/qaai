@@ -1,0 +1,20 @@
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "No", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "N-A", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "Yes", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "N-A", "H6": "Yes", "R7": "Yes", "class": "known_good"}
+{"Overall_Verdict": "No", "H1": "No", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H1"}
+{"Overall_Verdict": "No", "H1": "No", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H1"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "No", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H2"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "No", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H2"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "Yes", "H3": "No", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H3"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "Yes", "H3": "No", "H4": "Yes", "H5": "Yes", "H6": "Yes", "R7": "No", "class": "known_bad", "primary_failure": "H3"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "No", "H5": "No", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H4"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "No", "H5": "Yes", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H4"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "No", "H6": "Yes", "R7": "Yes", "class": "known_bad", "primary_failure": "H5"}
+{"Overall_Verdict": "No", "H1": "Yes", "H2": "Yes", "H3": "Yes", "H4": "Yes", "H5": "Yes", "H6": "No", "R7": "Yes", "class": "known_bad", "primary_failure": "H6"}
