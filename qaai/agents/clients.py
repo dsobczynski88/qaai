@@ -204,6 +204,17 @@ class OpenAIRateLimiter:
             # record request
             self.request_timestamps.append(_now())
 
+    async def snapshot(self) -> Dict[str, int]:
+        """Current RPM-window utilization: ``{used, limit}``. Purges expired
+        timestamps under the lock first, so the reading matches what
+        wait_if_needed would compute. Used by GET /api/v1/usage for centralized,
+        all-users rate-limit monitoring."""
+        async with self.lock:
+            current_time = _now()
+            while self.request_timestamps and current_time - self.request_timestamps[0] >= 60:
+                self.request_timestamps.popleft()
+            return {"used": len(self.request_timestamps), "limit": self.max_requests}
+
 class OpenAITokenLimiter:
     """
     Token-per-minute (TPM) limiter using a rolling 60-second window.
@@ -257,6 +268,14 @@ class OpenAITokenLimiter:
             self._purge_old(now)
             self.entries.append((now, tokens))
             self.total_tokens_in_window += tokens
+
+    async def snapshot(self) -> Dict[str, int]:
+        """Current TPM-window utilization: ``{used, limit}``. Purges expired
+        entries under the lock first. Used by GET /api/v1/usage for centralized,
+        all-users token-rate monitoring."""
+        async with self.lock:
+            self._purge_old(_now())
+            return {"used": self.total_tokens_in_window, "limit": self.max_tokens}
 
     async def suggest_wait_time(self, est_tokens: int) -> float:
         """
@@ -323,6 +342,17 @@ class RateLimitOpenAIClient:
         self.token_limiter = OpenAITokenLimiter(max_tokens_per_minute) if max_tokens_per_minute else None
         self._token_estimator_fn = token_estimator or (lambda messages, model: _estimate_tokens_from_messages(messages, model))
         self.telemetry_tracker = telemetry_tracker
+
+    async def usage_snapshot(self) -> Dict[str, Any]:
+        """Current RPM/TPM window utilization across ALL callers of this client.
+
+        Single-instance by design: one shared RateLimitOpenAIClient holds the only
+        RPM/TPM limiter, so this snapshot is the whole server's outbound LLM load —
+        exposed via GET /api/v1/usage for centralized monitoring. ``tpm`` is None
+        when no token limit is configured."""
+        rpm = await self.rate_limiter.snapshot()
+        tpm = await self.token_limiter.snapshot() if self.token_limiter else None
+        return {"rpm": rpm, "tpm": tpm}
 
     def _estimate_total_tokens(self, model: str, messages: List[Dict[str, Any]], kwargs: Dict[str, Any]) -> int:
         """

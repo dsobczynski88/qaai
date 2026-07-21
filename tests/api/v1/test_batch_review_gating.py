@@ -46,7 +46,7 @@ def _viewer_writer(outputs_path, log_entries=None):
     return f"{outputs_path}.html" if text.strip() else None
 
 
-async def _run(items, cache, tmp_path, *, progress=None, missing_records_fn=None):
+async def _run(items, cache, tmp_path, *, progress=None, missing_records_fn=None, max_concurrent=8):
     return await _run_batch_review(
         logger=logger,
         run_dir=tmp_path,
@@ -56,6 +56,7 @@ async def _run(items, cache, tmp_path, *, progress=None, missing_records_fn=None
         graph_input_fn=lambda _i, item: item,
         viewer_writer=_viewer_writer,
         item_noun="thing",
+        max_concurrent=max_concurrent,
         entity_id_fn=lambda _i, item: item["entity"],
         is_complete_fn=lambda s: s.get("ok") is True,
         missing_records_fn=missing_records_fn,
@@ -142,6 +143,7 @@ async def test_outputs_in_input_order_and_run_concurrently(tmp_path):
         graph_input_fn=lambda _i, item: item,
         viewer_writer=_viewer_writer,
         item_noun="thing",
+        max_concurrent=4,
         entity_id_fn=lambda _i, item: item["entity"],
         is_complete_fn=lambda s: s.get("ok") is True,
         cache_manager=cache,
@@ -156,6 +158,56 @@ async def test_outputs_in_input_order_and_run_concurrently(tmp_path):
         if line.strip()
     ]
     assert [rec["entity"] for rec in lines] == ["E0", "E1", "E2", "E3"]
+
+
+async def test_max_concurrent_one_serializes_items(tmp_path):
+    """max_concurrent=1 (the hazard reviewer's default) processes items strictly
+    one at a time — never more than one graph invocation in flight — so the first
+    record can warm the shared cache before the next starts."""
+    import asyncio
+
+    class _ConcurrentGraph:
+        def __init__(self):
+            self.in_flight = 0
+            self.max_in_flight = 0
+
+        async def ainvoke(self, graph_input, config):
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            await asyncio.sleep(graph_input["delay"])
+            self.in_flight -= 1
+            return {"ok": True, "entity": graph_input["entity"]}
+
+    graph = _ConcurrentGraph()
+    items = [
+        {"entity": "E0", "delay": 0.05},
+        {"entity": "E1", "delay": 0.05},
+        {"entity": "E2", "delay": 0.05},
+    ]
+    cache = _FakeCache()
+    viewer = await _run_batch_review(
+        logger=logger,
+        run_dir=tmp_path,
+        items=items,
+        graph=graph,
+        thread_id_fn=lambda i, _item: f"t-{i}",
+        graph_input_fn=lambda _i, item: item,
+        viewer_writer=_viewer_writer,
+        item_noun="thing",
+        max_concurrent=1,
+        entity_id_fn=lambda _i, item: item["entity"],
+        is_complete_fn=lambda s: s.get("ok") is True,
+        cache_manager=cache,
+    )
+    assert viewer is not None
+    # Strictly sequential: at most one item ever in flight.
+    assert graph.max_in_flight == 1
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / OUTPUT_JSONL_FILENAME).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [rec["entity"] for rec in lines] == ["E0", "E1", "E2"]
 
 
 async def test_progress_counts_and_run_log(tmp_path):

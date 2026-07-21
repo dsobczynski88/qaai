@@ -271,6 +271,48 @@ async def test_purge_run_missing_entity_is_noop(cache):
     await cache.purge_run("REQ-DOES-NOT-EXIST", datetime(2026, 1, 1))
 
 
+async def test_purge_run_scoped_by_run_token_not_time(cache, tmp_path, monkeypatch):
+    """Concurrency safety: when a run directory is bound to the context, a failed
+    run's purge removes ONLY its own run-token-tagged files — a concurrent run of
+    the SAME entity id (writing after ``since``) is untouched, even though the old
+    time-boundary rule would have deleted it."""
+    from qaai.core.logging_config import current_run_dir
+
+    # Run A writes one file, then "fails" and purges. Run B (concurrent) has
+    # already written a file for the same entity at a later timestamp.
+    _stamp_seq(
+        monkeypatch,
+        "2026_06_15_00_00_00_000000",  # run A's file
+        "2026_06_15_00_00_00_000001",  # run B's file (later, same entity)
+    )
+
+    token_a = current_run_dir.set(tmp_path / "run-2026-06-15_00-00-00-aaaaaaaa")
+    try:
+        await cache.set("REQ-1", "n", "v1.0.0", {"value": "A"}, 0, 0, "m")
+    finally:
+        current_run_dir.reset(token_a)
+
+    token_b = current_run_dir.set(tmp_path / "run-2026-06-15_00-00-00-bbbbbbbb")
+    try:
+        await cache.set("REQ-1", "n", "v1.0.0", {"value": "B"}, 0, 0, "m")
+    finally:
+        current_run_dir.reset(token_b)
+
+    # Run A fails and purges under its own run context — a `since` before both
+    # writes that would nuke B too under the legacy time rule.
+    token_a2 = current_run_dir.set(tmp_path / "run-2026-06-15_00-00-00-aaaaaaaa")
+    try:
+        await cache.purge_run("REQ-1", datetime(2026, 1, 1))
+    finally:
+        current_run_dir.reset(token_a2)
+
+    # B survives and is the newest readable result; A is gone.
+    files = sorted((tmp_path / "REQ-1").glob("n_v1.0.0_*.json"))
+    assert len(files) == 1
+    got = await cache.get("REQ-1", "n", "v1.0.0")
+    assert got["result"] == {"value": "B"}
+
+
 # --- full-entity purge (manual clear) -------------------------------------
 
 

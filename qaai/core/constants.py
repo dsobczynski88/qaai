@@ -13,8 +13,8 @@ DEFAULT_MAX_REQUESTS_PER_MINUTE = 10000
 """Default maximum API requests per minute.
 
 Provides generous headroom under a high-tier RPM limit so the parallel batch
-loop (see MAX_CONCURRENT_REVIEWS) is not throttled by the proactive limiter.
-Adjust based on your API tier and account limits.
+loop (see the per-reviewer *_MAX_CONCURRENT_REVIEWS knobs) is not throttled by
+the proactive limiter. Adjust based on your API tier and account limits.
 """
 
 DEFAULT_MAX_TOKENS_PER_MINUTE = 10_000_000
@@ -40,15 +40,34 @@ Tuned for models like Claude Haiku. Larger batches reduce API calls but may
 hit token limits. Smaller batches increase latency but improve reliability.
 """
 
-DEFAULT_MAX_CONCURRENT_REVIEWS = 8
-"""Default number of review items (requirements / hazards / test cases) a batch
-processes concurrently.
+DEFAULT_TEST_SUITE_MAX_CONCURRENT_REVIEWS = 8
+"""Default number of review items the Test Suite (RTM) reviewer processes concurrently.
 
 Soft cap on top of the client's hard RPM/TPM limiter: _run_batch_review fans the
 per-item graph invocations out with an asyncio.Semaphore of this size instead of
-awaiting them one at a time. Each item itself fans out internally (Send), so the
-peak concurrent LLM calls are roughly this × the per-graph fan-out; the client's
-rate limiter is the backstop. Lower it if the limiter is observed queuing.
+awaiting them one at a time. This same value also bounds the embedded RTM subgraph
+fan-out inside a single hazard record (the requirement_reviewer Send fan-out in
+RequirementReviewerNode) — the embedded subgraph *is* the Test Suite reviewer.
+Each item itself fans out internally (Send), so the peak concurrent LLM calls are
+roughly this × the per-graph fan-out; the client's rate limiter is the backstop.
+Lower it if the limiter is observed queuing.
+"""
+
+DEFAULT_HAZARD_MAX_CONCURRENT_REVIEWS = 1
+"""Default number of hazard records the Hazard Coverage reviewer processes concurrently.
+
+Defaults to 1 (sequential) on purpose: the review cache is write-after-completion
+with no in-flight dedup, so running hazard records one at a time lets the first
+record warm the shared per-doc design summaries (DD-*) and per-requirement RTM
+result blobs (REQ-*) before the next record starts — avoiding a burst of identical
+prompts (and rate-limit pressure) when many records cite the same doc/requirement.
+Each record still fans its own summarizers + requirement reviews out concurrently.
+"""
+
+DEFAULT_TEST_CASE_MAX_CONCURRENT_REVIEWS = 8
+"""Default number of test cases the Single Test Case reviewer processes concurrently.
+
+Same soft-cap semantics as DEFAULT_TEST_SUITE_MAX_CONCURRENT_REVIEWS.
 """
 
 MAX_TEST_CASES_PER_REQUIREMENT = 1000

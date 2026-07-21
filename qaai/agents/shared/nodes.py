@@ -329,15 +329,24 @@ class BaseLLMNode(ABC):
 
     @staticmethod
     def _run_dir() -> Path:
-        """Best-effort resolve the active run directory (logs/run-<ts>/).
+        """Best-effort resolve the active run directory (logs/run-<ts>-<uuid>/).
 
-        Derived from the 'qaai' logger's FileHandler (set per run by
-        setup_logging(), as the API/UI do); when none is attached (eval/CLI/script
-        processes) falls back to a process-cached, lazily-created timestamped
-        logs/run-<ts>/ folder so dumps still co-locate like an API/UI run instead
-        of scattering into bare ./logs. Never raises — diagnostics must not break
-        parsing.
+        Prefers the ``current_run_dir`` contextvar (set per review by
+        start_new_run) — the authoritative source now that logging routes via a
+        contextvar-driven handler rather than a per-run FileHandler. Falls back to
+        a legacy plain FileHandler if one is attached, then to a process-cached,
+        lazily-created timestamped folder so dumps still co-locate like an API/UI
+        run instead of scattering into bare ./logs. Never raises — diagnostics must
+        not break parsing.
         """
+        try:
+            from qaai.core.logging_config import get_current_run_dir
+
+            run_dir = get_current_run_dir()
+            if run_dir is not None:
+                return run_dir
+        except Exception:
+            pass
         try:
             qlog = logging.getLogger("qaai")
             for h in qlog.handlers:

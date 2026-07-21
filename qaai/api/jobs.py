@@ -15,10 +15,13 @@ Scope / constraints:
   sets no --workers). If the app is ever run with multiple workers, this store
   must move to a shared backend (e.g. Redis, already a dependency) keyed by
   job_id, because each worker would otherwise hold its own dict.
-- Jobs are serialized by an asyncio.Lock so only one review runs at a time. This
-  preserves the global per-run-folder logging invariant (start_new_run() mutates
-  process-global logging + settings.log_file_path), matching today's effective
-  one-review-at-a-time behaviour.
+- Reviews run CONCURRENTLY: there is no longer a global run-lock. It used to exist
+  only to protect the per-run-folder logging invariant (start_new_run() re-pointed
+  process-global logging handlers + settings.log_file_path, so two reviews would
+  clobber each other's routing). That invariant is gone — per-run log/telemetry
+  routing and cache-purge scoping are now carried in the ``current_run_dir``
+  contextvar (qaai/core/logging_config.py), which asyncio copies per task, so each
+  review is isolated without serialization. See start_new_run() for details.
 """
 
 import asyncio
@@ -131,8 +134,6 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: Dict[str, Job] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
-        # Serialize review execution; submission/status reads are not gated.
-        self._run_lock = asyncio.Lock()
 
     def submit(self, coro_factory: CoroFactory, filename: str) -> Job:
         """Register a job and schedule it on the event loop. Returns immediately."""
@@ -164,35 +165,35 @@ class JobManager:
         return True
 
     async def _run(self, job: Job, coro_factory: CoroFactory) -> None:
-        # The lock makes reviews run one at a time, preserving the per-run-folder
-        # logging invariant. While queued, the job stays in PENDING.
-        async with self._run_lock:
-            self._set(job, RUNNING)
-            logger.info("Job %s running", job.job_id)
-            try:
-                result_path = await coro_factory(job)
-            except asyncio.CancelledError:
-                # User asked to stop the run (cancel & discard). Record a terminal
-                # state and swallow — no partial report is kept.
-                self._fail(job, "Run stopped by user.", 499)
-                self._set(job, CANCELLED)
-                logger.info("Job %s cancelled", job.job_id)
-                return
-            except ValueError as exc:
-                # Bad input (e.g. unknown baseline) — surface the detail as a 400.
-                self._fail(job, str(exc), 400)
-                logger.warning("Job %s failed (bad request): %s", job.job_id, exc)
-            except Exception as exc:  # noqa: BLE001 — log full, surface generic
-                self._fail(
-                    job,
-                    f"An internal error occurred (job_id: {job.job_id})",
-                    500,
-                )
-                logger.error("Job %s failed: %s", job.job_id, exc, exc_info=True)
-            else:
-                job.result_path = result_path
-                self._set(job, COMPLETED)
-                logger.info("Job %s completed -> %s", job.job_id, result_path)
+        # No run-lock: reviews execute concurrently. Each review binds its own run
+        # folder via the current_run_dir contextvar (start_new_run), so their
+        # logs/telemetry/cache stay isolated without serialization.
+        self._set(job, RUNNING)
+        logger.info("Job %s running", job.job_id)
+        try:
+            result_path = await coro_factory(job)
+        except asyncio.CancelledError:
+            # User asked to stop the run (cancel & discard). Record a terminal
+            # state and swallow — no partial report is kept.
+            self._fail(job, "Run stopped by user.", 499)
+            self._set(job, CANCELLED)
+            logger.info("Job %s cancelled", job.job_id)
+            return
+        except ValueError as exc:
+            # Bad input (e.g. unknown baseline) — surface the detail as a 400.
+            self._fail(job, str(exc), 400)
+            logger.warning("Job %s failed (bad request): %s", job.job_id, exc)
+        except Exception as exc:  # noqa: BLE001 — log full, surface generic
+            self._fail(
+                job,
+                f"An internal error occurred (job_id: {job.job_id})",
+                500,
+            )
+            logger.error("Job %s failed: %s", job.job_id, exc, exc_info=True)
+        else:
+            job.result_path = result_path
+            self._set(job, COMPLETED)
+            logger.info("Job %s completed -> %s", job.job_id, result_path)
 
     def _set(self, job: Job, status: str) -> None:
         job.status = status

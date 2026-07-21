@@ -89,16 +89,22 @@ A review can take several minutes. If the report were returned synchronously, an
 4. **Download** — `GET /api/v1/jobs/{job_id}/result` returns the HTML report (`200`) when `completed`. It returns `404` for an unknown id, `425 Too Early` while pending/running, and the job's failure status when it failed — `400` for bad input, `499` for a user-cancelled run, `500` otherwise <span class="src">routes.py:232-249, jobs.py:166-195</span>.
 
 <div class="note warn"><strong>Single worker.</strong> Jobs live in an in-memory registry
-(most-recent <strong>200</strong> retained) and run <strong>one at a time</strong> via an
-<code>asyncio.Lock</code> <span class="src">jobs.py:41</span>. This assumes a single
-uvicorn worker — see <a href="#prod">Production</a>. The frontend performs submit → poll →
+(most-recent <strong>200</strong> retained). Reviews now run <strong>concurrently</strong> — the
+old <code>asyncio.Lock</code> that serialized them is gone; each review binds its own run folder
+via the <code>current_run_dir</code> contextvar so logs/telemetry/cache stay isolated with no lock
+<span class="src">jobs.py, qaai/core/logging_config.py</span>. The in-memory registry still assumes a
+single uvicorn worker — see <a href="#prod">Production</a>. The frontend performs submit → poll →
 download automatically (polling every ~4 s, showing elapsed time and per-item progress).</div>
 
-<div class="note"><strong>Items within one job run concurrently.</strong> "One job at a time"
-is a job-level lock, not an item-level one: <code>_run_batch_review</code>
+<div class="note"><strong>Reviews and their items both run concurrently.</strong> Multiple
+submitted jobs execute in parallel (no job-level lock); within each job <code>_run_batch_review</code>
 <span class="src">qaai/api/services.py:233-298</span> fans a job's items out with
-<code>asyncio.gather</code> under <code>asyncio.Semaphore(settings.max_concurrent_reviews)</code>
-(<code>MAX_CONCURRENT_REVIEWS</code>, default 8) rather than awaiting them one at a time. A single
+<code>asyncio.gather</code> under an <code>asyncio.Semaphore</code> sized by that reviewer's per-job
+knob — <code>TEST_SUITE_MAX_CONCURRENT_REVIEWS</code> (8), <code>TEST_CASE_MAX_CONCURRENT_REVIEWS</code>
+(8), or <code>HAZARD_MAX_CONCURRENT_REVIEWS</code> (<strong>1</strong>) — rather than awaiting them
+one at a time. The hazard reviewer defaults to <strong>1</strong> so records run sequentially and
+the first warms the shared <code>DD-*</code>/<code>REQ-*</code> cache before the next; its embedded
+RTM subgraph fan-out is separately bounded by <code>TEST_SUITE_MAX_CONCURRENT_REVIEWS</code>. A single
 item's exception (<code>return_exceptions=True</code>) never cancels its siblings — the item is
 skipped, its run-scoped cache entries are purged via <code>purge_run</code> so the failed attempt is
 never reused (see <a href="configuration.html#caching">Configuration &amp; Caching</a>), and the job
@@ -266,8 +272,13 @@ Each run also writes `token_usage.jsonl` with per-call token and cost metrics <s
 
 <div class="note warn"><strong>Run a single worker.</strong> The async job registry is
 in-memory <span class="src">qaai/api/jobs.py</span>, so a <code>job_id</code> created on
-one worker is invisible to another. Keep <code>--workers 1</code> until the registry moves
-to a shared backend.</div>
+one worker is invisible to another; the shared RPM/TPM rate limiter is likewise per-process, so
+N workers would each assume the full quota and multiply outbound LLM load. Keep <code>--workers 1</code>
+until the registry moves to a shared backend — <code>qaai/api/run.py</code> logs a loud warning if
+<code>QAAI_API_WORKERS &gt; 1</code>. Reviews still run concurrently <em>within</em> the one worker,
+which comfortably covers the ~10-concurrent-user target. Monitor aggregate LLM usage across all
+users via <code>GET /api/v1/usage</code> (current RPM/TPM window utilization vs. caps + rolling
+token/cost totals).</div>
 
 ```
 gunicorn qaai.api.main:app \

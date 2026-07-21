@@ -65,14 +65,25 @@ class TokenUsageTracker:
 
     @property
     def file_path(self) -> str:
-        """Resolve the JSONL output path, deferring to settings when unpinned.
+        """Resolve the JSONL output path, deferring to the run context when unpinned.
 
-        start_new_run() updates settings.log_file_path (and thus the derived
-        telemetry_file_path) and truncates the new file, so reading it lazily
-        here keeps telemetry in the current run folder.
+        The single shared tracker serves concurrent reviews, so it must write into
+        the *calling* review's run folder. That folder is carried in the
+        ``current_run_dir`` contextvar (set by start_new_run and copied into every
+        task/Send a review spawns), so resolving it here keeps each review's
+        token_usage.jsonl isolated. Falls back to settings.telemetry_file_path for
+        contexts the contextvar can't reach (tests / CLI).
         """
         if self._file_path is not None:
             return self._file_path
+        from qaai.core.logging_config import get_current_run_dir
+
+        run_dir = get_current_run_dir()
+        if run_dir is not None:
+            from qaai.core.constants import TOKEN_USAGE_JSONL_FILENAME
+
+            return str(run_dir / TOKEN_USAGE_JSONL_FILENAME)
+
         from qaai.core.config import settings
 
         return settings.telemetry_file_path

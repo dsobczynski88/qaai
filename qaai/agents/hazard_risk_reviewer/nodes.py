@@ -17,6 +17,7 @@ from START to summarize design documents and user needs for optional
 consumption by H4/H5 evaluators.
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, List, Optional
@@ -33,6 +34,7 @@ from qaai.agents.shared.nodes import (
 )
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.core.cache import ReviewCacheManager
+from qaai.core.config import settings
 
 from .constants import HAZARD_RISK_REVIEWER_REQUIRED_HAZARD_FIELDS
 from .core import (
@@ -340,6 +342,15 @@ class RequirementReviewerNode:
         # Namespaces the req-blob cache by prompt set so the v3/v4 RTM subgraph
         # results for the same requirement never alias.
         self.prompt_set = prompt_set
+        # Bounds how many live RTM subgraph invocations run at once across the
+        # per-requirement Send fan-out (this node instance is shared by every
+        # Send). Sized by the Test Suite reviewer's knob — the embedded subgraph
+        # *is* the Test Suite reviewer. Cache hits return before acquiring it, so
+        # only real subgraph runs count against the limit. Constructed eagerly
+        # (safe on Python ≥3.12; binds to the running loop on first await).
+        self._rtm_sem = asyncio.Semaphore(
+            max(1, settings.test_suite_max_concurrent_reviews)
+        )
 
     _NODE_NAME = "requirementreviewernode"
 
@@ -416,7 +427,10 @@ class RequirementReviewerNode:
         tokens_before_completion = getattr(tracker, "_total_completion_tokens", 0)
 
         try:
-            rtm_result = await self.rtm.graph.ainvoke(rtm_input)
+            # Bound concurrent live RTM subgraph runs across the fan-out (cache
+            # hits already returned above, so they never wait on this).
+            async with self._rtm_sem:
+                rtm_result = await self.rtm.graph.ainvoke(rtm_input)
         except Exception as e:
             logger.warning(
                 "RequirementReviewerNode: RTM subgraph invocation failed for %s — %s",
