@@ -3,6 +3,11 @@
 **Revision 1** of the Test Suite Reviewer answer key —
 `eval/datasets/test_suite/actual/2026-07-17_12-01-00/`.
 
+> **Amendment (2026-07-21):** each row was given a per-requirement `design_docs`
+> SDD (a multi-paragraph Software Design Description), and an **R6 Design Alignment**
+> label was added to every row (see *R6 Design Alignment* below). These were applied
+> to this revision in place rather than as a new sibling.
+
 ## Domain & product
 - Domain: Medical device software (SaMD / health software, IEC 82304)
 - Product: HealthCore EHR — clinical ordering, medication management, and access control
@@ -76,6 +81,21 @@ M4 carries 4 because the two M1-failure records have **no positive-path test at 
 genuinely leaves the functional spec uncovered. Labelling those M4=Yes would have been a
 convenient fiction; the whole point of this set is that labels follow from content.
 
+## R6 Design Alignment (advisory)
+Every row now carries a `design_docs` SDD and an `R6` label. R6 is **advisory** —
+excluded from `overall_verdict` exactly like M1–M5's relationship is not (a No never
+flips the verdict). Distribution: **18 Yes / 2 No**.
+
+The two `R6 = No` rows are **grounded**: their design doc was deliberately authored to
+omit the enforcement the requirement demands, so the misalignment is visible in the text.
+This is **orthogonal to the M1–M5 known-bads** — only the design doc was changed, no M-cell
+label moved.
+
+| R6 = No | Requirement | Design gap |
+|---|---|---|
+| REQ-HC-010 | account lock after 5 failed logins / 15-min window + lockout notice | SDD tracks failures and vaguely "may suspend," but never specifies the 5-attempt/15-min lock or the account-naming notice |
+| REQ-HC-013 | end session after 20 min idle + require re-authentication | SDD describes the session module but omits automatic termination and the re-auth gate |
+
 ## Statistical posture
 - **This is a seed batch, not the study.** n=20 gives a 95% CI of roughly ±0.22 — directional
   only. Its purpose is to test one hypothesis: *does a grounded dataset yield kappa > 0?*
@@ -90,10 +110,11 @@ convenient fiction; the whole point of this set is that labels follow from conte
   stratified ~60 and report reviewer-vs-label Cohen's kappa.
 
 ## Schema references
-- Input shape: `tests/fixtures/gold/gold_dataset_labeled.jsonl` (requirement + test_cases + labels)
+- Input shape: `requirement` + `test_cases` + `design_docs` (one `DD-HC-*` SDD per row);
+  cf. `tests/fixtures/gold/gold_dataset_labeled.jsonl`.
 - Eval spec (authoritative rubric): `eval/specs/test_suite_reviewer.yaml` — **M1–M5 mandatory
-  + R6 advisory**, 6 findings. R6 is excluded from `overall_verdict`; this answer key omits
-  the R6 column entirely, which round-trips correctly (an absent code is not scored).
+  + R6 advisory**, 6 findings. R6 is excluded from `overall_verdict`. This answer key now
+  **includes** the R6 column (18 Yes / 2 No); it round-trips through `V050` like the others.
 - Output shape: `qaai/agents/test_suite_reviewer/core.py::RTMReviewState`
 
 ## Provenance
