@@ -655,9 +655,10 @@ class HazardEvaluatorNode(StandardLLMNode):
         # H4, H5 need requirement_reviews
         if self.dimension_code in ["H4", "H5"]:
             reviews = state.get("requirement_reviews", [])
+            # requirement_reviews already embeds each requirement's req_id/text
+            # (see _summarise_reviews), so the raw requirements list would be
+            # pure duplication — it is deliberately not attached here.
             payload["requirement_reviews"] = _summarise_reviews(reviews)
-            # H4, H5 also get the full requirements list
-            payload["requirements"] = [r.requirement.model_dump() for r in reviews]
 
             # H4 gets summarized_designs if available
             if self.dimension_code == "H4":
@@ -669,15 +670,11 @@ class HazardEvaluatorNode(StandardLLMNode):
                 else:
                     payload["summarized_designs"] = None
 
-            # H5 gets the raw test_cases (its prompt reads them for verification
-            # depth) and summarized_user_needs. H4's prompt never reads raw test
-            # cases, so they are deliberately not attached to the H4 payload.
+            # H5 gets summarized_user_needs. Raw test_cases are deliberately
+            # not attached — each requirement_reviews entry's mandatory_findings
+            # already carries the M1-M5 verdict/rationale/cited_test_case_ids,
+            # which is the verification-depth evidence H5's prompt reasons over.
             if self.dimension_code == "H5":
-                test_cases = []
-                if hazard.requirements_traceability:
-                    test_cases = hazard.requirements_traceability.test_cases or []
-                payload["test_cases"] = [tc.model_dump() for tc in test_cases]
-
                 summarized_user_needs = state.get("summarized_user_needs")
                 if summarized_user_needs is not None and len(summarized_user_needs) > 0:
                     payload["summarized_user_needs"] = [
