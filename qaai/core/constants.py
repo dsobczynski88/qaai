@@ -9,14 +9,15 @@ their purpose and typical use cases.
 # Rate Limiting Defaults
 # ============================================================================
 
-DEFAULT_MAX_REQUESTS_PER_MINUTE = 5000
+DEFAULT_MAX_REQUESTS_PER_MINUTE = 10000
 """Default maximum API requests per minute.
 
-Provides headroom under a high-tier RPM limit. Adjust based on your API tier
-and account limits.
+Provides generous headroom under a high-tier RPM limit so the parallel batch
+loop (see MAX_CONCURRENT_REVIEWS) is not throttled by the proactive limiter.
+Adjust based on your API tier and account limits.
 """
 
-DEFAULT_MAX_TOKENS_PER_MINUTE = 5_000_000
+DEFAULT_MAX_TOKENS_PER_MINUTE = 10_000_000
 """Default maximum tokens per minute across all requests.
 
 Check your account's TPM limit and adjust accordingly.
@@ -37,6 +38,17 @@ DEFAULT_BATCH_SIZE = 25
 
 Tuned for models like Claude Haiku. Larger batches reduce API calls but may
 hit token limits. Smaller batches increase latency but improve reliability.
+"""
+
+DEFAULT_MAX_CONCURRENT_REVIEWS = 8
+"""Default number of review items (requirements / hazards / test cases) a batch
+processes concurrently.
+
+Soft cap on top of the client's hard RPM/TPM limiter: _run_batch_review fans the
+per-item graph invocations out with an asyncio.Semaphore of this size instead of
+awaiting them one at a time. Each item itself fans out internally (Send), so the
+peak concurrent LLM calls are roughly this × the per-graph fan-out; the client's
+rate limiter is the backstop. Lower it if the limiter is observed queuing.
 """
 
 MAX_TEST_CASES_PER_REQUIREMENT = 1000

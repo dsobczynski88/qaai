@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 from qaai.agents.test_suite_reviewer.pipeline import RTMReviewerRunnable
 from qaai.agents.test_case_reviewer.pipeline import TCReviewerRunnable
 from qaai.core.config import (
+    settings,
     PromptConfig,
     PROMPT_SET_EDGE_CASE,
     PROMPT_SET_BASELINE,
@@ -227,9 +229,17 @@ async def _run_batch_review(
         progress.begin(len(items))
 
     start = time.perf_counter()
-    succeeded = 0
-    failed = 0
-    for i, item in enumerate(items):
+
+    # Bound concurrency with a semaphore (soft cap over the client's hard RPM/TPM
+    # limiter). Items fan out with asyncio.gather instead of awaiting one at a
+    # time; each item still fans out internally (Send), so peak concurrent LLM
+    # calls are roughly this × the per-graph fan-out.
+    sem = asyncio.Semaphore(max(1, settings.max_concurrent_reviews))
+
+    async def _process_item(i: int, item) -> tuple:
+        """Run one item; returns (status, final_state). status is one of
+        'ok' | 'incomplete' | 'failed' | 'cache_required'. Never raises — it
+        records its own problems so a sibling's failure can't cancel the gather."""
         item_id = entity_id_fn(i, item) if entity_id_fn else None
         label = item_id or f"#{i + 1}"
 
@@ -241,34 +251,31 @@ async def _run_batch_review(
 
         config = {"configurable": {"thread_id": thread_id_fn(i, item)}}
         item_start = datetime.now()  # boundary for run-scoped cache purge
-        try:
-            final_state = await graph.ainvoke(graph_input_fn(i, item), config)
-        except CacheRequiredError as exc:
-            # Cache "test" mode: a node had no cached result, so the report cannot
-            # be recreated offline. This is a hard, whole-job failure (not a skip)
-            # surfaced verbatim to the UI as a 400 by jobs.py.
-            logger.warning(
-                "[%d/%d] %s review aborted — test mode cache miss: %s",
-                i + 1, len(items), item_noun, exc,
-            )
-            raise ValueError(
-                "Test mode requires all node results to pre-exist in cache"
-            ) from exc
-        except Exception as exc:
-            failed += 1
-            logger.error(
-                "[%d/%d] %s review errored, skipping item: %s",
-                i + 1, len(items), item_noun, exc, exc_info=True,
-            )
-            _log(item_id, "error", f"{item_noun.capitalize()} {label}: review errored — item skipped.")
-            await _purge(i, item, "run errored", item_start)
-            if progress is not None:
-                progress.record_item(ok=False)
-            continue
+        async with sem:
+            try:
+                final_state = await graph.ainvoke(graph_input_fn(i, item), config)
+            except CacheRequiredError as exc:
+                # Cache "test" mode: a node had no cached result, so the report
+                # cannot be recreated offline. A hard, whole-job failure — the
+                # caller raises after the gather so the UI sees a 400.
+                logger.warning(
+                    "[%d/%d] %s review aborted — test mode cache miss: %s",
+                    i + 1, len(items), item_noun, exc,
+                )
+                return ("cache_required", None)
+            except Exception as exc:
+                logger.error(
+                    "[%d/%d] %s review errored, skipping item: %s",
+                    i + 1, len(items), item_noun, exc, exc_info=True,
+                )
+                _log(item_id, "error", f"{item_noun.capitalize()} {label}: review errored — item skipped.")
+                await _purge(i, item, "run errored", item_start)
+                if progress is not None:
+                    progress.record_item(ok=False)
+                return ("failed", None)
 
         if is_complete_fn is not None and not is_complete_fn(final_state):
             # Surface the (incomplete) result in the viewer, but never reuse it.
-            failed += 1
             logger.warning(
                 "[%d/%d] %s review incomplete — recording output but purging cache",
                 i + 1, len(items), item_noun,
@@ -278,13 +285,43 @@ async def _run_batch_review(
             await _purge(i, item, "incomplete output", item_start)
             if progress is not None:
                 progress.record_item(ok=False)
-        else:
-            succeeded += 1
-            logger.info("[%d/%d] Completed %s review", i + 1, len(items), item_noun)
-            if progress is not None:
-                progress.record_item(ok=True)
+            return ("incomplete", final_state)
 
-        with outputs_path.open("a", encoding="utf-8") as f:
+        logger.info("[%d/%d] Completed %s review", i + 1, len(items), item_noun)
+        if progress is not None:
+            progress.record_item(ok=True)
+        return ("ok", final_state)
+
+    results = await asyncio.gather(
+        *(_process_item(i, item) for i, item in enumerate(items)),
+        return_exceptions=True,
+    )
+
+    # A test-mode cache miss anywhere is a hard, whole-job failure (mirrors the
+    # old sequential behavior that raised on the first such miss).
+    if any(isinstance(r, tuple) and r[0] == "cache_required" for r in results):
+        raise ValueError("Test mode requires all node results to pre-exist in cache")
+
+    # Write outputs in INPUT order — results is index-aligned to items. A failed
+    # item records no output (matching the old `continue`); ok/incomplete do.
+    succeeded = 0
+    failed = 0
+    with outputs_path.open("a", encoding="utf-8") as f:
+        for r in results:
+            if isinstance(r, BaseException):
+                # _process_item swallows its own errors; this is a defensive guard
+                # (e.g. a purge/progress hook raising) so one bad item can't abort.
+                failed += 1
+                logger.error("%s review item raised unexpectedly: %r", item_noun, r)
+                continue
+            status, final_state = r
+            if status == "failed":
+                failed += 1
+                continue
+            if status == "incomplete":
+                failed += 1
+            else:  # "ok"
+                succeeded += 1
             f.write(json.dumps(final_state, default=_json_default) + "\n")
 
     viewer_path = viewer_writer(outputs_path, log_entries=run_log)

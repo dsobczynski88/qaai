@@ -105,6 +105,59 @@ async def test_all_items_failing_raises(tmp_path):
     assert ("E1", "test_suite_reviewer_v4") in cache.purged
 
 
+async def test_outputs_in_input_order_and_run_concurrently(tmp_path):
+    """The parallelized batch fans items out concurrently (more than one in flight
+    at once) yet still writes outputs.jsonl in INPUT order, not completion order."""
+    import asyncio
+
+    class _ConcurrentGraph:
+        def __init__(self):
+            self.in_flight = 0
+            self.max_in_flight = 0
+
+        async def ainvoke(self, graph_input, config):
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            # Earlier items sleep longer, so completion order is the REVERSE of
+            # input order — the output ordering assertion below is meaningful only
+            # because of this.
+            await asyncio.sleep(graph_input["delay"])
+            self.in_flight -= 1
+            return {"ok": True, "entity": graph_input["entity"]}
+
+    graph = _ConcurrentGraph()
+    items = [
+        {"entity": "E0", "delay": 0.15},
+        {"entity": "E1", "delay": 0.10},
+        {"entity": "E2", "delay": 0.05},
+        {"entity": "E3", "delay": 0.01},
+    ]
+    cache = _FakeCache()
+    viewer = await _run_batch_review(
+        logger=logger,
+        run_dir=tmp_path,
+        items=items,
+        graph=graph,
+        thread_id_fn=lambda i, _item: f"t-{i}",
+        graph_input_fn=lambda _i, item: item,
+        viewer_writer=_viewer_writer,
+        item_noun="thing",
+        entity_id_fn=lambda _i, item: item["entity"],
+        is_complete_fn=lambda s: s.get("ok") is True,
+        cache_manager=cache,
+    )
+    assert viewer is not None
+    # Concurrency actually happened (sequential would keep max_in_flight == 1).
+    assert graph.max_in_flight >= 2
+    # Output stays in INPUT order despite reverse completion order.
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / OUTPUT_JSONL_FILENAME).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [rec["entity"] for rec in lines] == ["E0", "E1", "E2", "E3"]
+
+
 async def test_progress_counts_and_run_log(tmp_path):
     """The Job's progress counters advance once per item and the problems-only
     run log captures errored / incomplete / missing-input notes — and the same
