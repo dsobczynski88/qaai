@@ -156,6 +156,7 @@ async def _run_batch_review(
     graph_input_fn,
     viewer_writer,
     item_noun: str,
+    max_concurrent: int,
     entity_id_fn=None,
     is_complete_fn=None,
     missing_records_fn=None,
@@ -169,6 +170,8 @@ async def _run_batch_review(
     appending each final state to ``outputs.jsonl``, renders the viewer, and
     returns its path. The per-reviewer differences — thread-id source, graph
     input shape, and which ``write_viewer*`` to call — are injected as callables.
+    ``max_concurrent`` sizes the batch semaphore per-reviewer (hazard passes 1 for
+    sequential records; test-suite / test-case pass their higher settings).
 
     Success-gating (the "only cache results from clean runs" toggle): when
     ``cache_manager`` + ``entity_id_fn`` are supplied, an item whose graph run
@@ -231,10 +234,12 @@ async def _run_batch_review(
     start = time.perf_counter()
 
     # Bound concurrency with a semaphore (soft cap over the client's hard RPM/TPM
-    # limiter). Items fan out with asyncio.gather instead of awaiting one at a
-    # time; each item still fans out internally (Send), so peak concurrent LLM
-    # calls are roughly this × the per-graph fan-out.
-    sem = asyncio.Semaphore(max(1, settings.max_concurrent_reviews))
+    # limiter), sized per-reviewer by the caller (``max_concurrent``). Items fan
+    # out with asyncio.gather instead of awaiting one at a time; each item still
+    # fans out internally (Send), so peak concurrent LLM calls are roughly this ×
+    # the per-graph fan-out. The hazard service passes 1 (sequential records) so
+    # the first record warms the shared DD-*/REQ-* cache before the next runs.
+    sem = asyncio.Semaphore(max(1, max_concurrent))
 
     async def _process_item(i: int, item) -> tuple:
         """Run one item; returns (status, final_state). status is one of
@@ -453,6 +458,7 @@ class RTMReviewService:
             },
             viewer_writer=write_viewer,
             item_noun="requirement",
+            max_concurrent=settings.test_suite_max_concurrent_reviews,
             entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("requirement"), "req_id", None),
             is_complete_fn=rtm_is_complete,
             missing_records_fn=rtm_missing_records,
@@ -664,6 +670,7 @@ class HazardReviewService:
             graph_input_fn=_hazard_graph_input,
             viewer_writer=write_viewer_hz,
             item_noun="hazard",
+            max_concurrent=settings.hazard_max_concurrent_reviews,
             entity_id_fn=lambda _i, hazard_row: getattr(hazard_row, "hazard_id", None),
             is_complete_fn=hazard_is_complete,
             missing_records_fn=hazard_missing_records,
@@ -789,6 +796,7 @@ class TestCaseReviewService:
             },
             viewer_writer=write_viewer_tc,
             item_noun="test case",
+            max_concurrent=settings.test_case_max_concurrent_reviews,
             entity_id_fn=lambda _i, state_dict: getattr(state_dict.get("test_case"), "test_id", None),
             is_complete_fn=tc_is_complete,
             missing_records_fn=tc_missing_records,

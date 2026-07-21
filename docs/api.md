@@ -99,8 +99,12 @@ download automatically (polling every ~4 s, showing elapsed time and per-item p
 <div class="note"><strong>Reviews and their items both run concurrently.</strong> Multiple
 submitted jobs execute in parallel (no job-level lock); within each job <code>_run_batch_review</code>
 <span class="src">qaai/api/services.py:233-298</span> fans a job's items out with
-<code>asyncio.gather</code> under <code>asyncio.Semaphore(settings.max_concurrent_reviews)</code>
-(<code>MAX_CONCURRENT_REVIEWS</code>, default 8) rather than awaiting them one at a time. A single
+<code>asyncio.gather</code> under an <code>asyncio.Semaphore</code> sized by that reviewer's per-job
+knob — <code>TEST_SUITE_MAX_CONCURRENT_REVIEWS</code> (8), <code>TEST_CASE_MAX_CONCURRENT_REVIEWS</code>
+(8), or <code>HAZARD_MAX_CONCURRENT_REVIEWS</code> (<strong>1</strong>) — rather than awaiting them
+one at a time. The hazard reviewer defaults to <strong>1</strong> so records run sequentially and
+the first warms the shared <code>DD-*</code>/<code>REQ-*</code> cache before the next; its embedded
+RTM subgraph fan-out is separately bounded by <code>TEST_SUITE_MAX_CONCURRENT_REVIEWS</code>. A single
 item's exception (<code>return_exceptions=True</code>) never cancels its siblings — the item is
 skipped, its run-scoped cache entries are purged via <code>purge_run</code> so the failed attempt is
 never reused (see <a href="configuration.html#caching">Configuration &amp; Caching</a>), and the job
