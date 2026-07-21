@@ -58,8 +58,8 @@ class PromptConfig(BaseModel):
 
     # Test Suite Reviewer prompts
     decomposer: str = "decomposer/v6.0.0/template.jinja2"
-    summarizer: str = "summarizer/v4.0.0/template.jinja2"
-    design_summarizer: str = "design_summarizer/v1.0.0/template.jinja2"
+    summarizer: str = "summarizer/v5.0.0/template.jinja2"
+    design_summarizer: str = "design_summarizer/v2.0.0/template.jinja2"
     coverage: str = "coverage_evaluator/v8.0.0/template.jinja2"
     synthesizer: str = "synthesizer/v8.0.0/template.jinja2"
     
@@ -79,8 +79,8 @@ class PromptConfig(BaseModel):
     hazard_h6: str = "hazard_h6/v2.0.0/template.jinja2"
     hazard_r7: str = "hazard_r7/v1.0.0/template.jinja2"
     hazard_final: str = "hazard_final_assessor/v1.0.0/template.jinja2"
-    hazard_design_summarizer: str = "hazard_design_summarizer/v1.0.0/template.jinja2"
-    hazard_needs_summarizer: str = "hazard_needs_summarizer/v1.0.0/template.jinja2"
+    hazard_design_summarizer: str = "hazard_design_summarizer/v2.0.0/template.jinja2"
+    hazard_needs_summarizer: str = "hazard_needs_summarizer/v2.0.0/template.jinja2"
     
     @classmethod
     def from_set(cls, set_name: str) -> "PromptConfig":

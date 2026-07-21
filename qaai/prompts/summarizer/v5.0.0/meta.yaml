@@ -1,0 +1,13 @@
+role: summarizer
+version: v5.0.0
+component: test_suite_reviewer
+authored: '2026-07-20'
+status: published
+parent_version: v4.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: SummarizedTestCaseList
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Trimmed generic how-to-summarize prose and removed the in-context worked examples, keeping only the evidence-over-interpretation / no-over-claim / no-label-leakage / completeness rules. Output schema (SummarizedTestCaseList bare array) unchanged.

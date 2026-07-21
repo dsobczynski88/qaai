@@ -109,10 +109,10 @@ description: |
   Baseline stack (no edge-case analysis).
 prompts:
   decomposer: v5.0.0
-  summarizer: v4.0.0
+  summarizer: v5.0.0
   coverage: v8.0.0
   synthesizer: v8.0.0
-  design_summarizer: v1.0.0
+  design_summarizer: v2.0.0
 status: experimental
 authored: "2026-06-06"
 ```

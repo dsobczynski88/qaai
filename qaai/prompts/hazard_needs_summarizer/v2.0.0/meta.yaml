@@ -1,0 +1,15 @@
+role: hazard_needs_summarizer
+version: v2.0.0
+component: hazard_risk_reviewer
+authored: '2026-07-20'
+status: published
+parent_version: v1.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: HazardSummarizedUserNeedList
+target_models:
+- gpt-4o-mini
+- gpt-4o
+- claude-3-5-haiku-20241022
+- claude-3-5-sonnet-20241022
+changelog: Trimmed generic how-to-summarize prose and the Special Handling Rules, and removed the in-context worked examples, keeping only the evidence-over-interpretation, safety-framing, and completeness rules. Output schema (HazardSummarizedUserNeedList bare array) unchanged.
