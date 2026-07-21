@@ -333,6 +333,11 @@ async def _run_batch_review(
         "Batch %s review complete: %d items in %.1fs (%d clean, %d failed/incomplete), viewer at %s",
         item_noun, len(items), elapsed, succeeded, failed, viewer_path,
     )
+    # Eagerly close this run's per-run log FileHandlers (fd hygiene). Failure/early-
+    # exit paths are bounded by the routing handler's LRU cap instead.
+    from qaai.core.logging_config import finalize_run
+
+    finalize_run(run_dir)
     return str(viewer_path)
 
 

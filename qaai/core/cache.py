@@ -76,6 +76,23 @@ def _sanitize(value: str) -> str:
     return re.sub(r"[^\w\-]", "_", value)
 
 
+def _current_run_token() -> Optional[str]:
+    """Token identifying the active review run (the ``run-<ts>-<uuid>`` folder
+    name), or None when no run directory is bound to the context (eval / tests /
+    CLI). Written into new cache filenames so purge_run can delete only the files
+    a single run produced — critical once concurrent reviews of the same entity id
+    share one entity folder. The run-folder name embeds hyphens, so it never
+    collides with the ``$``-anchored trailing ``_<timestamp>`` token.
+    """
+    try:
+        from qaai.core.logging_config import get_current_run_dir
+
+        run_dir = get_current_run_dir()
+    except Exception:
+        return None
+    return _sanitize(run_dir.name) if run_dir is not None else None
+
+
 class ReviewCacheManager:
     """Write-through 3-tier cache for reviewer nodes.
 
@@ -266,41 +283,55 @@ class ReviewCacheManager:
     async def purge_run(
         self, entity_id: str, since: datetime, prompt_set: Optional[str] = None
     ) -> None:
-        """Remove only THIS run's cached files for an entity (those written at or
-        after ``since``), leaving earlier good history intact.
+        """Remove only THIS run's cached files for an entity, leaving earlier good
+        history — and any concurrent run's files — intact.
 
         Used by the batch loop's success-gating: a run that errors or produces an
         incomplete rubric has just the files it wrote this run deleted, so the
         newest-wins read never selects a failed/partial result — but prior
         successful runs for the same entity remain auditable.
 
-        Disk files carry an embedded ``_<timestamp>`` token (and, as a fallback,
-        an mtime); a file is purged when either is ≥ ``since``. The entity's Redis
-        keys are dropped wholesale (best-effort) since Redis only holds the latest
-        write and cannot be time-scoped — the next read falls back to disk-newest.
+        Run scoping: when a run directory is bound to the context, files are
+        matched by the per-run token embedded in their name (see _new_file_path),
+        so a concurrent run reviewing the SAME entity id is never touched — the
+        ``since`` timestamp is ignored in this mode. When no run is bound (eval /
+        tests / CLI) it falls back to the legacy time-boundary: a file is purged
+        when its embedded ``_<timestamp>`` (or, as a fallback, mtime) is ≥ ``since``.
+        The entity's Redis keys are dropped wholesale (best-effort) since Redis
+        only holds the latest write and cannot be run- or time-scoped — the next
+        read falls back to disk-newest (a concurrent sibling re-populates it).
         """
         safe_id = _sanitize(entity_id)
         target = self.cache_dir / safe_id
         if prompt_set:
             target = target / _sanitize(prompt_set)
 
+        run_token = _current_run_token()
         removed = 0
         if target.is_dir():
             for path in target.glob("*.json"):
-                ts = _parse_file_timestamp(path)
                 try:
-                    written = ts or datetime.fromtimestamp(path.stat().st_mtime)
-                    if written >= since:
-                        path.unlink()
-                        removed += 1
+                    if run_token is not None:
+                        # Run-scoped: only files this run wrote carry the token.
+                        if f"_{run_token}_" not in path.name:
+                            continue
+                    else:
+                        # Legacy time-scoped fallback (no active run bound).
+                        ts = _parse_file_timestamp(path)
+                        written = ts or datetime.fromtimestamp(path.stat().st_mtime)
+                        if written < since:
+                            continue
+                    path.unlink()
+                    removed += 1
                 except Exception as e:  # pragma: no cover - best-effort unlink
                     logger.warning(
                         "ReviewCacheManager: run purge failed for %s — %s", path, e
                     )
         if removed:
+            scope = f"run={run_token}" if run_token else f"≥ {since.isoformat()}"
             logger.info(
-                "Cache PURGE (run, disk): %d file(s) ≥ %s under %s",
-                removed, since.isoformat(), target,
+                "Cache PURGE (run, disk): %d file(s) [%s] under %s",
+                removed, scope, target,
             )
 
         # --- Tier 2: Redis (drop the entity's keys; not time-scopable) ---
@@ -427,9 +458,20 @@ class ReviewCacheManager:
         self, entity_id: str, node_name: str, prompt_version: str,
         prompt_set: Optional[str] = None, include_design: Optional[bool] = None,
     ) -> Path:
-        """Path for a brand-new write: {entity}/[{set}/]{node}_{version}_[{ds}_]{ts}.json."""
+        """Path for a brand-new write:
+        {entity}/[{set}/]{node}_{version}_[{ds}_][{run}_]{ts}.json.
+
+        A per-run token (the run-folder name) is inserted before the trailing
+        timestamp when a run directory is bound to the context, so purge_run can
+        scope deletion to a single run. The prefix (used by _newest_file's glob and
+        _file_prefix) deliberately excludes the run token, so newest-wins reads
+        still see writes from every run. When no run is bound the token is omitted,
+        preserving the legacy filename layout (backward compatible).
+        """
         prefix = self._file_prefix(node_name, prompt_version, include_design)
-        filename = f"{prefix}{_now_timestamp()}.json"
+        run_token = _current_run_token()
+        run_part = f"{run_token}_" if run_token else ""
+        filename = f"{prefix}{run_part}{_now_timestamp()}.json"
         return self._entity_dir(entity_id, prompt_set) / filename
 
     def _newest_file(

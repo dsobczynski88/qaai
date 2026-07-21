@@ -65,6 +65,20 @@ def main():
     logger.info("  - Reload: %s", reload)
     logger.info("  - Workers: %d", workers)
     logger.info("=" * 80)
+
+    # Single-worker invariant: the in-memory JobManager registry and the single
+    # shared RPM/TPM rate limiter both assume ONE worker. Multiple workers each get
+    # their own job dict (so a poll can hit a worker that never saw the job) and
+    # their own limiter (so outbound LLM load multiplies by the worker count, and
+    # GET /api/v1/usage only reports one worker's slice). Keep QAAI_API_WORKERS=1
+    # until the job store moves to a shared backend (see qaai/api/jobs.py).
+    if workers > 1:
+        logger.warning(
+            "QAAI_API_WORKERS=%d > 1 is UNSUPPORTED: the in-memory job registry and "
+            "shared rate limiter require a single worker. Job tracking will fragment "
+            "across workers and outbound LLM load will multiply. Set QAAI_API_WORKERS=1.",
+            workers,
+        )
     
     # Build uvicorn command with CLI arguments
     # Using uvicorn as a subprocess ensures a clean asyncio event loop

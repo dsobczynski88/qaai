@@ -62,6 +62,24 @@ async def whoami(request: Request) -> dict[str, Any]:
     return resolve_identity(request)
 
 
+@router.get("/usage", tags=["System"])
+async def usage(request: Request) -> dict[str, Any]:
+    """Centralized LLM usage: current RPM/TPM window utilization vs configured caps,
+    plus rolling token/cost totals — aggregated across ALL users/reviews.
+
+    Single-instance by design: one shared RateLimitOpenAIClient holds the only
+    RPM/TPM limiter and one TokenUsageTracker accumulates all calls, so this is the
+    whole server's outbound LLM load. Read-only and ungated, mirroring GET /me.
+    """
+    client = getattr(request.app.state, "llm_client", None)
+    tracker = getattr(request.app.state, "telemetry_tracker", None)
+    rate_limits = (
+        await client.usage_snapshot() if client is not None else {"rpm": None, "tpm": None}
+    )
+    totals = tracker.summary() if tracker is not None else {}
+    return {"rate_limits": rate_limits, "totals": totals}
+
+
 @router.get("/health", tags=["System"])
 async def health_check(request: Request) -> dict[str, Any]:
     """Health check endpoint. Returns 200 when all services are initialized, 503 otherwise."""

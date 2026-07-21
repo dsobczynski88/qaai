@@ -29,6 +29,24 @@ async def test_request_id_header_present(client):
     assert len(response.headers["X-Request-ID"]) > 0
 
 
+async def test_usage_endpoint_reports_limits_and_totals(client):
+    """GET /usage exposes the shared limiter's RPM/TPM utilization + rolling totals
+    (centralized, all-users monitoring on a single instance)."""
+    response = await client.get("/api/v1/usage")
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+
+    assert "rate_limits" in body and "totals" in body
+    rpm = body["rate_limits"]["rpm"]
+    assert set(rpm) == {"used", "limit"}
+    assert rpm["used"] >= 0 and rpm["limit"] > 0
+    # TPM limiter is configured by default settings, so it should report too.
+    tpm = body["rate_limits"]["tpm"]
+    assert tpm is None or set(tpm) == {"used", "limit"}
+    # Totals come from the TokenUsageTracker.summary() shape.
+    assert "total_tokens" in body["totals"]
+
+
 # ---------------------------------------------------------------------------
 # TODO: Additional Tests
 # ---------------------------------------------------------------------------

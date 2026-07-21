@@ -31,7 +31,7 @@ from qaai.agents.clients import RateLimitOpenAIClient
 from qaai.core.cache import ReviewCacheManager
 from qaai.core.config import settings
 from qaai.core.telemetry import TokenUsageTracker
-from qaai.core.logging_config import bootstrap_console_logging
+from qaai.core.logging_config import install_run_routing
 
 
 logger = logging.getLogger("qaai.api.main")
@@ -150,6 +150,12 @@ async def lifespan(app: FastAPI):
     # Backwards-compat: existing callers reference app.state.service for the RTM service.
     app.state.service = app.state.rtm_service
 
+    # Expose the shared client + telemetry tracker so GET /api/v1/usage can report
+    # centralized, all-users RPM/TPM utilization and rolling token/cost totals. On
+    # a single instance these are the only limiter/tracker, so they see everything.
+    app.state.llm_client = client
+    app.state.telemetry_tracker = telemetry_tracker
+
     # Background job registry: reviews run async (202 + poll) so the upstream proxy
     # never sees a multi-minute idle request and can't return a 504.
     app.state.job_manager = JobManager()
@@ -163,12 +169,14 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    # Console-only logging at boot — we deliberately do NOT create a run folder
-    # here. The first logs/run-<ts>/ folder is created by the first review request
-    # (start_new_run inside the service), so there is exactly one folder per
-    # endpoint hit. Boot/lifespan logs go to stdout (captured by the process
-    # manager / container runtime).
-    bootstrap_console_logging()
+    # Install console + per-run routing logging handlers ONCE at boot. We
+    # deliberately do NOT create a run folder here — the first logs/run-<ts>-<uuid>/
+    # folder is created by the first review (start_new_run inside the service).
+    # Each review binds its own run folder via the current_run_dir contextvar, and
+    # the routing handler resolves it per record, so concurrent reviews write to
+    # isolated log files with no global handler swap. Boot/lifespan logs go to
+    # stdout (captured by the process manager / container runtime).
+    install_run_routing()
 
     startup_logger = logging.getLogger("qaai.api.main")
     startup_logger.info("Application startup initiated")
