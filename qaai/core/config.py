@@ -9,6 +9,7 @@ from qaai.core.constants import (
     DEFAULT_MAX_REQUESTS_PER_MINUTE,
     DEFAULT_MAX_TOKENS_PER_MINUTE,
     DEFAULT_MAX_OUTPUT_TOKENS,
+    DEFAULT_MAX_CONCURRENT_REVIEWS,
     DEFAULT_TOKEN_COST_INPUT_PER_M,
     DEFAULT_TOKEN_COST_OUTPUT_PER_M,
     TOKEN_USAGE_JSONL_FILENAME,
@@ -142,6 +143,11 @@ class Settings(BaseSettings):
     max_requests_per_minute: int = DEFAULT_MAX_REQUESTS_PER_MINUTE
     max_tokens_per_minute: int = DEFAULT_MAX_TOKENS_PER_MINUTE
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    # How many review items a batch processes concurrently (soft cap over the
+    # client's RPM/TPM limiter). See _run_batch_review in qaai/api/services.py.
+    max_concurrent_reviews: int = Field(
+        default=DEFAULT_MAX_CONCURRENT_REVIEWS, alias="MAX_CONCURRENT_REVIEWS"
+    )
 
     # Models whose Chat Completions API expects `max_completion_tokens` instead of
     # the legacy `max_tokens` output cap. Keeps the capability decision in config

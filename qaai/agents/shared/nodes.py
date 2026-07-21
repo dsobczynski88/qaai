@@ -19,7 +19,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, List
 from abc import ABC, abstractmethod
 
 try:
@@ -671,6 +671,14 @@ class BatchedLLMNode(BaseLLMNode, ABC):
 
     BATCH_SIZE: int = 10  # Override per subclass
 
+    # Opt-in per-ITEM caching (default off = the whole-batch cache path below).
+    # When True, each item is cached under its OWN entity id (_get_item_cache_id),
+    # so a summary is shared across every graph entity that references that item
+    # (e.g. a design-doc summary keyed by doc_id is reused across every
+    # requirement/hazard that cites it). __call__ then LLM-processes only the
+    # cache misses and merges hits + fresh results back in original item order.
+    PER_ITEM_CACHE: bool = False
+
     def __init__(
         self,
         client: RateLimitOpenAIClient,
@@ -728,6 +736,33 @@ class BatchedLLMNode(BaseLLMNode, ABC):
     def _serialize_for_cache(self, summaries: list) -> Any:
         return [s.model_dump() for s in summaries]
 
+    # --- Optional per-item cache hooks (used only when PER_ITEM_CACHE = True) ---
+
+    def _get_item_cache_id(self, item: Any) -> Optional[str]:
+        """Per-item cache entity id (e.g. a design doc's doc_id), or None to
+        skip caching this item. Only consulted when PER_ITEM_CACHE is True."""
+        return None
+
+    def _item_id_of_summary(self, summary: Any) -> Optional[str]:
+        """Id carried by a produced summary, matched against
+        _get_item_cache_id(item) to re-align LLM output to its input item even
+        when a batch returns them out of order or drops one. Default: doc_id."""
+        return getattr(summary, "doc_id", None)
+
+    def _item_cache_prompt_set(self) -> Optional[str]:
+        """Prompt set to namespace per-item entries under. Defaults to the node's
+        prompt_set; a summarizer that is identical across sets overrides this to
+        None so the entry is shared across sets."""
+        return self.prompt_set
+
+    def _restore_item_from_cache(self, cached: dict) -> Any:
+        raise NotImplementedError(
+            "Override _restore_item_from_cache when PER_ITEM_CACHE is set"
+        )
+
+    def _serialize_item_for_cache(self, summary: Any) -> Any:
+        return summary.model_dump()
+
     # --- Core batching loop ---
 
     async def _process_single_batch(
@@ -768,13 +803,138 @@ class BatchedLLMNode(BaseLLMNode, ABC):
             return [], prompt_tokens, completion_tokens
         return self._unwrap_batch_result(parsed), prompt_tokens, completion_tokens
 
+    async def _call_per_item(self, state: Any, node_name: str) -> dict:
+        """PER_ITEM_CACHE path: resolve each item from its own cache entry, run
+        only the misses through the batch machinery, write each fresh result back
+        under its item id, and merge hits + fresh results in original item order.
+
+        Summaries are re-aligned to their input item by ``_item_id_of_summary`` /
+        ``_get_item_cache_id`` (matched on id, not position) so an out-of-order or
+        dropped batch response is handled deterministically.
+        """
+        items = self._get_items(state)
+        if not items:
+            logger.warning("%s: no items to process", self.__class__.__name__)
+            return self._get_skip_response()
+
+        read_ok = self._cache_read_allowed(state)
+        write_ok = self._cache_write_allowed(state)
+        prompt_set = self._item_cache_prompt_set()
+        include_design = self._design_discriminator(state)
+
+        resolved: List[Optional[Any]] = [None] * len(items)
+        miss_indices: List[int] = []
+        for idx, item in enumerate(items):
+            cid = self._get_item_cache_id(item)
+            if read_ok and cid:
+                cached = await self.cache_manager.get(
+                    cid, node_name, self.prompt_version, prompt_set,
+                    include_design=include_design,
+                )
+                if cached is not None:
+                    try:
+                        resolved[idx] = self._restore_item_from_cache(cached)
+                        continue
+                    except Exception as exc:
+                        logger.warning(
+                            "%s: per-item cache restore failed for %s, recomputing — %s",
+                            self.__class__.__name__, cid, exc,
+                        )
+            miss_indices.append(idx)
+
+        hits = len(items) - len(miss_indices)
+        logger.info(
+            "%s: %d/%d items from cache, %d to compute",
+            self.__class__.__name__, hits, len(items), len(miss_indices),
+        )
+
+        if miss_indices:
+            # Test mode makes NO live LLM calls — an uncached item is a hard failure.
+            if self._mode(state) == "test":
+                raise CacheRequiredError(
+                    node_name, self._get_item_cache_id(items[miss_indices[0]])
+                )
+
+            miss_items = [items[i] for i in miss_indices]
+            num_batches = (len(miss_items) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
+            batches = [
+                miss_items[i:i + self.BATCH_SIZE]
+                for i in range(0, len(miss_items), self.BATCH_SIZE)
+            ]
+            batch_results = await asyncio.gather(*[
+                self._process_single_batch(state, batch, i + 1, num_batches)
+                for i, batch in enumerate(batches)
+            ])
+            fresh = [s for summaries, _, _ in batch_results for s in summaries]
+            total_prompt_tokens = sum(pt for _, pt, _ in batch_results)
+            total_completion_tokens = sum(ct for _, _, ct in batch_results)
+            # Even token attribution across fresh summaries — the batch API returns
+            # per-batch usage only, so this is an estimate for the cache-hit
+            # "tokens saved" telemetry, not billed accounting.
+            per_item_prompt = total_prompt_tokens // len(fresh) if fresh else 0
+            per_item_completion = total_completion_tokens // len(fresh) if fresh else 0
+
+            fresh_by_id = {}
+            for summary in fresh:
+                sid = self._item_id_of_summary(summary)
+                if sid is not None:
+                    fresh_by_id[sid] = summary
+
+            for idx in miss_indices:
+                cid = self._get_item_cache_id(items[idx])
+                summary = fresh_by_id.get(cid)
+                if summary is None:
+                    continue  # LLM dropped this item; left as None (handled below)
+                resolved[idx] = summary
+                if write_ok and cid:
+                    try:
+                        await self.cache_manager.set(
+                            entity_id=cid,
+                            node_name=node_name,
+                            prompt_version=self.prompt_version,
+                            result_dict=self._serialize_item_for_cache(summary),
+                            prompt_tokens=per_item_prompt,
+                            completion_tokens=per_item_completion,
+                            model=self.model,
+                            prompt_set=prompt_set,
+                            include_design=include_design,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "%s: per-item cache write failed for %s — %s",
+                            self.__class__.__name__, cid, exc,
+                        )
+
+        missing = [i for i, r in enumerate(resolved) if r is None]
+        if missing:
+            if self.REQUIRE_COMPLETE_BATCH:
+                logger.warning(
+                    "%s: %d/%d items unresolved (LLM dropped or unparseable) — "
+                    "skipping rather than judging on a truncated summary set",
+                    self.__class__.__name__, len(missing), len(items),
+                )
+                return self._get_skip_response()
+            resolved = [r for r in resolved if r is not None]
+
+        if not resolved:
+            logger.warning("%s: all items failed or returned empty", self.__class__.__name__)
+            return self._get_skip_response()
+
+        return self._build_result(state, list(resolved))
+
     async def __call__(self, state: Any) -> dict:
         if not self._validate_state(state):
             logger.debug("%s: skipping — validation failed", self.__class__.__name__)
             return self._get_skip_response()
 
-        # --- Cache check ---
         node_name = self._get_cache_node_name(state)
+
+        # Per-item caching: each item cached under its own entity id and reused
+        # across every graph entity that references it. Only the misses hit the LLM.
+        if self.PER_ITEM_CACHE:
+            return await self._call_per_item(state, node_name)
+
+        # --- Cache check ---
         if self._cache_read_allowed(state):
             entity_id = self._get_cache_entity_id(state)
             if entity_id:

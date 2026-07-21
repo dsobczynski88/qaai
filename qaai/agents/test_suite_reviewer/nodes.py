@@ -130,6 +130,9 @@ class DesignSummarizerNode(BatchedLLMNode):
     """
 
     BATCH_SIZE = 5
+    # Cache each design-doc summary under its own doc_id (not the requirement),
+    # so it is reused across every requirement/hazard that cites the doc.
+    PER_ITEM_CACHE = True
 
     def _validate_state(self, state: RTMReviewState) -> bool:
         # Only require a requirement; design_docs are optional.
@@ -137,12 +140,17 @@ class DesignSummarizerNode(BatchedLLMNode):
         # triggering the standard BatchedLLMNode empty-items handling.
         return state.get("requirement") is not None
 
-    def _get_cache_entity_id(self, state: RTMReviewState) -> Optional[str]:
-        requirement = state.get("requirement")
-        return getattr(requirement, "req_id", None) if requirement else None
+    def _get_item_cache_id(self, item) -> Optional[str]:
+        # Per-doc cache entity — a design summary is a function of the doc itself.
+        return getattr(item, "doc_id", None)
 
-    def _restore_from_cache(self, cached: dict) -> list:
-        return [SummarizedDesignSpec.model_validate(d) for d in cached["result"]]
+    def _item_cache_prompt_set(self) -> Optional[str]:
+        # design_summarizer is identical across prompt sets (only the decomposer
+        # differs between v3/v4), so share doc summaries across sets.
+        return None
+
+    def _restore_item_from_cache(self, cached: dict) -> SummarizedDesignSpec:
+        return SummarizedDesignSpec.model_validate(cached["result"])
 
     def _get_items(self, state: RTMReviewState) -> list:
         items = state.get("design_docs") or []
@@ -155,10 +163,10 @@ class DesignSummarizerNode(BatchedLLMNode):
         return items
 
     def _build_batch_payload(self, state: RTMReviewState, batch: List) -> dict:
-        requirement = state["requirement"]
-        sanitized_text = sanitize_requirement_text(text=requirement.text, req_id=requirement.req_id)
+        # Doc-intrinsic summary: the prompt summarizes each design document on its
+        # own terms, so the requirement is deliberately NOT sent — that is what
+        # makes the per-doc cache entry shareable across requirements.
         return {
-            "requirement": {"req_id": requirement.req_id, "text": sanitized_text},
             "design_docs": [
                 {"doc_id": dd.doc_id, "name": dd.name, "description": dd.description}
                 for dd in batch
@@ -271,7 +279,10 @@ class SingleSpecEvaluatorNode(StandardLLMNode):
         return {
             "original_requirement": requirement.model_dump(),
             "decomposed_spec": spec.model_dump(),
-            "test_suite": test_suite.model_dump(),
+            # The coverage_evaluator prompt reads only TestSuite.summary, so the
+            # raw `test_cases` list is dropped here — it was pure token weight
+            # (duplicated the summarized view) on every spec × requirement.
+            "test_suite": test_suite.model_dump(exclude={"test_cases"}),
             # Optional supporting context for the R6-style design alignment lens.
             # Null-safe shape mirrors SynthesizerNode._build_payload.
             "summarized_designs": (

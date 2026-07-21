@@ -302,7 +302,9 @@ class RateLimitOpenAIClient:
     - Safe for asyncio.gather usage
 
     Usage Notes:
-    - Default RPM is set to 490 (buffer under 500)
+    - Default RPM/TPM come from settings (DEFAULT_MAX_REQUESTS_PER_MINUTE /
+      DEFAULT_MAX_TOKENS_PER_MINUTE in qaai.core.constants); override per account
+      tier via MAX_REQUESTS_PER_MINUTE / MAX_TOKENS_PER_MINUTE
     - TPM must be supplied to enforce token limits (varies by model/account)
     - Token estimation uses tiktoken if available; otherwise, a heuristic
     """

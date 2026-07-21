@@ -655,13 +655,14 @@ def test_rtm_runnable_stores_cache_manager(cache):
     assert rtm.cache_manager is cache
 
 
-def test_hazard_embedded_rtm_is_uncached(cache):
-    """The hazard reviewer's own nodes share the cache, but its embedded
-    test-suite subgraph must NOT self-cache — its result is cached as one
-    blob per requirement by RequirementReviewerNode instead."""
+def test_hazard_embedded_rtm_shares_cache(cache):
+    """The hazard reviewer's embedded test-suite subgraph shares the SAME cache
+    manager, so its per-node cache — notably the doc-keyed design_summarizer —
+    is reused across entities. Its whole-subgraph result is still additionally
+    cached as one blob per requirement by RequirementReviewerNode."""
     from qaai.agents.hazard_risk_reviewer.pipeline import HazardReviewerRunnable
 
     client = make_counting_client("{}")
     hz = HazardReviewerRunnable(client, "m", cache_manager=cache)
     assert hz.cache_manager is cache
-    assert hz.rtm.cache_manager is None
+    assert hz.rtm.cache_manager is cache

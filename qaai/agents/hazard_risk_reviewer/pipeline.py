@@ -110,20 +110,12 @@ class HazardReviewerRunnable:
         self.checkpointer = checkpointer
         self.prompt_config = prompt_config if prompt_config is not None else settings.prompt_config
         self.pyjama_config = pyjama_config
-        # The RTM subgraph is built once and reused across all Send fan-outs.
-        # Callers can inject a pre-built RTMReviewerRunnable to share a
-        # single compiled graph between this service and an RTMReviewService.
-        self.rtm = rtm_runnable or RTMReviewerRunnable(
-            client=client,
-            model=model,
-            model_kwargs=model_kwargs,
-            prompt_config=self.prompt_config,
-        )
 
         # Build cache manager if not injected and caching is enabled.
         # Callers can pass a pre-wired ReviewCacheManager (e.g. to share
         # between this reviewer and the RTMReviewService), or let the
-        # pipeline auto-build one from settings.
+        # pipeline auto-build one from settings. Resolved BEFORE the RTM
+        # subgraph so the embedded RTM can share it (see below).
         if cache_manager is not None:
             self.cache_manager: Optional[ReviewCacheManager] = cache_manager
         elif settings.enable_cache:
@@ -138,6 +130,22 @@ class HazardReviewerRunnable:
             )
         else:
             self.cache_manager = None
+
+        # The RTM subgraph is built once and reused across all Send fan-outs.
+        # Callers can inject a pre-built RTMReviewerRunnable to share a
+        # single compiled graph between this service and an RTMReviewService.
+        # The auto-built subgraph is given the SAME cache_manager so its
+        # per-node cache (notably the doc-keyed design_summarizer) is shared —
+        # a cold requirement can reuse a design-doc summary another entity
+        # already computed. Its whole-result blob is still cached per requirement
+        # by RequirementReviewerNode; the two layers are complementary.
+        self.rtm = rtm_runnable or RTMReviewerRunnable(
+            client=client,
+            model=model,
+            model_kwargs=model_kwargs,
+            prompt_config=self.prompt_config,
+            cache_manager=self.cache_manager,
+        )
 
         self.graph = self.build()
 

@@ -86,6 +86,9 @@ class HazardDesignSummarizerNode(BatchedLLMNode):
     """Summarizes design documents for hazard mitigation evaluation."""
 
     BATCH_SIZE = 5
+    # Cache each design-doc summary under its own doc_id (not the hazard), so it
+    # is reused across every hazard that cites the same design document.
+    PER_ITEM_CACHE = True
 
     def _validate_state(self, state: HazardReviewState) -> bool:
         hazard = state.get("hazard")
@@ -93,18 +96,24 @@ class HazardDesignSummarizerNode(BatchedLLMNode):
             return False
         return bool(getattr(hazard.requirements_traceability, "design_docs", None))
 
+    def _get_item_cache_id(self, item) -> Optional[str]:
+        # Per-doc cache entity — a design summary is a function of the doc itself.
+        return getattr(item, "doc_id", None)
+
+    def _item_cache_prompt_set(self) -> Optional[str]:
+        # Hazard design_summarizer is set-independent; share doc summaries.
+        return None
+
+    def _restore_item_from_cache(self, cached: dict) -> HazardSummarizedDesignSpec:
+        return HazardSummarizedDesignSpec.model_validate(cached["result"])
+
     def _get_items(self, state: HazardReviewState) -> list:
         return state["hazard"].requirements_traceability.design_docs
 
     def _build_batch_payload(self, state: HazardReviewState, batch: List) -> dict:
-        hazard = state["hazard"]
+        # Doc-intrinsic summary: the hazard context is deliberately NOT sent so
+        # the per-doc cache entry is shareable across hazards.
         return {
-            "hazard": {
-                "hazard_id": hazard.hazard_id,
-                "hazardous_situation": hazard.hazardous_situation,
-                "software_related_causes": hazard.software_related_causes,
-                "risk_control_measures": hazard.risk_control_measures,
-            },
             "design_docs": [
                 {"doc_id": dd.doc_id, "name": dd.name, "description": dd.description}
                 for dd in batch
@@ -119,15 +128,6 @@ class HazardDesignSummarizerNode(BatchedLLMNode):
 
     def _build_result(self, state: HazardReviewState, all_summaries: list) -> dict:
         return {"summarized_designs": all_summaries}
-
-    def _get_cache_entity_id(self, state: HazardReviewState) -> Optional[str]:
-        hazard = state.get("hazard")
-        return hazard.hazard_id if hazard else None
-
-    def _restore_from_cache(self, cached: dict) -> list:
-        restored = [HazardSummarizedDesignSpec.model_validate(d) for d in cached["result"]]
-        logger.info("%s: returning %d summaries from cache", self.__class__.__name__, len(restored))
-        return restored
 
 
 class HazardNeedsSummarizerNode(BatchedLLMNode):
@@ -396,8 +396,9 @@ class RequirementReviewerNode:
         rtm_input = {
             "requirement": requirement,
             "test_cases": test_cases,
-            # Embedded RTM has no cache manager of its own (Option A), so this
-            # is a no-op for its internal nodes; passed for consistency.
+            # The embedded RTM now shares the hazard reviewer's cache_manager, so
+            # this mode drives its internal nodes too — notably letting the
+            # doc-keyed design_summarizer reuse summaries across entities.
             "cache_mode": cache_mode,
             # Gates the embedded RTM design_summarizer branch (see route_after_gate_rtm).
             "include_design_summaries": include_design_summaries,
@@ -655,15 +656,9 @@ class HazardEvaluatorNode(StandardLLMNode):
         if self.dimension_code in ["H4", "H5"]:
             reviews = state.get("requirement_reviews", [])
             payload["requirement_reviews"] = _summarise_reviews(reviews)
-            # H4, H5 also get the full requirements and test_cases lists
+            # H4, H5 also get the full requirements list
             payload["requirements"] = [r.requirement.model_dump() for r in reviews]
-            
-            # Test cases come from requirements_traceability
-            test_cases = []
-            if hazard.requirements_traceability:
-                test_cases = hazard.requirements_traceability.test_cases or []
-            payload["test_cases"] = [tc.model_dump() for tc in test_cases]
-            
+
             # H4 gets summarized_designs if available
             if self.dimension_code == "H4":
                 summarized_designs = state.get("summarized_designs")
@@ -673,9 +668,16 @@ class HazardEvaluatorNode(StandardLLMNode):
                     ]
                 else:
                     payload["summarized_designs"] = None
-            
-            # H5 gets summarized_user_needs if available
+
+            # H5 gets the raw test_cases (its prompt reads them for verification
+            # depth) and summarized_user_needs. H4's prompt never reads raw test
+            # cases, so they are deliberately not attached to the H4 payload.
             if self.dimension_code == "H5":
+                test_cases = []
+                if hazard.requirements_traceability:
+                    test_cases = hazard.requirements_traceability.test_cases or []
+                payload["test_cases"] = [tc.model_dump() for tc in test_cases]
+
                 summarized_user_needs = state.get("summarized_user_needs")
                 if summarized_user_needs is not None and len(summarized_user_needs) > 0:
                     payload["summarized_user_needs"] = [
