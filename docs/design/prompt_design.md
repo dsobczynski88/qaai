@@ -91,7 +91,7 @@ Each system uses constrained findings and a defined roll-up rule:
 
 - **Test Suite Reviewer:** mandatory M1–M5 findings determine whether the traced suite adequately covers the requirement; R6 is advisory.
 - **Test Case Reviewer:** checklist rows roll up by deterministic AND logic; Partial Yes remains visible but does not fail the overall verdict.
-- **Hazard Risk Reviewer:** H1–H6 mandatory findings produce a binary safety-review disposition, with narrowly controlled N-A behavior only where justified; R7 is a recommended finding that is excluded from the verdict.
+- **Hazard Risk Reviewer:** H1–H6 mandatory findings produce a binary safety-review disposition, with narrowly controlled N-A behavior only where justified; R7 is a recommended finding that is excluded from the verdict. Each finding also carries a `partial` flag (Partial Yes) marking a met-but-materially-incomplete criterion — rendered Yellow and kept visible without failing the overall verdict, mirroring the Test Case Reviewer.
 
 <h2 id="ts">Test Suite Reviewer — ISO/IEC/IEEE 29148 + BS ISO/IEC/IEEE 29119-3</h2>
 
@@ -302,7 +302,7 @@ This appendix consolidates the standard-to-prompt mappings from the provided des
 <tr><td>ISO 14971 — Clauses 2.10, 2.28, 3.4(e), 6.3</td><td>H5 Verification Depth and Hazard-Path Effectiveness</td><td>Hazard Risk Reviewer</td><td>Requires objective evidence that controls work for the hazardous scenario, including negative, fault, boundary, timing, integration, security, alarm, or degraded-mode evidence where needed.</td></tr>
 <tr><td>ISO 14971 — Clauses 3.2, 3.4(d), 3.5, 6.4, 6.5, 7</td><td>H6 Residual Risk Closure</td><td>Hazard Risk Reviewer</td><td>Requires post-mitigation risk fields, acceptability criteria, final rating rationale, and upstream H4/H5 support.</td></tr>
 <tr><td>ISO 14971 — Clauses 6.6, 6.7, 9, Annex E, Annex G</td><td>R7 HSHA Update and New Hazard Capture (recommended)</td><td>Hazard Risk Reviewer</td><td>Checks whether analysis reveals new hazards or hazardous situations and requires concrete <code>new_hs_reference</code> linkage when applicable.</td></tr>
-<tr><td>ISO 14971 — Risk Management File Traceability</td><td>Shared H1–H6 + R7 Output Schema</td><td>Hazard Risk Reviewer</td><td>Outputs evidence identifiers, cited requirements, cited tests, unblocked items, concise rationales, and deterministic verdicts.</td></tr>
+<tr><td>ISO 14971 — Risk Management File Traceability</td><td>Shared H1–H6 + R7 Output Schema</td><td>Hazard Risk Reviewer</td><td>Outputs evidence identifiers, cited requirements, cited tests, unblocked items, concise rationales, partial (Yellow) flags, and deterministic verdicts.</td></tr>
 <tr><td>ISO 14971 — Documentation Completeness Expectations</td><td>Placeholder Detection Rule</td><td>Hazard Risk Reviewer</td><td>Treats empty, null, TBD, TBC, Unknown, ?, and inappropriate N/A values as non-substantive.</td></tr>
 </tbody>
 </table>

@@ -56,3 +56,46 @@ def test_h5_na_is_allowed():
 
 def test_mandatory_no_overrides_r7_yes():
     assert _FinalAssessorNode._aggregate_verdict(_findings(H1="No", R7="Yes")) == "No"
+
+
+# --- partial-Yes (Yellow) signal -------------------------------------------------
+
+
+def test_partial_yes_still_passes_verdict():
+    """A partial-Yes has verdict='Yes', so it must not flip overall_verdict."""
+    findings = _findings()
+    findings[0].partial = True  # H1 partial-Yes
+    assert findings[0].verdict == "Yes"
+    assert _FinalAssessorNode._aggregate_verdict(findings) == "Yes"
+
+
+def test_partial_defaults_false():
+    """partial defaults to False on every finding when not supplied."""
+    assert all(f.partial is False for f in _findings())
+
+
+def test_partial_alias_coerced_to_yes_plus_flag():
+    """An LLM 'Partial' verdict string is rewritten to verdict='Yes', partial=True."""
+    f = HazardFinding(
+        code="H2",
+        dimension=_DIMENSIONS["H2"],
+        verdict="Partial",
+        rationale="cause coverage is thin",
+    )
+    assert f.verdict == "Yes"
+    assert f.partial is True
+
+
+def test_partial_alias_across_full_rubric_stays_yes():
+    """A rubric whose findings are all partial-Yes (via alias) still aggregates to Yes."""
+    findings = [
+        HazardFinding(
+            code=code,
+            dimension=_DIMENSIONS[code],
+            verdict="Partial",
+            rationale="test",
+        )
+        for code in _DIMENSIONS
+    ]
+    assert all(f.verdict == "Yes" and f.partial for f in findings)
+    assert _FinalAssessorNode._aggregate_verdict(findings) == "Yes"

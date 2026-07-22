@@ -9,9 +9,14 @@ review-hazard-mitigation-coverage skill.
 
 Verdicts are binary Yes/No (matching test_suite_reviewer's M1-M5 and
 test_case_reviewer's checklist conventions); H5 alone may be N-A when the
-hazard has no software_related_causes. overall_verdict is Yes iff every
-MANDATORY finding (H1-H6) verdict is in {Yes, N-A}, else No. R7 is recommended
-only and is excluded from the verdict (mirrors the RTM reviewer's R6).
+hazard has no software_related_causes. Each finding also carries a `partial`
+flag (mirroring test_case_reviewer's EvaluatedReviewObjective): partial=True
+rides alongside verdict="Yes" when the criterion is met but coverage is
+materially incomplete, driving Yellow rendering in the viewer. Partial-Yes
+still passes the gate — it never flips overall_verdict and is intentionally
+unscored by the eval harness. overall_verdict is Yes iff every MANDATORY
+finding (H1-H6) verdict is in {Yes, N-A}, else No. R7 is recommended only and
+is excluded from the verdict (mirrors the RTM reviewer's R6).
 
 HazardAssessment mirrors SynthesizedAssessment from test_suite_reviewer.core:
 mandatory findings only, no advisories. Advisory items defined in
@@ -26,7 +31,14 @@ assessment by the API layer.
 import operator
 from typing import Annotated, Any, List, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+
+# Repair helpers live in the single documented surface
+# (qaai.agents.shared.json_repair_registry). Imported so the model-level
+# mode="before" validator stays a safety net for direct model_validate calls.
+from qaai.agents.shared.json_repair_registry import (
+    coerce_partial_verdict as _coerce_partial_verdict,
+)
 
 from qaai.agents.shared.core import (
     DecomposedRequirement,
@@ -325,6 +337,16 @@ class HazardFinding(BaseModel):
             "(Yes / No) and NEVER affects overall_verdict."
         ),
     )
+    partial: bool = Field(
+        default=False,
+        description=(
+            "True ONLY when verdict='Yes' AND the criterion is met but coverage "
+            "is incomplete in some material way (drives Yellow rendering in the "
+            "viewer). Always False when verdict is No or N-A. Has NO effect on "
+            "overall_verdict aggregation — a partial-Yes still passes — and is "
+            "intentionally unscored by the eval harness."
+        ),
+    )
     rationale: str = Field(
         ...,
         description=(
@@ -348,6 +370,19 @@ class HazardFinding(BaseModel):
         ),
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_partial_alias(cls, data: Any) -> Any:
+        # Safety net: if the LLM emits a "Partial" alias as the verdict string
+        # instead of (verdict='Yes', partial=True), rewrite it to the canonical
+        # boolean-flag shape. Mirrors EvaluatedReviewObjective in the TC reviewer.
+        if isinstance(data, dict):
+            verdict, was_partial = _coerce_partial_verdict(data.get("verdict"))
+            if was_partial:
+                data["verdict"] = verdict
+                data["partial"] = True
+        return data
+
 
 class HazardAssessment(BaseModel):
     """Aggregated H1-H6 (mandatory) + R7 (recommended) rubric for a single hazard."""
@@ -359,9 +394,10 @@ class HazardAssessment(BaseModel):
         ...,
         description=(
             "Yes iff every MANDATORY finding (H1-H6) verdict ∈ {Yes, N-A}. "
-            "No otherwise. R7 is recommended only and is EXCLUDED from this "
-            "computation. Computed deterministically by the final_assessor "
-            "node, never by the LLM."
+            "No otherwise. A partial-Yes (verdict='Yes', partial=True) still "
+            "counts as Yes and never flips this. R7 is recommended only and is "
+            "EXCLUDED from this computation. Computed deterministically by the "
+            "final_assessor node, never by the LLM."
         ),
     )
     mandatory_findings: List[HazardFinding] = Field(

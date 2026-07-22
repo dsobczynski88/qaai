@@ -4,7 +4,7 @@
 
 <h2 id="purpose">What it checks &amp; how</h2>
 
-The Hazard Risk Reviewer evaluates a single hazard record from a Software Hazard Analysis (SHA) and asks whether its traced requirements, test cases, and design controls provide **reasonable assurance of safety** against that hazard, per ISO 14971 / IEC 62304. It applies a seven-dimension rubric (H1–H6 mandatory + R7 recommended) and emits a binary Yes/No `overall_verdict` computed deterministically from the seven findings.
+The Hazard Risk Reviewer evaluates a single hazard record from a Software Hazard Analysis (SHA) and asks whether its traced requirements, test cases, and design controls provide **reasonable assurance of safety** against that hazard, per ISO 14971 / IEC 62304. It applies a seven-dimension rubric (H1–H6 mandatory + R7 recommended) and emits a binary Yes/No `overall_verdict` computed deterministically from the seven findings. Each finding also carries a `partial` flag: a partial-Yes (`verdict="Yes"`, `partial=true`) means the criterion is met but coverage is materially incomplete, rendered **Yellow** for reviewer attention. A partial-Yes still passes the verdict and is intentionally unscored by the eval harness (mirrors the test_case_reviewer's checklist `partial`).
 
 Its defining feature: for every requirement traced from the hazard, it **invokes the entire Test Suite (RTM) reviewer as a subgraph** — so each risk-control requirement gets a full coverage review, and those results feed the risk-control / verification dimensions.
 
@@ -95,9 +95,11 @@ review (v4 edge-case decomposer when ON, v3 baseline when OFF).</div>
 <tr><td><strong>R7</strong> <em>(recommended)</em></td><td>HSHA update &amp; newly identified hazard capture</td><td>Yes / No</td><td>Recommended only — excluded from <code>overall_verdict</code>.</td></tr>
 </tbody></table>
 
+<div class="note"><strong>Partial (Yellow) signal.</strong> Every finding also carries a boolean <code>partial</code> flag. Set with <code>verdict="Yes"</code>, it marks a criterion that is met but whose coverage/evidence is materially incomplete — rendered Yellow in the viewer for reviewer attention. <code>partial</code> is legal only with <code>Yes</code> (never <code>No</code>/<code>N-A</code>), a partial-Yes still passes <code>overall_verdict</code>, and it is intentionally left unscored by the eval harness (the scorer reads only the binary verdict). This mirrors the test_case_reviewer's <code>EvaluatedReviewObjective.partial</code>.</div>
+
 <h2 id="verdict">Verdict logic</h2>
 
-The `final_assessment` node returns exactly seven `HazardFinding` items (H1–H6 mandatory + R7 recommended). The verdict is computed **deterministically in code**, not by the LLM: `overall_verdict` is **Yes** iff every **mandatory** finding (H1–H6) verdict is in `{Yes, N-A}`, else **No**. **R7 is recommended only and is excluded from the verdict** — an R7 = No never flips it (mirrors the RTM reviewer's R6 advisory criterion). The LLM is used only to write the accompanying `comments` and `clarification_questions`; if the prose call fails, the deterministic assessment is still produced. <span class="src">hazard_risk_reviewer/nodes.py</span>
+The `final_assessment` node returns exactly seven `HazardFinding` items (H1–H6 mandatory + R7 recommended). The verdict is computed **deterministically in code**, not by the LLM: `overall_verdict` is **Yes** iff every **mandatory** finding (H1–H6) verdict is in `{Yes, N-A}`, else **No**. **R7 is recommended only and is excluded from the verdict** — an R7 = No never flips it (mirrors the RTM reviewer's R6 advisory criterion). A `partial`-Yes finding has `verdict="Yes"`, so it passes here unchanged — `partial` is a Yellow reviewer-attention signal, never a gate. The LLM is used only to write the accompanying `comments` and `clarification_questions`; if the prose call fails, the deterministic assessment is still produced. <span class="src">hazard_risk_reviewer/nodes.py</span>
 
 <h2 id="cache">Caching &amp; prompt sets</h2>
 
