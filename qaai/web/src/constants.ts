@@ -8,16 +8,16 @@ export const POLL_INTERVAL_MS = 4000;
 export const MAX_POLL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 // ── RBAC ──
-// Which roles grant which UI action. This is UX gating ONLY — a determined client
-// can still call the API directly, so the backend must enforce these server-side
-// in the follow-up phase. Keep this map as the single source of truth.
+// Which roles grant which UI action. This UX gating mirrors the backend permission
+// map (qaai/api/authz.py PERMISSIONS_BY_ROLE), which is the real gate — a determined
+// client can still call the API directly and gets a 401/403 there. Keep the two in
+// sync. admin: everything; user: run reviews + upload feedback.
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: ["run_review", "upload_feedback", "manage"],
-  reviewer: ["run_review", "upload_feedback"],
-  viewer: [],
+  user: ["run_review", "upload_feedback"],
 };
 
-export const ALL_ROLES: Role[] = ["admin", "reviewer", "viewer"];
+export const ALL_ROLES: Role[] = ["admin", "user"];
 
 // ── Tooltip copy (centralized; ported verbatim from the original index.html) ──
 export const TOOLTIPS = {

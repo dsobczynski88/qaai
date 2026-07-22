@@ -1,9 +1,9 @@
 // ── Shared domain types ──
 
-export type Role = "admin" | "reviewer" | "viewer";
+export type Role = "admin" | "user";
 
-/** UI-gated actions. Enforced for UX only on the client; real enforcement is
- *  server-side (see the RBAC follow-up phase). */
+/** UI-gated actions. The client gates for UX; the backend enforces the same
+ *  permission map server-side (qaai/api/authz.py). */
 export type Permission = "run_review" | "upload_feedback" | "manage";
 
 export interface User {

@@ -35,14 +35,18 @@ All runtime configuration is centralized in the `Settings` singleton <span class
 <tr><td><code>ENVIRONMENT</code></td><td>(read in <code>main.py</code>)</td><td><code>development</code></td><td><code>production</code> hides <code>/docs</code> &amp; <code>/redoc</code></td></tr>
 <tr><td><code>QAAI_DEV_USER</code></td><td><code>dev_user_name</code></td><td><code>Local Dev</code></td><td>Identity name for the DEV fallback used by <code>GET /api/v1/me</code></td></tr>
 <tr><td><code>QAAI_DEV_EMAIL</code></td><td><code>dev_user_email</code></td><td><code>dev@localhost</code></td><td>Identity email for the DEV fallback</td></tr>
-<tr><td><code>QAAI_DEV_ROLES</code></td><td><code>dev_roles</code></td><td><code>admin</code></td><td>Comma-separated roles for the DEV fallback (validated against <code>admin</code>/<code>reviewer</code>/<code>viewer</code>)</td></tr>
-<tr><td><code>QAAI_OIDC_ROLE_MAP</code></td><td><code>oidc_role_map_json</code></td><td><code>""</code></td><td>JSON map of SSO group → role, e.g. <code>{"qaai-admins":"admin"}</code></td></tr>
+<tr><td><code>QAAI_DEV_ROLES</code></td><td><code>dev_roles</code></td><td><code>admin</code></td><td>Comma-separated roles for the DEV fallback (validated against <code>admin</code>/<code>user</code>)</td></tr>
+<tr><td><code>QAAI_OIDC_ROLE_MAP</code></td><td><code>oidc_role_map_json</code></td><td><code>""</code></td><td>JSON map of SSO/AD group → role, e.g. <code>{"qaai-admins":"admin","qaai-users":"user"}</code></td></tr>
+<tr><td><code>ALB_OIDC_REGION</code></td><td><code>alb_oidc_region</code></td><td><code>None</code></td><td>AWS region hosting the ALB OIDC signing keys; builds the public-key URL <code>https://public-keys.auth.elb.&lt;region&gt;.amazonaws.com/&lt;kid&gt;</code> used to verify the <code>x-amzn-oidc-data</code> JWT. Required in PROD when verification is on</td></tr>
+<tr><td><code>QAAI_VERIFY_OIDC_SIGNATURE</code></td><td><code>verify_oidc_signature</code></td><td><code>true</code></td><td>Verify the ALB OIDC JWT signature (ES256) before trusting claims; skipped only in DEV. <strong>Never set false in PROD</strong></td></tr>
 </tbody></table>
 
-<div class="note">The RBAC/identity variables feed <code>GET /api/v1/me</code> and the SPA's role
-gating — see the <a href="design/frontend_vue_rbac.html">Frontend &amp; RBAC design</a>. Real
-per-route enforcement and OIDC signature verification are a documented follow-up; today the
-roles are UX gating only.</div>
+<div class="note">The RBAC/identity variables feed <code>GET /api/v1/me</code>, the SPA's role
+gating, <strong>and</strong> the server-side per-route enforcement — see the
+<a href="design/frontend_vue_rbac.html">Frontend &amp; RBAC design</a> and the
+<a href="deployment.html">Deployment guide</a>. Roles are now enforced on the API
+(<code>qaai/api/authz.py</code>), and the OIDC signature is verified outside DEV — the client
+checks are a UX convenience layered on top, not the boundary.</div>
 
 Example `.env`:
 
@@ -71,6 +75,13 @@ CACHE_DIR=./shared/runs
 # Locally you can mimic the AWS flow with prefixed vars, e.g. APP_ENV=PROD plus
 # PROD_API_KEY=... PROD_API_MODEL=... (no QAAI_SECRET_ID set).
 # APP_ENV=DEV
+
+# RBAC / ALB OIDC (PROD). Roles: admin | user. In DEV, set QAAI_DEV_ROLES to
+# exercise gating; in PROD the ALB injects x-amzn-oidc-data and QAAI verifies it.
+# QAAI_DEV_ROLES=user
+# QAAI_OIDC_ROLE_MAP={"qaai-admins":"admin","qaai-users":"user"}
+# ALB_OIDC_REGION=us-east-1
+# QAAI_VERIFY_OIDC_SIGNATURE=true
 ```
 
 <h2 id="models">AI model settings</h2>

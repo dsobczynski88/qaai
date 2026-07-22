@@ -1,0 +1,28 @@
+# Keep the build context small and free of local state / secrets.
+.git
+.venv
+env/
+venv/
+.env
+.envrc
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node build inputs/outputs (the image rebuilds the SPA in the web stage).
+qaai/web/node_modules/
+qaai/web/dist/
+
+# Local runtime state — must come from a mounted volume, never the image.
+logs/
+shared/
+cache/
+mlruns/
+mlflow.db
+
+# Eval datasets / notebooks / editor cruft.
+eval/datasets/**/predictions/
+.vscode/
+.idea/

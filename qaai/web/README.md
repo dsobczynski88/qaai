@@ -1,9 +1,9 @@
 # QAAI Web (Vue 3 SPA)
 
 The interactive reviewer UI, a **Vue 3 + Vite** single-page app. It replaces the old
-vanilla `qaai/api/static/` page and is **RBAC-ready** (auth store, route guards,
-role-gated components) for the AWS deployment. Built output (`dist/`) is served by
-FastAPI at `/`.
+vanilla `qaai/api/static/` page and layers on **RBAC** (auth store, route guards,
+role-gated components) mirroring the server-side enforcement for the AWS deployment.
+Built output (`dist/`) is served by FastAPI at `/`.
 
 ## Prerequisites
 
@@ -89,30 +89,35 @@ and the poll engine (`POLL_INTERVAL_MS`/`MAX_POLL_MS`).
 
 ## RBAC
 
-Roles: **admin** (everything) · **reviewer** (run reviews + download + upload feedback)
-· **viewer** (view/download only — cannot start runs). The role → action map lives in
-`src/constants.ts` (`ROLE_PERMISSIONS`) and is mirrored server-side in
-`qaai/core/config.py` (`VALID_ROLES`).
+Roles: **admin** (everything, incl. `GET /usage` monitoring) · **user** (run reviews +
+poll/download jobs + upload feedback). The role → action map lives in `src/constants.ts`
+(`ROLE_PERMISSIONS`) and is mirrored server-side in `qaai/api/authz.py`
+(`PERMISSIONS_BY_ROLE`); `VALID_ROLES` in `qaai/core/config.py` is the role vocabulary.
 
 Identity comes from `GET /api/v1/me` (`qaai/api/identity.py`):
 
 - **Production (ALB + OIDC):** the ALB authenticates at the edge and injects a signed
-  JWT in `x-amzn-oidc-data`; the endpoint reads the claims and maps SSO groups → roles
-  (`QAAI_OIDC_ROLE_MAP`, or a name-substring fallback).
+  JWT in `x-amzn-oidc-data`; outside DEV the endpoint **verifies the JWT's ES256
+  signature** against the ALB public key (fetched by `kid`) before reading the claims and
+  mapping SSO/AD groups → roles (`QAAI_OIDC_ROLE_MAP`, or a name-substring fallback).
 - **Local dev:** with `APP_ENV=DEV` and no header, a configurable dev identity is
-  returned. Set `QAAI_DEV_ROLES=viewer` (or `reviewer` / `admin`) to exercise gating.
-  Outside DEV, a missing header fails closed (unauthenticated → "Access denied").
+  returned (signature verification skipped). Set `QAAI_DEV_ROLES=user` (or `admin`) to
+  exercise gating. Outside DEV, a missing header fails closed (→ "Access denied").
 
-> **⚠ Frontend RBAC is UX only, not security.** Route guards and disabled buttons stop
-> honest users, not the API. Real enforcement — verifying the ALB OIDC JWT **signature**
-> and adding per-route role dependencies on the review endpoints — is the RBAC
-> **follow-up phase**. Do not treat the client checks as an access boundary.
+> **Frontend RBAC is UX; the API is the boundary.** Route guards and disabled buttons stop
+> honest users; the real enforcement is server-side — every review/jobs/feedback/usage
+> route carries a `Depends(...)` guard from `qaai/api/authz.py` (401 unauthenticated, 403
+> lacking permission), and the ALB OIDC JWT signature is verified outside DEV. The client
+> and server permission maps are kept in sync deliberately. Full deployment path:
+> `docs/deployment.md`.
 
 ### Relevant env vars
 
 | Var | Purpose |
 |-----|---------|
-| `QAAI_DEV_ROLES` | DEV-only fallback roles (comma-separated), default `admin` |
+| `QAAI_DEV_ROLES` | DEV-only fallback roles (comma-separated), default `admin`; validated against `admin`/`user` |
 | `QAAI_DEV_USER` / `QAAI_DEV_EMAIL` | DEV fallback display identity |
-| `QAAI_OIDC_ROLE_MAP` | JSON map of SSO group → role, e.g. `{"qaai-admins":"admin"}` |
-| `APP_ENV` | `DEV` enables the dev fallback; `TEST`/`PROD` require the edge header |
+| `QAAI_OIDC_ROLE_MAP` | JSON map of SSO/AD group → role, e.g. `{"qaai-admins":"admin","qaai-users":"user"}` |
+| `ALB_OIDC_REGION` | AWS region for the ALB OIDC signing keys (signature verification) |
+| `QAAI_VERIFY_OIDC_SIGNATURE` | Verify the JWT signature (default `true`); skipped in DEV. Never false in PROD |
+| `APP_ENV` | `DEV` enables the dev fallback + skips verification; `TEST`/`PROD` require & verify the edge header |

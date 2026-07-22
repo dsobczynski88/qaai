@@ -4,7 +4,8 @@ import { useAuthStore } from "../stores/auth";
 import { uploadFeedback } from "../api/reviews";
 
 // Send an exported reviewer feedback JSON back to the server (saved under
-// ./shared/feedback/). Role-gated: hidden from viewers.
+// ./shared/feedback/). Shown to any role holding the upload_feedback
+// permission (admin and user).
 const auth = useAuthStore();
 const canUpload = computed(() => auth.can("upload_feedback"));
 

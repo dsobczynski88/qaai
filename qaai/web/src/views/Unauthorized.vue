@@ -14,7 +14,7 @@ const auth = useAuthStore();
     </p>
     <p v-else>
       Your account is authenticated but does not have a role permitted to use this
-      reviewer. Contact an administrator to be granted the Reviewer or Admin role.
+      reviewer. Contact an administrator to be granted the User or Admin role.
     </p>
     <p class="detail">
       <span v-if="auth.user">Signed in as {{ auth.user.name }}.</span>
