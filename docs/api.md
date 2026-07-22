@@ -44,20 +44,31 @@ rather than adding features to <code>static/</code>.</div>
 All routes are mounted under `/api/v1` <span class="src">qaai/api/routes.py</span>.
 
 <table>
-<thead><tr><th>Method &amp; path</th><th>Body / form</th><th>Success</th><th>Source</th></tr></thead>
+<thead><tr><th>Method &amp; path</th><th>Body / form</th><th>Success</th><th>Permission</th><th>Source</th></tr></thead>
 <tbody>
-<tr><td><span class="pill get">GET</span> <code>/api/v1/me</code></td><td>—</td><td>200 <code>{user, roles}</code></td><td><span class="src">routes.py:52-62</span></td></tr>
-<tr><td><span class="pill get">GET</span> <code>/api/v1/health</code></td><td>—</td><td>200 (or 503 degraded)</td><td><span class="src">routes.py:65-83</span></td></tr>
-<tr><td><span class="pill post">POST</span> <code>/api/v1/test-suite-review</code></td><td><code>BaselineRequest</code> JSON</td><td>202 + <code>job_id</code></td><td><span class="src">routes.py:86-111</span></td></tr>
-<tr><td><span class="pill post">POST</span> <code>/api/v1/test-case-review</code></td><td><code>BaselineRequest</code> JSON</td><td>202 + <code>job_id</code></td><td><span class="src">routes.py:114-138</span></td></tr>
-<tr><td><span class="pill post">POST</span> <code>/api/v1/hazard-risk-review</code></td><td><code>multipart/form-data</code></td><td>202 + <code>job_id</code></td><td><span class="src">routes.py:141-188</span></td></tr>
-<tr><td><span class="pill get">GET</span> <code>/api/v1/jobs/{job_id}</code></td><td>—</td><td>200 status (404 unknown)</td><td><span class="src">routes.py:203-212</span></td></tr>
-<tr><td><span class="pill post">POST</span> <code>/api/v1/jobs/{job_id}/cancel</code></td><td>—</td><td>200 <code>{status, cancelled}</code> (Stop Run)</td><td><span class="src">routes.py:215-229</span></td></tr>
-<tr><td><span class="pill get">GET</span> <code>/api/v1/jobs/{job_id}/result</code></td><td>—</td><td>200 HTML (see codes below)</td><td><span class="src">routes.py:232-249</span></td></tr>
-<tr><td><span class="pill post">POST</span> <code>/api/v1/feedback-upload</code></td><td><code>multipart</code> (<code>.json</code> file)</td><td>200 <code>{saved, status}</code></td><td><span class="src">routes.py:256-282</span></td></tr>
+<tr><td><span class="pill get">GET</span> <code>/api/v1/me</code></td><td>—</td><td>200 <code>{user, roles}</code></td><td>public</td><td><span class="src">routes.py:53-63</span></td></tr>
+<tr><td><span class="pill get">GET</span> <code>/api/v1/health</code></td><td>—</td><td>200 (or 503 degraded)</td><td>public</td><td><span class="src">routes.py:84-102</span></td></tr>
+<tr><td><span class="pill get">GET</span> <code>/api/v1/usage</code></td><td>—</td><td>200 <code>{rate_limits, totals}</code></td><td><code>manage</code> (admin)</td><td><span class="src">routes.py:66-81</span></td></tr>
+<tr><td><span class="pill post">POST</span> <code>/api/v1/test-suite-review</code></td><td><code>BaselineRequest</code> JSON</td><td>202 + <code>job_id</code></td><td><code>run_review</code></td><td><span class="src">routes.py:105-133</span></td></tr>
+<tr><td><span class="pill post">POST</span> <code>/api/v1/test-case-review</code></td><td><code>BaselineRequest</code> JSON</td><td>202 + <code>job_id</code></td><td><code>run_review</code></td><td><span class="src">routes.py:136-161</span></td></tr>
+<tr><td><span class="pill post">POST</span> <code>/api/v1/hazard-risk-review</code></td><td><code>multipart/form-data</code></td><td>202 + <code>job_id</code></td><td><code>run_review</code></td><td><span class="src">routes.py:164-214</span></td></tr>
+<tr><td><span class="pill get">GET</span> <code>/api/v1/jobs/{job_id}</code></td><td>—</td><td>200 status (404 unknown)</td><td><code>run_review</code></td><td><span class="src">routes.py:229-239</span></td></tr>
+<tr><td><span class="pill post">POST</span> <code>/api/v1/jobs/{job_id}/cancel</code></td><td>—</td><td>200 <code>{status, cancelled}</code> (Stop Run)</td><td><code>run_review</code></td><td><span class="src">routes.py:242-257</span></td></tr>
+<tr><td><span class="pill get">GET</span> <code>/api/v1/jobs/{job_id}/result</code></td><td>—</td><td>200 HTML (see codes below)</td><td><code>run_review</code></td><td><span class="src">routes.py:260-278</span></td></tr>
+<tr><td><span class="pill post">POST</span> <code>/api/v1/feedback-upload</code></td><td><code>multipart</code> (<code>.json</code> file)</td><td>200 <code>{saved, status}</code></td><td><code>upload_feedback</code></td><td><span class="src">routes.py:308-337</span></td></tr>
 </tbody></table>
 
-`GET /api/v1/me` returns the caller's identity and roles for the SPA's RBAC layer (resolved from the ALB/OIDC header or a DEV fallback); it is identity-read only and does **not** gate the review endpoints. `POST /api/v1/feedback-upload` stores exported reviewer feedback JSON under `./shared/feedback/`.
+<div class="note"><strong>Authorization is enforced server-side.</strong> Every non-public
+route above carries a <code>Depends(...)</code> guard from <code>qaai/api/authz.py</code>
+that fails closed: <strong>401</strong> when unauthenticated, <strong>403</strong> when
+authenticated but lacking the listed permission. Roles are <code>admin</code> (holds
+<code>run_review</code>, <code>upload_feedback</code>, <code>manage</code>) and
+<code>user</code> (<code>run_review</code>, <code>upload_feedback</code>). The jobs endpoints
+require <code>run_review</code> too, because the SPA auto-polls and downloads on every run.
+See <a href="design/frontend_vue_rbac.html#rbac">RBAC model</a> and the
+<a href="deployment.html">Deployment guide</a>. <span class="src">qaai/api/authz.py:27-66</span></div>
+
+`GET /api/v1/me` returns the caller's identity and roles for the SPA's RBAC layer (resolved from the ALB/OIDC header or a DEV fallback); it is public and identity-read only. `GET /api/v1/usage` exposes the shared limiter's RPM/TPM utilization + rolling token/cost totals for monitoring (admin-only). `POST /api/v1/feedback-upload` validates the exported-feedback JSON shape (422 on mismatch) and stores it under `./shared/feedback/`.
 
 ### Health check
 
@@ -65,7 +76,7 @@ All routes are mounted under `/api/v1` <span class="src">qaai/api/routes.py</spa
 curl http://localhost:8000/api/v1/health
 ```
 
-Returns 200 with each service marked `available` when initialized; if any service is missing it returns **503** with `"status": "degraded"` <span class="src">routes.py:65-83</span>:
+Returns 200 with each service marked `available` when initialized; if any service is missing it returns **503** with `"status": "degraded"` <span class="src">routes.py:84-102</span>:
 
 ```
 {
@@ -86,7 +97,7 @@ A review can take several minutes. If the report were returned synchronously, an
 1. **Submit** — `POST` a review endpoint → `202 Accepted` with `{"job_id": "...", "status": "pending"}` in well under a second.
 2. **Poll** — `GET /api/v1/jobs/{job_id}` returns `Job.to_status_dict()`: `{job_id, status, filename, error, total, done, succeeded, failed, eta_seconds, messages}`. `status` ∈ `pending`, `running`, `completed`, `failed`, `cancelled` <span class="src">jobs.py:34-38</span>.
 3. **Cancel (optional)** — `POST /api/v1/jobs/{job_id}/cancel` stops an in-flight run (the UI's "Stop Run"); the job then reports `cancelled`.
-4. **Download** — `GET /api/v1/jobs/{job_id}/result` returns the HTML report (`200`) when `completed`. It returns `404` for an unknown id, `425 Too Early` while pending/running, and the job's failure status when it failed — `400` for bad input, `499` for a user-cancelled run, `500` otherwise <span class="src">routes.py:232-249, jobs.py:166-195</span>.
+4. **Download** — `GET /api/v1/jobs/{job_id}/result` returns the HTML report (`200`) when `completed`. It returns `404` for an unknown id, `425 Too Early` while pending/running, and the job's failure status when it failed — `400` for bad input, `499` for a user-cancelled run, `500` otherwise <span class="src">routes.py:260-278, jobs.py:166-195</span>.
 
 <div class="note warn"><strong>Single worker.</strong> Jobs live in an in-memory registry
 (most-recent <strong>200</strong> retained). Reviews now run <strong>concurrently</strong> — the
@@ -144,7 +155,7 @@ Excel alone; the per-requirement RTM sub-review and the H4/H5 coverage/verificat
 depend on the JAMA-traced data and evaluate empty inputs without it
 <span class="src">qaai/agents/hazard_risk_reviewer/loader.py:91-115</span>.</div>
 
-Multipart form fields <span class="src">routes.py:142-153</span>:
+Multipart form fields <span class="src">routes.py:167-175</span>:
 
 <table>
 <thead><tr><th>Field</th><th>Required</th><th>Default</th><th>Notes</th></tr></thead>
@@ -195,11 +206,11 @@ Both endpoints accept a `BaselineRequest` body <span class="src">qaai/api/schema
 <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td><code>baseline_id</code></td><td>string</td><td>required</td><td>JAMA baseline to fetch and review</td></tr>
-<tr><td><code>cache_mode</code></td><td><code>"off"|"on"|"test"</code>? (also accepts legacy <code>"partial"|"full"</code>)</td><td><code>null</code></td><td>Explicit per-run cache mode; when set it overrides <code>use_cache</code> <span class="src">routes.py:40-49</span></td></tr>
-<tr><td><code>use_cache</code></td><td>bool (deprecated)</td><td><code>true</code></td><td><code>true</code> → <code>cache_mode="on"</code>; <code>false</code> → <code>"off"</code> (used only when <code>cache_mode</code> is unset) <span class="src">routes.py:100,127</span></td></tr>
+<tr><td><code>cache_mode</code></td><td><code>"off"|"on"|"test"</code>? (also accepts legacy <code>"partial"|"full"</code>)</td><td><code>null</code></td><td>Explicit per-run cache mode; when set it overrides <code>use_cache</code> <span class="src">routes.py:41-50</span></td></tr>
+<tr><td><code>use_cache</code></td><td>bool (deprecated)</td><td><code>true</code></td><td><code>true</code> → <code>cache_mode="on"</code>; <code>false</code> → <code>"off"</code> (used only when <code>cache_mode</code> is unset) <span class="src">routes.py:120,150</span></td></tr>
 <tr><td><code>test_mode</code></td><td>bool?</td><td><code>null</code></td><td>Cache-only JAMA (no live calls); <code>null</code> → <code>PYJAMA_TEST_MODE</code></td></tr>
-<tr><td><code>include_edge_case_analysis</code></td><td>bool</td><td><code>false</code></td><td><code>true</code> → prompt set <code>test_suite_reviewer_v4</code> (edge-case decomposer v6); <code>false</code> → <code>test_suite_reviewer_v3</code> (baseline v5). Applies to the test-suite review only. <span class="src">routes.py:102</span></td></tr>
-<tr><td><code>include_decomposition_analysis</code></td><td>bool</td><td><code>true</code></td><td>Test-case review only: <code>true</code> → <code>test_case_reviewer_v2</code> (decomposition); <code>false</code> → <code>test_case_reviewer_v3</code> (no-decomposition) <span class="src">routes.py:134</span></td></tr>
+<tr><td><code>include_edge_case_analysis</code></td><td>bool</td><td><code>false</code></td><td><code>true</code> → prompt set <code>test_suite_reviewer_v4</code> (edge-case decomposer v6); <code>false</code> → <code>test_suite_reviewer_v3</code> (baseline v5). Applies to the test-suite review only. <span class="src">routes.py:122</span></td></tr>
+<tr><td><code>include_decomposition_analysis</code></td><td>bool</td><td><code>true</code></td><td>Test-case review only: <code>true</code> → <code>test_case_reviewer_v2</code> (decomposition); <code>false</code> → <code>test_case_reviewer_v3</code> (no-decomposition) <span class="src">routes.py:157</span></td></tr>
 <tr><td><code>include_design_summaries</code></td><td>bool</td><td><code>false</code></td><td>Test-suite review only: <code>true</code> → run the <code>design_summarizer</code> so design context feeds per-spec coverage and the R6 criterion; <code>false</code> skips that branch <span class="src">qaai/api/schemas.py:55-64</span></td></tr>
 <tr><td><code>baseline_review_type</code></td><td><code>"requirements"|"tests"</code></td><td><code>"tests"</code></td><td>Test-suite review only: <code>tests</code> fetches baseline items as test cases traced up to their requirements (<code>request_type=test_suite_review</code>, the original behavior); <code>requirements</code> fetches requirement ids directly (<code>request_type=requirement_review</code>). Both produce the same per-requirement output shape <span class="src">qaai/api/schemas.py:65-75</span></td></tr>
 </tbody></table>
@@ -264,11 +275,17 @@ Each run also writes `token_usage.jsonl` with per-call token and cost metrics <s
 
 <h2 id="prod">Production deployment</h2>
 
-1. Remove `--reload` (dev-only).
-2. Use a production ASGI server (Gunicorn + a Uvicorn worker).
+<div class="note"><strong>Full guide.</strong> The reproducible AWS path — the multi-stage
+<code>Dockerfile</code>, single-worker run, EBS volumes, ALB OIDC listener config, PROD env
+vars, and a post-deploy smoke test — is in the <a href="deployment.html">Deployment
+guide</a>. The essentials:</div>
+
+1. Remove `--reload` (dev-only); run a **single** uvicorn worker (see below).
+2. Set `APP_ENV=PROD` so secrets hydrate from the AWS store and OIDC signature verification turns on.
 3. Set `ENVIRONMENT=production` to hide API docs.
-4. Set `ALLOWED_ORIGINS` to your domain(s) instead of `*`.
-5. Ensure required env vars are set; keep secrets out of `.env`.
+4. Put an ALB with an OIDC listener (AD security group) in front; it injects `x-amzn-oidc-data`, which QAAI verifies. Keep `ALB_OIDC_REGION` matching the ALB region.
+5. Set `ALLOWED_ORIGINS` to your domain(s) instead of `*`; keep secrets out of the image (Secrets Manager / SSM).
+6. Mount an EBS volume for `./shared` (cache + regulatory evidence) and `./logs` so they survive restarts.
 
 <div class="note warn"><strong>Run a single worker.</strong> The async job registry is
 in-memory <span class="src">qaai/api/jobs.py</span>, so a <code>job_id</code> created on

@@ -15,7 +15,7 @@ const disabled = computed(() => props.busy || !allowed.value);
 const title = computed(() =>
   allowed.value
     ? undefined
-    : "You need the Reviewer or Admin role to run reviews.",
+    : "You need the User or Admin role to run reviews.",
 );
 </script>
 
@@ -30,7 +30,7 @@ const title = computed(() =>
     <span aria-hidden="true">▶</span> {{ label }}
   </button>
   <p v-if="!allowed" class="perm-note">
-    Your role is view-only — running reviews requires the Reviewer or Admin role.
+    Your account isn't permitted to run reviews — this requires the User or Admin role.
   </p>
 </template>
 

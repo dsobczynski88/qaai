@@ -231,8 +231,9 @@ In-depth, self-contained HTML docs (generated from the codebase) live under `doc
 
 **Guides**
 
-- [Configuration Guide](docs/configuration.html) — environment variables, enabling/disabling the cache, and creating & selecting prompt sets.
-- [API Server & Frontend Guide](docs/api.html) — the async job model, every endpoint, request schemas, the web frontend, and production notes.
+- [Configuration Guide](docs/configuration.html) — environment variables (incl. RBAC/OIDC), enabling/disabling the cache, and creating & selecting prompt sets.
+- [API Server & Frontend Guide](docs/api.html) — the async job model, every endpoint, request schemas, per-route authorization, the web frontend, and production notes.
+- [Production Deployment](docs/deployment.html) — running on AWS behind an ALB (OIDC against an AD group): the Dockerfile, single-worker rule, roles & endpoint gating, PROD env vars, and EBS volumes.
 - [Test Guide](docs/test_guide.html) — running the unit, API, and integration suites; default fixtures and custom input files.
 - [MLflow Evaluation](docs/mlflow.html) — score the reviewers as classifiers: the spec-driven harness, dataset format, metrics, sample sizing, and the `qaai-mlflow-eval` plugin.
 - [Test Catalog](docs/test_catalog.html) — the `--test-catalog` pytest plugin: a searchable HTML book of the collected suite.
@@ -245,4 +246,4 @@ In-depth, self-contained HTML docs (generated from the codebase) live under `doc
 - [Hazard Risk Reviewer](docs/design/hazard_risk_reviewer.html) — the staged H1–H6 + R7 graph and the embedded RTM subgraph.
 - [Caching](docs/design/caching.html) — disk layout, cache keys, per-run cache modes, prompt-set namespacing, and version-driven invalidation.
 - [Prompt Design](docs/design/prompt_design.html) — how the prompt suites encode ISO/IEC/IEEE 29148, 29119-3, and ISO 14971, with a full clause→prompt traceability table.
-- [Frontend (Vue 3) & RBAC](docs/design/frontend_vue_rbac.html) — the SPA, the async job engine, the RBAC model, and the `/api/v1/me` identity seam.
+- [Frontend (Vue 3) & RBAC](docs/design/frontend_vue_rbac.html) — the SPA, the async job engine, the admin/user RBAC model (enforced server-side), and the verified ALB OIDC `/api/v1/me` identity seam.

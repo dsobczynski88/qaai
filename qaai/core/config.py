@@ -20,9 +20,12 @@ from qaai.core.constants import (
 logger = logging.getLogger(__name__)
 
 # RBAC roles recognized by the reviewer UI and identity layer. Kept here so the
-# API identity resolver (qaai/api/identity.py) and settings validation share one
-# source of truth. Mirrors the Role union in the Vue app (qaai/web/src/types.ts).
-VALID_ROLES = ("admin", "reviewer", "viewer")
+# API identity resolver (qaai/api/identity.py), the authz dependency
+# (qaai/api/authz.py), and settings validation share one source of truth. Mirrors
+# the Role union in the Vue app (qaai/web/src/types.ts).
+#   admin — everything, incl. usage/ops monitoring + user management.
+#   user  — run reviews and upload reviewer feedback.
+VALID_ROLES = ("admin", "user")
 
 # ---------------------------------------------------------------------------
 # Prompt-set selection constants
@@ -215,20 +218,30 @@ class Settings(BaseSettings):
     # Optional prompt set name - if specified, overrides default prompt_config
     prompt_set: Optional[str] = Field(default=None, alias='PROMPT_SET')
 
-    # ── RBAC identity (scaffolding) ──
+    # ── RBAC identity ──
     # In production, identity comes from the ALB/OIDC-injected header and roles are
-    # mapped from SSO groups (see qaai/api/identity.py). The settings below cover
-    # local DEV (no edge auth) and the group→role mapping.
+    # mapped from SSO/AD groups (see qaai/api/identity.py). Per-route enforcement is
+    # in qaai/api/authz.py. The settings below cover local DEV (no edge auth), the
+    # group→role mapping, and OIDC signature verification.
     #
     # QAAI_DEV_ROLES: comma-separated roles granted to the local dev user when
-    # APP_ENV=DEV and no OIDC header is present (e.g. "reviewer" or "viewer" to
-    # exercise role gating; "admin" default). Ignored outside DEV.
+    # APP_ENV=DEV and no OIDC header is present (e.g. "user" to exercise role
+    # gating; "admin" default). Ignored outside DEV.
     dev_user_name: str = Field(default="Local Dev", alias="QAAI_DEV_USER")
     dev_user_email: str = Field(default="dev@localhost", alias="QAAI_DEV_EMAIL")
     dev_roles: str = Field(default="admin", alias="QAAI_DEV_ROLES")
-    # JSON object mapping SSO/IdP group name → QAAI role, e.g.
-    # '{"qaai-admins":"admin","qaai-reviewers":"reviewer","qaai-viewers":"viewer"}'.
+    # JSON object mapping SSO/AD group name → QAAI role, e.g.
+    # '{"qaai-admins":"admin","qaai-users":"user"}'.
     oidc_role_map_json: str = Field(default="", alias="QAAI_OIDC_ROLE_MAP")
+
+    # AWS region hosting the ALB OIDC signing keys, used to build the public-key
+    # URL https://public-keys.auth.elb.<region>.amazonaws.com/<kid> for signature
+    # verification (qaai/api/identity.py). Required in PROD when verification is on.
+    alb_oidc_region: Optional[str] = Field(default=None, alias="ALB_OIDC_REGION")
+    # Verify the ALB OIDC JWT signature before trusting its claims. Default on;
+    # skipped only in DEV (where there is typically no ALB in front). A production
+    # deployment must leave this True so a forged x-amzn-oidc-data header is rejected.
+    verify_oidc_signature: bool = Field(default=True, alias="QAAI_VERIFY_OIDC_SIGNATURE")
 
     _prompt_config_cache: Optional[PromptConfig] = None
 

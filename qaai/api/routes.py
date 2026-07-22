@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from qaai.api.authz import require_manage, require_run_review, require_upload_feedback
 from qaai.api.jobs import COMPLETED, FAILED, JobManager
 from qaai.api.schemas import BaselineRequest
 from qaai.api.services import (
@@ -54,8 +55,9 @@ async def whoami(request: Request) -> dict[str, Any]:
     """Return the caller's identity + roles for the SPA's RBAC layer.
 
     Resolved from the ALB/OIDC-injected header when present, else a DEV-only dev
-    fallback (see qaai/api/identity.py). Identity READ only — it does NOT gate the
-    review endpoints; per-route enforcement is the RBAC follow-up phase.
+    fallback (see qaai/api/identity.py). This route is public and identity-READ
+    only; the review/jobs/feedback/usage routes are enforced server-side by the
+    qaai/api/authz.py dependency.
     """
     from qaai.api.identity import resolve_identity
 
@@ -63,13 +65,13 @@ async def whoami(request: Request) -> dict[str, Any]:
 
 
 @router.get("/usage", tags=["System"])
-async def usage(request: Request) -> dict[str, Any]:
+async def usage(request: Request, _auth: dict = Depends(require_manage)) -> dict[str, Any]:
     """Centralized LLM usage: current RPM/TPM window utilization vs configured caps,
     plus rolling token/cost totals — aggregated across ALL users/reviews.
 
     Single-instance by design: one shared RateLimitOpenAIClient holds the only
     RPM/TPM limiter and one TokenUsageTracker accumulates all calls, so this is the
-    whole server's outbound LLM load. Read-only and ungated, mirroring GET /me.
+    whole server's outbound LLM load. Admin-only (ops/monitoring surface).
     """
     client = getattr(request.app.state, "llm_client", None)
     tracker = getattr(request.app.state, "telemetry_tracker", None)
@@ -107,6 +109,7 @@ async def test_suite_review(
     request: Request,
     service: RTMReviewService = Depends(get_rtm_service),
     job_manager: JobManager = Depends(get_job_manager),
+    _auth: dict = Depends(require_run_review),
 ) -> JSONResponse:
     """Submit an RTM coverage review for every requirement in a JAMA baseline.
 
@@ -137,6 +140,7 @@ async def test_case_review(
     request: Request,
     service: TestCaseReviewService = Depends(get_test_case_service),
     job_manager: JobManager = Depends(get_job_manager),
+    _auth: dict = Depends(require_run_review),
 ) -> JSONResponse:
     """Submit a test-case adequacy review for every test case in a JAMA baseline.
 
@@ -172,6 +176,7 @@ async def hazard_risk_review(
     include_design_summaries: bool = Form(default=False, description="Run the embedded RTM design_summarizer branch; default skips it. Design-sensitive cache is keyed by this flag (ds0/ds1)."),
     service: HazardReviewService = Depends(get_hazard_service),
     job_manager: JobManager = Depends(get_job_manager),
+    _auth: dict = Depends(require_run_review),
 ) -> JSONResponse:
     """Submit a hazard risk review for every row of an uploaded SHA Excel file.
 
@@ -226,6 +231,7 @@ def _submit_with_job_id(job_manager: JobManager, make_coro, filename: str) -> JS
 async def get_job_status(
     job_id: str,
     job_manager: JobManager = Depends(get_job_manager),
+    _auth: dict = Depends(require_run_review),
 ) -> dict[str, Any]:
     """Return the status of a submitted review job (pending/running/completed/failed)."""
     job = job_manager.get(job_id)
@@ -238,6 +244,7 @@ async def get_job_status(
 async def cancel_job(
     job_id: str,
     job_manager: JobManager = Depends(get_job_manager),
+    _auth: dict = Depends(require_run_review),
 ) -> dict[str, Any]:
     """Request cancellation of a running/pending review job (Stop Run).
 
@@ -255,6 +262,7 @@ async def cancel_job(
 async def get_job_result(
     job_id: str,
     job_manager: JobManager = Depends(get_job_manager),
+    _auth: dict = Depends(require_run_review),
 ) -> FileResponse:
     """Download the HTML report for a completed job.
 
@@ -275,24 +283,50 @@ async def get_job_result(
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _validate_feedback_payload(data: Any) -> None:
+    """Enforce the exported reviewer-feedback shape (qaai/viewer/common/shared.js).
+
+    The viewer exports a JSON object mapping record-key -> {rating, notes,
+    saved_at}. Reject anything else so a `user` (now permitted to upload) can't
+    drop an arbitrary file into ./shared/feedback. Raises 422 on a shape mismatch.
+    """
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="Feedback file must be a JSON object of {record_key: entry}",
+        )
+    for key, entry in data.items():
+        if not isinstance(entry, dict) or not {"rating", "notes", "saved_at"} <= entry.keys():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Feedback entry '{key}' is malformed: each value must be an "
+                    "object with 'rating', 'notes', and 'saved_at'"
+                ),
+            )
+
+
 @router.post("/feedback-upload", tags=["Feedback"])
 async def feedback_upload(
     file: UploadFile = File(..., description="Exported reviewer feedback JSON file"),
+    _auth: dict = Depends(require_upload_feedback),
 ) -> dict[str, Any]:
     """Save an exported reviewer feedback JSON file under ./shared/feedback/.
 
     The viewers export ``feedback_{review_type}_{run_folder_id}.json``; this
     endpoint stores it (creating ./shared/feedback if needed) so feedback
     collected in the offline HTML viewer can be brought back to the server.
+    Requires the ``upload_feedback`` permission (admin or user).
     """
     if not file.filename or not file.filename.lower().endswith(".json"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a JSON file (.json)")
 
     file_bytes = await file.read()
     try:
-        json.loads(file_bytes.decode("utf-8"))
+        payload = json.loads(file_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=f"File is not valid JSON: {exc}")
+    _validate_feedback_payload(payload)
 
     feedback_dir = _PROJECT_ROOT / "shared" / "feedback"
     feedback_dir.mkdir(parents=True, exist_ok=True)
