@@ -1,0 +1,13 @@
+role: hazard_r7
+version: v2.0.0
+component: hazard_risk_reviewer
+authored: '2026-07-22'
+status: draft
+parent_version: v1.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: HazardFinding
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Added the `partial` (Yellow) flag. Verdict stays binary Yes/No; a new boolean `partial` rides alongside verdict='Yes' when HSHA-update capture is adequate but review evidence is materially light. R7 is recommended so partial is a pure reviewer-attention signal. Added a "Partial (Yellow) signal" section and the schema field.
