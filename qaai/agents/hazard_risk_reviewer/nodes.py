@@ -817,7 +817,9 @@ class _FinalAssessorNode(StandardLLMNode):
         """Yes iff every MANDATORY finding's verdict is in {Yes, N-A}; else No.
 
         R7 is a recommended (advisory) criterion and is excluded from the
-        aggregation — an R7 = No never flips overall_verdict.
+        aggregation — an R7 = No never flips overall_verdict. A partial-Yes
+        (verdict='Yes', partial=True) intentionally passes here, since the
+        verdict is still 'Yes' — partial is a UX-only signal that never gates.
         """
         return (
             "Yes"

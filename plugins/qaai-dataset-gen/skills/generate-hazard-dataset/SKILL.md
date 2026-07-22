@@ -51,6 +51,16 @@ assessor computes this in code, never the LLM.
 **Only H5 may be `N-A`**, in the narrow case where `software_related_causes` indicates no
 software cause, leaving no software hazard path to verify.
 
+**Partial (Yellow) flag.** Every `HazardFinding` also carries a boolean `partial` (default
+`false`), mirroring the test_case_reviewer's `EvaluatedReviewObjective.partial`. Set
+`partial: true` **only** alongside `verdict: "Yes"` to mark a criterion that is met but whose
+coverage/evidence is materially incomplete (rendered Yellow). It is never valid with `No` or
+`N-A`. A partial-Yes **still passes** `Overall_Verdict` and is **not scored** by the eval
+harness (the scorer reads only the binary verdict), so it is a UX signal, not a label class —
+a full-shape "known good" record may include `partial: true` findings (a "yes-partial"
+flavour) while remaining `Overall_Verdict = "Yes"`. Minimal/oracle rows omit `partial`
+entirely (it defaults `false`).
+
 ## Persona
 
 A **Senior Medical Device Safety Software Architect** and independent hazard-analysis

@@ -1,0 +1,14 @@
+role: hazard_h1
+version: v7.0.0
+component: hazard_risk_reviewer
+authored: '2026-07-22'
+status: draft
+parent_version: v6.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: HazardFinding
+target_models:
+- gpt-4o-mini
+- gpt-4o
+- claude-haiku-4.5
+changelog: Added the `partial` (Yellow) flag. Verdict stays binary Yes/No; a new boolean `partial` rides alongside verdict='Yes' when the record is complete/coherent but coverage or evidence is materially incomplete (reviewer-attention signal, never gates overall_verdict). Added a "Partial (Yellow) signal" section, the schema field, and partial=false in both worked examples.

@@ -1,0 +1,13 @@
+role: hazard_h6
+version: v3.0.0
+component: hazard_risk_reviewer
+authored: '2026-07-22'
+status: draft
+parent_version: v2.0.0
+author: qaai-team
+required_template_vars: []
+output_pydantic_model: HazardFinding
+target_models:
+- gpt-4o-mini
+- gpt-4o
+changelog: Added the `partial` (Yellow) flag. Verdict stays binary Yes/No; a new boolean `partial` rides alongside verdict='Yes' when residual-risk closure is defensible but materially incomplete (reviewer-attention signal, never gates overall_verdict). Added a "Partial (Yellow) signal" section and the schema field.

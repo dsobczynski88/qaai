@@ -117,7 +117,7 @@ START → data_integration → transform → validation_gate  (skip → END if r
   → h6                         (joins h4/h5; h3 finding already reduced)
   → final_assessment (deterministic) → END
 ```
-State: `HazardReviewState`. Fan-in field: `hazard_findings: Annotated[List[HazardFinding], operator.add]`. Output: `HazardAssessment` with 7 `HazardFinding` items (H1–H6 mandatory + R7 recommended). `final_assessor` computes `overall_verdict` deterministically: Yes iff every **mandatory** finding (H1–H6) is Yes/N-A. **R7 is recommended only and is excluded from the verdict** — an R7 = No never flips it (mirrors the RTM reviewer's R6 advisory criterion).
+State: `HazardReviewState`. Fan-in field: `hazard_findings: Annotated[List[HazardFinding], operator.add]`. Output: `HazardAssessment` with 7 `HazardFinding` items (H1–H6 mandatory + R7 recommended). `final_assessor` computes `overall_verdict` deterministically: Yes iff every **mandatory** finding (H1–H6) is Yes/N-A. **R7 is recommended only and is excluded from the verdict** — an R7 = No never flips it (mirrors the RTM reviewer's R6 advisory criterion). Each `HazardFinding` also carries a `partial: bool` flag (mirroring the test_case_reviewer's `EvaluatedReviewObjective.partial`): a partial-Yes (`verdict="Yes"`, `partial=True`) marks a met-but-materially-incomplete criterion, renders **Yellow** in the viewer, still passes `overall_verdict`, and is intentionally **unscored** by the eval harness. An LLM `"Partial"` verdict string is coerced to `verdict="Yes"` + `partial=True` by a `mode="before"` validator via `coerce_partial_verdict`.
 
 **Test Case Reviewer (3-axis):**
 ```

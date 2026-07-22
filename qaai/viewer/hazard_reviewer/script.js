@@ -22,7 +22,11 @@ function renderLeft() {
   const ha = rec.hazard_assessment ?? {};
   const findings = ha.mandatory_findings ?? [];
   const overallVerdict = ha.overall_verdict ?? "?";
-  const overallClass = overallVerdict;
+  // A partial-Yes still passes overall_verdict; surface it as Yellow when any
+  // finding is a partial-Yes, mirroring the test_case_reviewer viewer.
+  const overallPartial =
+    overallVerdict === "Yes" && findings.some(f => f.verdict === "Yes" && f.partial);
+  const overallClass = overallPartial ? "Yellow" : overallVerdict;
   const comments = ha.comments ?? "";
   const clarq = ha.clarification_questions ?? [];
 
@@ -106,7 +110,8 @@ function renderLeft() {
     if (f.cited_req_ids?.length) extras.push(`reqs: ${f.cited_req_ids.map(escapeHTML).join(", ")}`);
     if (f.cited_test_case_ids?.length) extras.push(`TCs: ${f.cited_test_case_ids.map(escapeHTML).join(", ")}`);
     if (f.unblocked_items?.length) extras.push(`unblocked: ${f.unblocked_items.map(escapeHTML).join(" · ")}`);
-    const chipClass = f.verdict;
+    // Partial-Yes renders Yellow; the chip TEXT stays "Yes" (partial is a signal, not a verdict).
+    const chipClass = (f.verdict === "Yes" && f.partial) ? "Yellow" : f.verdict;
     const isRecommended = f.code === "R7";
     const rowClass = isRecommended ? ' class="recommended"' : '';
     return `<tr${rowClass}>
@@ -235,6 +240,7 @@ function openCriteriaHelp() {
       <dd>Newly identified hazards / hazardous situations are captured and linked, and the review shows evidence of checking against prior HSHA / standards-derived sources. <strong>Recommended only — an R7 = No never affects overall_verdict.</strong></dd>
     </dl>
     <div class="legend">overall_verdict = Yes iff every <strong>mandatory</strong> dimension (H1–H6) is Yes or N-A; otherwise No. <strong>R7 is recommended only and never affects overall_verdict.</strong></div>
+    <div class="legend"><strong>Yellow = "Yes, but partial"</strong> — the criterion is met but coverage/evidence is materially incomplete, so a reviewer should re-check. A partial-Yes still passes overall_verdict; it is a reviewer-attention signal, never a failure.</div>
   `);
 }
 

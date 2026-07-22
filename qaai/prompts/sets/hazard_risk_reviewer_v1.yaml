@@ -1,0 +1,25 @@
+name: hazard_risk_reviewer_v1
+component: hazard_risk_reviewer
+description: |
+  First named bundle for the hazard reviewer's own nodes. Pins the latest
+  version of each hazard evaluator (H1-H6 + R7) plus the design and needs
+  summarizers. These are the versions that carry the `partial` (Yellow)
+  signal on every finding (verdict stays binary Yes/No; a partial-Yes rides
+  alongside verdict="Yes" and never gates overall_verdict).
+
+  Pins: h1 v7, h2 v3, h3 v6, h4 v3, h5 v3, h6 v3, r7 v2,
+  design_summarizer v2, needs_summarizer v2. Roles not listed here (e.g.
+  hazard_final_assessor) keep their PromptConfig defaults.
+prompts:
+  hazard_h1: v7.0.0
+  hazard_h2: v3.0.0
+  hazard_h3: v6.0.0
+  hazard_h4: v3.0.0
+  hazard_h5: v3.0.0
+  hazard_h6: v3.0.0
+  hazard_r7: v2.0.0
+  hazard_design_summarizer: v2.0.0
+  hazard_needs_summarizer: v2.0.0
+status: experimental
+authored: "2026-07-22"
+parent_set: null
