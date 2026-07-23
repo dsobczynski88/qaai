@@ -2,7 +2,7 @@
 
 This drives ``POST /api/v1/hazard-risk-review`` end-to-end (HTTP -> route -> job ->
 ``HazardReviewService`` -> graph -> ``write_viewer_hz``) over the FluxPump 4000 pilot at
-``eval/datasets/hazard/actual/2026-07-21_08-11-24/`` (copied to
+``eval/datasets/hazard/actual/pilot-20-record/`` (copied to
 ``tests/fixtures/hazard/hazard_pilot_20.jsonl`` as the reusable source of truth, with a
 matching real ``hazard_pilot_20.xlsx`` SHA workbook).
 

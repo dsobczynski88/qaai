@@ -34,7 +34,7 @@ skills if copied to `.claude/skills/` — they auto-load with no marketplace ste
 # 1. dataset from gold (answer key rendered into graph-output shape)
 uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
-  --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --out eval/datasets/test_suite/actual/pilot-20-record \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 
 # 2. size the labelled set  (95% / +/-0.05 -> 385 at p=0.5, 196 at p=0.85)
@@ -44,25 +44,25 @@ uv run python scripts/sample_size.py ci --confidence 0.95 --margin 0.05 --p 0.85
 #    answer key matching itself, tagged oracle_selftest=true. Not a measurement.
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 --mode score --run-name plumbing-smoke
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record --mode score --run-name plumbing-smoke
 
 # 4. THE actual study: run the graph, save predictions/<ts>/, score them vs the answer key
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --mode run --limit 40 --max-concurrent 5 --run-name pilot-40
 
 # 5. inspect
 uv run mlflow ui
 
 # 6. eyeball the diff: side-by-side actual vs predicted for that run
-python -m qaai.eval.compare eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/   # writes compare.html
+python -m qaai.eval.compare eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts>/   # writes compare.html
 
 # 7. sweep models x prompt sets concurrently, ranked at the end (one MLflow run per arm)
 #    all arms hit ONE endpoint; a preflight aborts on any model id it can't reach.
 uv run python scripts/sweep.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --models gpt-5.4-mini,gpt-5-mini --prompt-sets test_suite_reviewer_v3,test_suite_reviewer_v4 \
   --experiment rtm-sweep --limit 20 --max-parallel-arms 4    # --dry-run previews; --skip-unavailable-models drops unreachable ids
 ```

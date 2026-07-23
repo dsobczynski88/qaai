@@ -47,7 +47,7 @@ If unspecified, ask once with `AskUserQuestion`:
    user asked for 10.
 3. **Class balance** — default 50/50.
 4. **Output folder** — default: whatever `dataset_studio new --type test_suite --quiet`
-   prints. Never write into `eval/datasets/test_suite/actual/2026-07-17_12-01-00/` directly; that is the committed
+   prints. Never write into `eval/datasets/test_suite/actual/pilot-20-record/` directly; that is the committed
    pilot.
 
 ## Files to write

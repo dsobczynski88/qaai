@@ -51,8 +51,8 @@ timestamped sets directly:
 ```bash
 uv run python -c "
 from qaai.eval.datasets import load_jsonl
-a = load_jsonl('eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts_a>/predicted_labels.jsonl')
-b = load_jsonl('eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts_b>/predicted_labels.jsonl')
+a = load_jsonl('eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts_a>/predicted_labels.jsonl')
+b = load_jsonl('eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts_b>/predicted_labels.jsonl')
 print([i for i,(x,y) in enumerate(zip(a,b)) if x != y])  # rows where the runs disagree"
 ```
 

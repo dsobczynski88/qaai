@@ -150,7 +150,7 @@ def test_sync_outputs_reproduces_the_committed_answer_key(tmp_path, capsys):
     """
     import shutil
 
-    committed = Path("eval/datasets/test_suite/actual/2026-07-17_12-01-00")
+    committed = Path("eval/datasets/test_suite/actual/pilot-20-record")
     d = tmp_path / "test_suite" / "2026-07-19_12-00-00"
     d.mkdir(parents=True)
     for name in ("actual_inputs.jsonl", "actual_labels.jsonl"):

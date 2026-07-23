@@ -62,7 +62,7 @@ and `dataset_studio ingest` converts a completed run into one pre-filled with th
 own answers for a human to correct. Point `--dataset-dir` at the folder either way.
 
 > The committed RTM pilot is revision 1 of this layout, at
-> `eval/datasets/test_suite/actual/2026-07-17_12-01-00/`.
+> `eval/datasets/test_suite/actual/pilot-20-record/`.
 
 All three committed files describe the **actual** (labelled) truth: inputs, and the expected
 answer in two shapes. Nothing in the dataset is a prediction. Predictions are produced by
@@ -75,7 +75,7 @@ From the existing gold fixtures (gives working data immediately):
 ```bash
 uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
-  --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --out eval/datasets/test_suite/actual/pilot-20-record \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 ```
 
@@ -87,7 +87,7 @@ smoke/CI and measures nothing about the reviewer. To harvest outputs from a prio
 
 ```bash
 uv run python scripts/convert_to_eval.py outputs \
-  --input logs/run-<ts>/outputs.jsonl --out eval/datasets/test_suite/actual/2026-07-17_12-01-00
+  --input logs/run-<ts>/outputs.jsonl --out eval/datasets/test_suite/actual/pilot-20-record
 ```
 
 You can also skip committing data and point the harness at your own files with
@@ -104,7 +104,7 @@ You can also skip committing data and point the harness at your own files with
 ```bash
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 --mode score --run-name setup-smoke
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record --mode score --run-name setup-smoke
 ```
 Expect a run with `overall_accuracy`, per-rubric metrics, and artifacts. Oracle data
 scores 1.0 and tags itself `oracle_selftest=true` — that only proves the plumbing; real
@@ -118,7 +118,7 @@ uv run python -c "
 from qaai.eval.spec import load_spec
 from qaai.eval.datasets import load_jsonl, outputs_to_labels
 s = load_spec('eval/specs/test_suite_reviewer.yaml')
-d = 'eval/datasets/test_suite/actual/2026-07-17_12-01-00'
+d = 'eval/datasets/test_suite/actual/pilot-20-record'
 assert outputs_to_labels(s, load_jsonl(f'{d}/actual_outputs.jsonl')) == load_jsonl(f'{d}/actual_labels.jsonl')
 print('answer key is self-consistent')"
 ```

@@ -17,7 +17,7 @@ The unit of work is the existing eval CLI — no harness logic is duplicated her
 Example:
     uv run python scripts/sweep.py \
         --spec eval/specs/test_suite_reviewer.yaml \
-        --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+        --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
         --models gpt-5-mini,claude-sonnet-5 \
         --prompt-sets test_suite_reviewer_v3,test_suite_reviewer_v4 \
         --experiment rtm-sweep-2026-07-20 \

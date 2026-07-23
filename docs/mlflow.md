@@ -90,12 +90,12 @@ Each dataset lives in its own timestamped folder, `eval/datasets/<type>/actual/<
 
 ### The committed dataset (pilot)
 
-There is **one** committed dataset — the grounded RTM *pilot* at `eval/datasets/test_suite/actual/2026-07-17_12-01-00/`. Its answer key is the three `actual_*` files above, alongside `source_gold.jsonl` (the hand-authored source of truth the converter renders them from) and a `description.md` <span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>:
+There is **one** committed dataset — the grounded RTM *pilot* at `eval/datasets/test_suite/actual/pilot-20-record/`. Its answer key is the three `actual_*` files above, alongside `source_gold.jsonl` (the hand-authored source of truth the converter renders them from) and a `description.md` <span class="src">eval/datasets/test_suite/actual/pilot-20-record/description.md</span>:
 
 <table>
 <thead><tr><th>Dataset</th><th>Rows</th><th>Use it?</th></tr></thead>
 <tbody>
-<tr><td><code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code></td><td>20</td><td><strong>Yes</strong> — hand-authored, labels grounded in the row's own text, 10 known-good / 10 known-bad, with a documented failure-mode distribution <span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span></td></tr>
+<tr><td><code>eval/datasets/test_suite/actual/pilot-20-record/</code></td><td>20</td><td><strong>Yes</strong> — hand-authored, labels grounded in the row's own text, 10 known-good / 10 known-bad, with a documented failure-mode distribution <span class="src">eval/datasets/test_suite/actual/pilot-20-record/description.md</span></td></tr>
 </tbody></table>
 
 <div class="note warn"><strong>Labels must be grounded in content.</strong> An earlier 800-row set
@@ -107,7 +107,7 @@ correctly reported <em>"M4 = No: automatic import of heart rate, blood pressure,
 covered"</em> on a row labelled <code>Yes</code>. You cannot measure accuracy against labels that
 are wrong. The committed pilot holds to the rule that <strong>a row earns <code>Yes</code> only if
 a competent reviewer reading it would agree</strong>
-<span class="src">eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md</span>.</div>
+<span class="src">eval/datasets/test_suite/actual/pilot-20-record/description.md</span>.</div>
 
 <div class="note"><strong>20 rows is a pilot, not the study.</strong> At n=20 the 95% accuracy CI
 is ±0.154 (Wilson) even assuming p=0.85, and ±0.20 at p=0.5 — so a 20-row result cannot
@@ -122,7 +122,7 @@ distinguish a 0.75 reviewer from a 0.95 one. Per-cell counts of 2–4 are likewi
 ```
 uv run python scripts/convert_to_eval.py gold \
   --input tests/fixtures/gold/gold_dataset_labeled.jsonl \
-  --out eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --out eval/datasets/test_suite/actual/pilot-20-record \
   --spec eval/specs/test_suite_reviewer.yaml --synthesize-outputs
 ```
 
@@ -186,7 +186,7 @@ Scores an existing `actual_outputs.jsonl` against the labels — fast and offlin
 ```
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --mode score --run-name plumbing-smoke
 ```
 
@@ -197,7 +197,7 @@ Invokes the compiled graph on `actual_inputs.jsonl`, persists the produced `pred
 ```
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --mode run --prompt-set test_suite_reviewer_v4 \
   --max-concurrent 5 --limit 20 --run-name v4-edge-case
 ```
@@ -237,7 +237,7 @@ Run twice into the same experiment, flipping `--prompt-set`. Each run pins the p
 ```
 for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
   uv run python scripts/evaluate_with_mlflow.py \
-    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
     --mode run --prompt-set $ps --run-name $ps
 done
 ```
@@ -249,7 +249,7 @@ done
 ```
 uv run python scripts/sweep.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --models gpt-5.4-mini,gpt-5-mini --prompt-sets test_suite_reviewer_v3,test_suite_reviewer_v4 \
   --experiment rtm-sweep --limit 20 --max-parallel-arms 4 [--dry-run] [--skip-unavailable-models]
 ```
@@ -294,8 +294,8 @@ The CLI prints a ready-made re-score command when it saves a set <span class="sr
 ```
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --actual-outputs eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/predicted_outputs.jsonl \
-  --actual-labels eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_labels.jsonl \
+  --actual-outputs eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts>/predicted_outputs.jsonl \
+  --actual-labels eval/datasets/test_suite/actual/pilot-20-record/actual_labels.jsonl \
   --mode score --run-name rescore-<ts>
 ```
 
@@ -422,7 +422,7 @@ The harness library and its drivers:
 <tr><td><code>qaai/eval/artifacts.py</code></td><td>Writes predictions / failures / per-rubric CSV / confusion matrix / provenance / fixture metadata</td></tr>
 <tr><td><code>qaai/eval/harness.py</code></td><td><code>evaluate()</code> — load → (run|read) → score → log to MLflow</td></tr>
 <tr><td><code>eval/specs/*.yaml</code></td><td>One spec per reviewer (RTM / hazard / test-case)</td></tr>
-<tr><td><code>eval/datasets/test_suite/actual/2026-07-17_12-01-00/</code></td><td>The one committed dataset — the grounded 20-row RTM pilot (<code>actual_*</code> answer key + <code>source_gold.jsonl</code>)</td></tr>
+<tr><td><code>eval/datasets/test_suite/actual/pilot-20-record/</code></td><td>The one committed dataset — the grounded 20-row RTM pilot (<code>actual_*</code> answer key + <code>source_gold.jsonl</code>)</td></tr>
 <tr><td><code>eval/datasets/&lt;type&gt;/actual/&lt;ts&gt;/predictions/&lt;ts2&gt;/</code></td><td>Saved prediction sets from <code>--mode run</code> (<code>predicted_*</code>), each with its <code>run_metadata.json</code></td></tr>
 <tr><td><code>scripts/evaluate_with_mlflow.py</code></td><td>Run a study (score / run)</td></tr>
 <tr><td><code>scripts/sweep.py</code></td><td>Fan out one <code>--mode run</code> arm per model × prompt-set cell, then rank them</td></tr>

@@ -18,7 +18,7 @@ from qaai.eval.spec import load_spec
 pytestmark = pytest.mark.unit
 
 RTM_SPEC = "eval/specs/test_suite_reviewer.yaml"
-COMMITTED_DATASET = Path("eval/datasets/test_suite/actual/2026-07-17_12-01-00")
+COMMITTED_DATASET = Path("eval/datasets/test_suite/actual/pilot-20-record")
 
 
 def test_gold_to_eval_roundtrip(tmp_path):
@@ -92,10 +92,17 @@ def test_outputs_to_labels_roundtrips_the_committed_dataset():
     """The shipped answer key is its own fixture: outputs -> labels must reproduce it exactly.
 
     This is what licenses using the same extractor for both sides of the comparison.
+    The comparison is over the *scored* keys `outputs_to_labels` emits; authoring/review
+    metadata that a real answer key may carry (`reviewer_note`, `reviewed_by`, `class`,
+    `primary_failure`, ...) is not derivable from outputs and is ignored here, exactly as
+    the V050 round-trip check ignores it.
     """
     spec = load_spec(RTM_SPEC)
     got = outputs_to_labels(spec, load_jsonl(COMMITTED_DATASET / "actual_outputs.jsonl"))
-    assert got == load_jsonl(COMMITTED_DATASET / "actual_labels.jsonl")
+    expected = load_jsonl(COMMITTED_DATASET / "actual_labels.jsonl")
+    assert len(got) == len(expected)
+    for g, exp in zip(got, expected):
+        assert g == {k: exp[k] for k in g}
 
 
 def test_outputs_to_labels_keeps_soft_failed_rows_aligned():

@@ -34,7 +34,7 @@ to be one.
 `actual_inputs.jsonl` and writes a timestamped prediction set:
 
 ```
-eval/datasets/test_suite/actual/2026-07-17_12-01-00/
+eval/datasets/test_suite/actual/pilot-20-record/
   actual_inputs.jsonl                   # graph input                <- ACTUAL
   actual_outputs.jsonl                  # answer key, output shape   <- ACTUAL
   actual_labels.jsonl                   # answer key, flat           <- ACTUAL (projection)
@@ -62,7 +62,7 @@ This is what measures the reviewer. `cache_mode` is forced to `off` (fresh, no r
 ```bash
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --mode run --prompt-set test_suite_reviewer_v4 \
   --max-concurrent 5 --limit 20 --run-name v4-edge-case
 ```
@@ -84,7 +84,7 @@ Scores an existing `actual_outputs.jsonl` against `actual_labels.jsonl`. Its rea
 ```bash
 uv run python scripts/evaluate_with_mlflow.py \
   --spec eval/specs/test_suite_reviewer.yaml \
-  --actual-outputs eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/predicted_outputs.jsonl \
+  --actual-outputs eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts>/predicted_outputs.jsonl \
   --actual-labels eval/datasets/test_suite/actual/<ts>/actual_labels.jsonl \
   --mode score --run-name rescore-<ts>
 ```
@@ -99,7 +99,7 @@ Run twice, flipping `--prompt-set`, into the same experiment:
 ```bash
 for ps in test_suite_reviewer_v3 test_suite_reviewer_v4; do
   uv run python scripts/evaluate_with_mlflow.py \
-    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+    --spec eval/specs/test_suite_reviewer.yaml --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
     --mode run --prompt-set $ps --run-name $ps
 done
 ```

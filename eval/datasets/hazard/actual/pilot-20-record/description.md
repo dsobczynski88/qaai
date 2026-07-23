@@ -1,10 +1,10 @@
 # Hazard Coverage Study Dataset — FluxPump 4000 (seed batch)
 
 **Revision 1** of the Hazard Coverage Reviewer answer key —
-`eval/datasets/hazard/actual/2026-07-21_08-11-24/`.
+`eval/datasets/hazard/actual/pilot-20-record/`.
 
 This is the hazard-reviewer counterpart of the committed RTM seed at
-`eval/datasets/test_suite/actual/2026-07-17_12-01-00/`, produced through the identical
+`eval/datasets/test_suite/actual/pilot-20-record/`, produced through the identical
 `qaai.dataset_studio` flow (`new → author → sync-outputs → validate → edit`) so every
 editing and evaluation operation is the same across the two reviewers.
 
@@ -55,7 +55,7 @@ under `<type>/actual/`:
 
 ```
 eval/datasets/hazard/actual/
-  2026-07-21_08-11-24/            <- this revision
+  pilot-20-record/            <- this revision
     actual_inputs.jsonl             graph input           (run mode)
     actual_outputs.jsonl            ANSWER KEY, output shape (derived by sync-outputs)
     actual_labels.jsonl             ANSWER KEY, flat projection
@@ -187,7 +187,7 @@ Hand-authored against the FluxPump 4000 product frame. The `actual_inputs.jsonl`
 the labels by:
 
 ```bash
-uv run python -m qaai.dataset_studio sync-outputs eval/datasets/hazard/actual/2026-07-21_08-11-24
+uv run python -m qaai.dataset_studio sync-outputs eval/datasets/hazard/actual/pilot-20-record
 ```
 
 The `actual_*` files are the **answer key** (ACTUAL). Predictions only come from
@@ -203,8 +203,8 @@ uv run python -m qaai.dataset_studio ingest logs/run-<ts> --edit
 ```
 Then review every record in the browser and validate:
 ```bash
-uv run python -m qaai.dataset_studio edit     eval/datasets/hazard/actual/2026-07-21_08-11-24
-uv run python -m qaai.dataset_studio validate eval/datasets/hazard/actual/2026-07-21_08-11-24   # must exit 0
+uv run python -m qaai.dataset_studio edit     eval/datasets/hazard/actual/pilot-20-record
+uv run python -m qaai.dataset_studio validate eval/datasets/hazard/actual/pilot-20-record   # must exit 0
 ```
 
 ## Verification gates before spending a run

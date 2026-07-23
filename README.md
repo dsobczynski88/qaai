@@ -117,7 +117,7 @@ pipeline (decompose → evaluate per spec → synthesize → viewer) runs with z
 
 ```bash
 # 1. Author a baseline: one JSON object per requirement, in graph-input shape. Copy the committed
-#    pilot as a template:  eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_inputs.jsonl
+#    pilot as a template:  eval/datasets/test_suite/actual/pilot-20-record/actual_inputs.jsonl
 #    Each line looks like:  {"requirement": {"req_id": "...", "text": "..."}, "test_cases": [ {...} ]}
 DIR=$(uv run python -m qaai.dataset_studio new --type test_suite --quiet)
 #    ...hand-write actual_inputs.jsonl in $DIR (one requirement per line).
@@ -175,11 +175,11 @@ This serves the same editor used by `ingest --edit`, reading/writing `actual_inp
 #    qaai/prompts/sets/<new_set>.yaml
 # 3a. Score one arm:
 uv run python scripts/evaluate_with_mlflow.py --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --mode run --prompt-set <new_set> --limit 20
 # 3b. …or sweep it against the baseline (one MLflow run per model x prompt-set cell, ranked):
 uv run python scripts/sweep.py --spec eval/specs/test_suite_reviewer.yaml \
-  --dataset-dir eval/datasets/test_suite/actual/2026-07-17_12-01-00 \
+  --dataset-dir eval/datasets/test_suite/actual/pilot-20-record \
   --models gpt-5-mini --prompt-sets <new_set>,test_suite_reviewer_v3 --experiment my-sweep --limit 20
 uv run mlflow ui                                                            # browse runs + per-template SHA provenance
 ```

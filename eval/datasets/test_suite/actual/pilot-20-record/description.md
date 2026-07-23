@@ -1,7 +1,7 @@
 # RTM Study Dataset — HealthCore EHR (seed batch)
 
 **Revision 1** of the Test Suite Reviewer answer key —
-`eval/datasets/test_suite/actual/2026-07-17_12-01-00/`.
+`eval/datasets/test_suite/actual/pilot-20-record/`.
 
 > **Amendment (2026-07-21):** each row was given a per-requirement `design_docs`
 > SDD (a multi-paragraph Software Design Description), and an **R6 Design Alignment**
@@ -35,7 +35,7 @@ Every answer key lives in its own timestamped folder under `<type>/actual/`:
 
 ```
 eval/datasets/test_suite/actual/
-  2026-07-17_12-01-00/            <- this revision
+  pilot-20-record/            <- this revision
     actual_inputs.jsonl             graph input          (run mode)
     actual_outputs.jsonl            ANSWER KEY, output shape
     actual_labels.jsonl             ANSWER KEY, flat projection

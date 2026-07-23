@@ -23,7 +23,7 @@ from qaai.dataset_studio.validate import validate_dataset, validate_rows
 
 pytestmark = pytest.mark.unit
 
-COMMITTED = Path("eval/datasets/test_suite/actual/2026-07-17_12-01-00")
+COMMITTED = Path("eval/datasets/test_suite/actual/pilot-20-record")
 CODES = ["M1", "M2", "M3", "M4", "M5"]
 DIMS = {
     "M1": "Functional", "M2": "Negative", "M3": "Boundary",

@@ -25,7 +25,7 @@ The one rule this workflow exists to enforce:
 > known-bad row must carry a real deficiency visible in the text — not merely a missing
 > row.**
 
-`eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md` records what happens otherwise: an 800-row
+`eval/datasets/test_suite/actual/pilot-20-record/description.md` records what happens otherwise: an 800-row
 generated set scored **kappa 0.000** and was discarded, because its labels were not
 grounded in its content. The validator cannot detect that; a human in the editor can.
 Never skip step 5.

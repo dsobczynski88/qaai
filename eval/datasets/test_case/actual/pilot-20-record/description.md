@@ -1,10 +1,10 @@
 # Single Test Case Reviewer dataset — HealthCore EHR (seed batch)
 
 **Revision 1** of the Test Case Reviewer answer key —
-`eval/datasets/test_case/actual/2026-07-21_08-29-19/`.
+`eval/datasets/test_case/actual/pilot-20-record/`.
 
 This is the test-case-reviewer counterpart of the committed RTM pilot at
-`eval/datasets/test_suite/actual/2026-07-17_12-01-00/`, built with the same tooling
+`eval/datasets/test_suite/actual/pilot-20-record/`, built with the same tooling
 (`python -m qaai.dataset_studio`) and the same governing rule, so every editing and
 evaluation command is identical apart from the reviewer-specific schema.
 
@@ -55,7 +55,7 @@ Identical to the RTM pilot's layout:
 
 ```
 eval/datasets/test_case/actual/
-  2026-07-21_08-29-19/            <- this revision
+  pilot-20-record/            <- this revision
     actual_inputs.jsonl             graph input          (run mode)
     actual_outputs.jsonl            ANSWER KEY, output shape (derived by sync-outputs)
     actual_labels.jsonl             ANSWER KEY, flat projection
@@ -154,7 +154,7 @@ contributes to — a `No` verdict.
 - `actual_outputs.jsonl` is **not hand-written**; it is derived from `actual_labels.jsonl`
   by `uv run python -m qaai.dataset_studio sync-outputs <dir>` (this is what makes the
   answer key agree with itself). Do not hand-edit it.
-- Created: 2026-07-21_08-29-19 (US/Central). Edits since creation: see `edits.log`.
+- Created: pilot-20-record (US/Central). Edits since creation: see `edits.log`.
 
 ## How to produce a successor / operate this set (identical to the RTM pilot)
 
@@ -171,8 +171,8 @@ uv run python -m qaai.dataset_studio ingest logs/run-<ts> --edit
 
 # Score the live pipeline against this answer key (writes predictions/<ts>/)
 uv run python scripts/evaluate_with_mlflow.py --spec eval/specs/test_case_reviewer.yaml \
-  --dataset-dir eval/datasets/test_case/actual/2026-07-21_08-29-19 --mode run --limit 20
-uv run python -m qaai.eval.compare eval/datasets/test_case/actual/2026-07-21_08-29-19/predictions/<ts>/
+  --dataset-dir eval/datasets/test_case/actual/pilot-20-record --mode run --limit 20
+uv run python -m qaai.eval.compare eval/datasets/test_case/actual/pilot-20-record/predictions/<ts>/
 ```
 
 ## Verification gates before spending a run

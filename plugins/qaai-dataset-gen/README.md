@@ -20,7 +20,7 @@ you only need a human to judge its answers; the inputs are then real by construc
 
 ## Why this exists
 
-`eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md` records an 800-row generated dataset that was
+`eval/datasets/test_suite/actual/pilot-20-record/description.md` records an 800-row generated dataset that was
 **discarded**: it scored **kappa 0.000** because its labels were not grounded in its
 content — templated test steps labelled `Yes` by fiat. The reviewer rejected all 40
 piloted records and was right to.

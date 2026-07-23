@@ -21,10 +21,10 @@ Turn one run's predictions into a browsable, offline actual-vs-predicted diff.
 ## One command
 
 ```bash
-python -m qaai.eval.compare eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/
+python -m qaai.eval.compare eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts>/
 # or the script wrapper:
-uv run python scripts/compare_eval.py eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/ --open
-# -> wrote eval/datasets/test_suite/actual/2026-07-17_12-01-00/predictions/<ts>/compare.html  (N records, K verdict mismatches)
+uv run python scripts/compare_eval.py eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts>/ --open
+# -> wrote eval/datasets/test_suite/actual/pilot-20-record/predictions/<ts>/compare.html  (N records, K verdict mismatches)
 ```
 
 Open `compare.html` in a browser (or pass `--open`). It is fully self-contained — inline

@@ -35,21 +35,42 @@ mlflow.db
 mlruns/
 eval/datasets/test_suite/*
 !eval/datasets/test_suite/.gitkeep
-# The committed RTM pilot (answer key), revision 1, at actual/<ts>/.
+# The committed RTM answer keys: the 20-record pilot (pilot-20-record), its reviewed
+# revision (pilot-20-record-reviewer), and the 400-record calibration set (eval-400-record).
 # Git will not descend into an excluded directory, so each level has to be re-included
 # before its children can be allowlisted - hence the alternating !dir/ , dir/* pairs.
-# The timestamp is named explicitly rather than re-including actual/ wholesale: every
+# Each keeper is named explicitly rather than re-including actual/ wholesale: every
 # other revision under it is an unreviewed working set and must stay out of the repo.
 !eval/datasets/test_suite/actual/
 eval/datasets/test_suite/actual/*
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/
-eval/datasets/test_suite/actual/2026-07-17_12-01-00/*
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_inputs.jsonl
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_outputs.jsonl
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/actual_labels.jsonl
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/source_gold.jsonl
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/description.md
-!eval/datasets/test_suite/actual/2026-07-17_12-01-00/edits.log
+!eval/datasets/test_suite/actual/pilot-20-record/
+eval/datasets/test_suite/actual/pilot-20-record/*
+!eval/datasets/test_suite/actual/pilot-20-record/actual_inputs.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record/actual_outputs.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record/actual_labels.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record/source_gold.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record/description.md
+!eval/datasets/test_suite/actual/pilot-20-record/edits.log
+
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/
+eval/datasets/test_suite/actual/pilot-20-record-reviewer/*
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/actual_inputs.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/actual_outputs.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/actual_labels.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/source_gold.jsonl
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/description.md
+!eval/datasets/test_suite/actual/pilot-20-record-reviewer/edits.log
+
+# The 400-record RTM calibration set (answer key, labels grounded by construction).
+!eval/datasets/test_suite/actual/eval-400-record/
+eval/datasets/test_suite/actual/eval-400-record/*
+!eval/datasets/test_suite/actual/eval-400-record/actual_inputs.jsonl
+!eval/datasets/test_suite/actual/eval-400-record/actual_outputs.jsonl
+!eval/datasets/test_suite/actual/eval-400-record/actual_labels.jsonl
+!eval/datasets/test_suite/actual/eval-400-record/description.md
+!eval/datasets/test_suite/actual/eval-400-record/edits.log
+!eval/datasets/test_suite/actual/eval-400-record/generator.py
+
 eval/datasets/test_case/*
 !eval/datasets/test_case/.gitkeep
 # The committed test_case pilot (answer key, human-grounded 20-row seed), at actual/<ts>/.
@@ -57,24 +78,24 @@ eval/datasets/test_case/*
 # is named explicitly so the 400-row calibration set and any other revision stay out of the repo.
 !eval/datasets/test_case/actual/
 eval/datasets/test_case/actual/*
-!eval/datasets/test_case/actual/2026-07-21_08-29-19/
-eval/datasets/test_case/actual/2026-07-21_08-29-19/*
-!eval/datasets/test_case/actual/2026-07-21_08-29-19/actual_inputs.jsonl
-!eval/datasets/test_case/actual/2026-07-21_08-29-19/actual_outputs.jsonl
-!eval/datasets/test_case/actual/2026-07-21_08-29-19/actual_labels.jsonl
-!eval/datasets/test_case/actual/2026-07-21_08-29-19/description.md
-!eval/datasets/test_case/actual/2026-07-21_08-29-19/edits.log
+!eval/datasets/test_case/actual/pilot-20-record/
+eval/datasets/test_case/actual/pilot-20-record/*
+!eval/datasets/test_case/actual/pilot-20-record/actual_inputs.jsonl
+!eval/datasets/test_case/actual/pilot-20-record/actual_outputs.jsonl
+!eval/datasets/test_case/actual/pilot-20-record/actual_labels.jsonl
+!eval/datasets/test_case/actual/pilot-20-record/description.md
+!eval/datasets/test_case/actual/pilot-20-record/edits.log
 eval/datasets/hazard/*
 !eval/datasets/hazard/.gitkeep
 !eval/datasets/hazard/actual/
 eval/datasets/hazard/actual/*
-!eval/datasets/hazard/actual/2026-07-21_08-11-24/
-eval/datasets/hazard/actual/2026-07-21_08-11-24/*
-!eval/datasets/hazard/actual/2026-07-21_08-11-24/actual_inputs.jsonl
-!eval/datasets/hazard/actual/2026-07-21_08-11-24/actual_outputs.jsonl
-!eval/datasets/hazard/actual/2026-07-21_08-11-24/actual_labels.jsonl
-!eval/datasets/hazard/actual/2026-07-21_08-11-24/description.md
-!eval/datasets/hazard/actual/2026-07-21_08-11-24/edits.log
+!eval/datasets/hazard/actual/pilot-20-record/
+eval/datasets/hazard/actual/pilot-20-record/*
+!eval/datasets/hazard/actual/pilot-20-record/actual_inputs.jsonl
+!eval/datasets/hazard/actual/pilot-20-record/actual_outputs.jsonl
+!eval/datasets/hazard/actual/pilot-20-record/actual_labels.jsonl
+!eval/datasets/hazard/actual/pilot-20-record/description.md
+!eval/datasets/hazard/actual/pilot-20-record/edits.log
 
 
 # logs
